@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+
+  dispatcher:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - TASK_FILE=/app/tasks.jsonl
+    depends_on: [redis]
+    volumes:
+      - ./tasks.jsonl:/app/tasks.jsonl:ro
+      - ./output:/app/output
+
+  sandbox-runtime:
+    build: ./runtimes/sandbox
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on: [redis]
+    volumes:
+      - ./output:/app/output
+    ports:
+      - "8001:8001"
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+
+networks:
+  default:
+    driver: bridge
