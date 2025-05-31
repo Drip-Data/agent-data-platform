@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  # Redis队列服务
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 4gb 
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # vLLM推理服务（可选）
+  vllm:
+    image: vllm/vllm-openai:v0.2.7
+    environment:
+      - MODEL=Salesforce/codegen-350M-mono
+      - TENSOR_PARALLEL_SIZE=1
+      - GPU_MEMORY_UTILIZATION=0.8
+      - MAX_MODEL_LEN=2048
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # 任务分发器
+  dispatcher:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - TASK_FILE=/app/tasks.jsonl
+      - LOG_LEVEL=INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./tasks.jsonl:/app/tasks.jsonl:ro
+      - ./output:/app/output
+    restart: unless-stopped
+    command: python -m core.dispatcher
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # 轻量代码执行运行时
+  sandbox-runtime:
+    build: ./runtimes/sandbox
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - VLLM_URL=http://vllm:8000
+      - LOG_LEVEL=INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+    ports:
+      - "8001:8001"  # metrics
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    deploy:
+      replicas: 2  # 运行2个实例
+
+  # Web导航运行时
+  web-runtime:
+    build: ./runtimes/web_navigator
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - VLLM_URL=http://vllm:8000
+      - LOG_LEVEL=INFO
+      - MAX_CONCURRENT=4
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+    ports:
+      - "8002:8002"  # metrics
+    restart: unless-stopped
+    shm_size: 2gb
+    deploy:
+      replicas: 1
+
+  # Prometheus监控
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  # Grafana仪表板
+  grafana:
+    image: grafana/grafana:10.2.2
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    driver: bridge
