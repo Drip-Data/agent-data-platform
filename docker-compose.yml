@@ -66,7 +66,6 @@ services:
       options:
         max-size: "100m"
         max-file: "3"
-
   # 轻量代码执行运行时
   sandbox-runtime:
     build:
@@ -76,6 +75,10 @@ services:
       - REDIS_URL=redis://redis:6379
       - VLLM_URL=http://vllm:8000
       - LOG_LEVEL=INFO
+      # 缓存配置 - 设置为true时禁用缓存，强制每次使用LLM生成新代码
+      - DISABLE_CACHE=${DISABLE_CACHE:-false}
+      # 轨迹保存配置 - 设置为true时同时保存单独的轨迹文件
+      - SAVE_INDIVIDUAL_TRAJECTORIES=${SAVE_INDIVIDUAL_TRAJECTORIES:-false}
       # 外部API配置 - 主要使用Google Gemini
       # Google Gemini API配置
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -130,6 +133,34 @@ services:
     shm_size: 2gb
     deploy:
       replicas: 1
+
+  # 推理运行时服务
+  reasoning-runtime:
+    build:
+      context: .
+      dockerfile: ./docker/reasoning.Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - VLLM_URL=http://vllm:8000
+      - LOG_LEVEL=INFO
+      # Google Gemini API配置
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      # DeepSeek API配置（备用）
+      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      # 通用OpenAI兼容API配置（备用）
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - OPENAI_API_BASE=${OPENAI_API_BASE}
+      # 推理运行时特有配置（如需要）
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+    ports:
+      - "8003:8003"
+    restart: unless-stopped
 
   # Prometheus监控
   prometheus:

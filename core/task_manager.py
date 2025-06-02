@@ -142,3 +142,48 @@ class TaskManager:
         
         if expired_tasks:
             logger.info(f"Cleaned up {len(expired_tasks)} expired tasks")
+    
+def get_runtime(task_type: str):
+    if task_type == 'reasoning':
+        from runtimes import ReasoningRuntime
+        return ReasoningRuntime()
+
+def start_runtime_service(runtime):
+    """启动给定运行时的任务消费服务"""
+    import os
+    import asyncio
+    import json
+    import redis.asyncio as redis_client
+    from .interfaces import TaskSpec
+
+    async def _run_service():
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        r = redis_client.from_url(redis_url)
+        queue_name = "tasks:reasoning"
+        group = "workers"
+        consumer_id = runtime.runtime_id
+        # 创建消费者组
+        try:
+            await r.xgroup_create(queue_name, group, id="0", mkstream=True)
+        except Exception:
+            pass
+        # 消费循环
+        while True:
+            msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=1000)
+            if not msgs:
+                continue
+            for _, entries in msgs:
+                for msg_id, fields in entries:
+                    try:
+                        data = json.loads(fields[b'task'].decode())
+                        task = TaskSpec.from_dict(data)
+                        result = await runtime.execute(task)
+                        # 路径由 runtime 自行保存轨迹
+                    except Exception as e:
+                        # 可记录错误日志
+                        pass
+                    finally:
+                        await r.xack(queue_name, group, msg_id)
+
+    # 运行异步服务
+    asyncio.run(_run_service())

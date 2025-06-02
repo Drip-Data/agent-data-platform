@@ -88,6 +88,14 @@ class TaskDispatcher:
                                 processed_tasks.add(task.task_id)
                                 
                                 logger.info(f"Dispatched task {task.task_id} to {queue_name}")
+                                # 结构化日志埋点
+                                log_entry = {
+                                    "task_id": task.task_id,
+                                    "queue": queue_name,
+                                    "submitted_at": time.time(),
+                                    "priority": task.priority
+                                }
+                                logger.debug(f"DispatchLog: {json.dumps(log_entry)}")
                             else:
                                 logger.error(f"No queue for task type {task.task_type}")
                                 

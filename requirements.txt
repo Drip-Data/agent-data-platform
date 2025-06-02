@@ -5,3 +5,9 @@ pydantic
 httpx
 selenium
 webdriver-manager
+matplotlib>=3.5.0
+pandas>=1.3.0
+numpy>=1.21.0
+playwright>=1.20.0
+beautifulsoup4>=4.11.0
+scikit-learn>=1.1.0

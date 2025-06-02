@@ -24,6 +24,7 @@ class ErrorType(Enum):
     RUNTIME_ERROR = "runtime_error"
     BROWSER_ERROR = "browser_error"
     SYSTEM_ERROR = "system_error"
+    TOOL_ERROR = "tool_error"
 
 @dataclass
 class TaskSpec:
@@ -65,15 +66,35 @@ class ExecutionStep:
     action_params: Dict[str, Any]
     observation: str
     success: bool
+    thinking: Optional[str] = None  # LLM思考过程
+    execution_code: Optional[str] = None  # 生成的工具调用代码
     error_type: Optional[ErrorType] = None
     error_message: Optional[str] = None
     timestamp: float = field(default_factory=time.time)
     duration: float = 0.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，用于日志和序列化"""
+        return {
+            'step_id': self.step_id,
+            'action_type': self.action_type.value if hasattr(self.action_type, 'value') else str(self.action_type),
+            'action_params': self.action_params,
+            'observation': self.observation,
+            'success': self.success,
+            'thinking': self.thinking,
+            'execution_code': self.execution_code,
+            'error_type': self.error_type.value if self.error_type else None,
+            'error_message': self.error_message,
+            'timestamp': self.timestamp,
+            'duration': self.duration
+        }
 
 @dataclass
 class TrajectoryResult:
     """轨迹结果"""
-    task_id: str
+    task_name: str  # 原 task_id 值迁移
+    task_id: str  # 新 UUID 格式 ID
+    task_description: str
     runtime_id: str
     success: bool
     steps: List[ExecutionStep]
@@ -86,19 +107,23 @@ class TrajectoryResult:
     
     def to_dict(self) -> Dict:
         return {
-            'task_id': self.task_id,
+            'task_id': self.task_id,  # 将task_id放在第一行
+            'task_name': self.task_name,
+            'task_description': self.task_description,
             'runtime_id': self.runtime_id,
             'success': self.success,
             'steps': [
                 {
                     'step_id': s.step_id,
                     'action_type': s.action_type.value,
-                    'action_params': s.action_params,
-                    'observation': s.observation,
+                    'tool_input': s.action_params,
+                    'tool_output': s.observation,
+                    'thinking': s.thinking,
+                    'execution_code': s.execution_code,
                     'success': s.success,
                     'error_type': s.error_type.value if s.error_type else None,
                     'error_message': s.error_message,
-                    'timestamp': s.timestamp,
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(s.timestamp)),
                     'duration': s.duration
                 } for s in self.steps
             ],
@@ -107,7 +132,7 @@ class TrajectoryResult:
             'error_message': self.error_message,
             'total_duration': self.total_duration,
             'metadata': self.metadata,
-            'created_at': self.created_at
+            'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.created_at))
         }
     
     def json(self) -> str:

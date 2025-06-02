@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from typing import List, Dict, Optional
 import redis.asyncio as redis
 from playwright.async_api import Page
@@ -14,7 +15,7 @@ from core.interfaces import (
 from core.metrics import EnhancedMetrics
 from core.cache import TemplateCache
 from core.llm_client import LLMClient
-from browser_manager import BrowserManager
+from runtimes.web_navigator.browser_manager import BrowserManager
 
 logger = logging.getLogger(__name__)
 metrics = EnhancedMetrics(port=8002)
@@ -32,10 +33,12 @@ class MemoryControlledWebRuntime(RuntimeInterface):
         # 并发控制
         self.max_concurrent = config.get("max_concurrent", 4)
         self.semaphore = asyncio.Semaphore(self.max_concurrent)
-        
         self.browser_manager = BrowserManager()
         self.cache = TemplateCache(self.redis)
         self.llm_client = LLMClient(config)
+        
+        # 是否同时保存单独的轨迹文件
+        self.config["save_individual_trajectories"] = config.get("save_individual_trajectories", False) or os.getenv("SAVE_INDIVIDUAL_TRAJECTORIES", "").lower() in ("1", "true", "yes")
         
     @property
     def runtime_id(self) -> str:
@@ -71,16 +74,17 @@ class MemoryControlledWebRuntime(RuntimeInterface):
         # 并发控制
         async with self.semaphore:
             return await self._execute_with_browser(task)
-    
     async def _execute_with_browser(self, task: TaskSpec) -> TrajectoryResult:
         """在浏览器中执行任务"""
         start_time = time.time()
+        trajectory_id = str(uuid.uuid4())  # 生成新的轨迹ID
         metrics.record_task_start(task.task_id, 'web_navigator')
         
         page = None
         steps = []
         
-        try:            # 检查缓存
+        try:
+            # 检查缓存
             cached_result = await self.cache.get(task.task_type.value, task.description)
             
             if cached_result:
@@ -88,7 +92,7 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 logger.info(f"Using cached web actions for task {task.task_id}")
                 
                 # 从缓存快速执行
-                result = await self._execute_cached_actions(task, cached_result)
+                result = await self._execute_cached_actions(task, cached_result, trajectory_id)
                 metrics.record_task_completed(task.task_id, 'web_navigator', True)
                 return result
             
@@ -104,13 +108,14 @@ class MemoryControlledWebRuntime(RuntimeInterface):
             # 导航到起始页面
             await page.goto(start_url, wait_until='networkidle', timeout=30000)
             initial_content = await self._extract_page_content(page)
-            
-            # 第一步：页面导航
+              # 第一步：页面导航
             nav_step = ExecutionStep(
                 step_id=0,
                 action_type=ActionType.BROWSER_ACTION,
                 action_params={"action": "goto", "url": start_url},
                 observation=initial_content[:1000],  # 限制观察长度
+                thinking=f"Navigating to starting URL: {start_url}",
+                execution_code=f"browser.goto('{start_url}')",
                 success=True,
                 duration=1.0
             )
@@ -132,8 +137,7 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 
                 if action.get("type") == "finish":
                     break
-                
-                # 执行动作
+                  # 执行动作
                 success, observation, error_type = await self._execute_browser_action(page, action)
                 
                 step = ExecutionStep(
@@ -141,6 +145,8 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                     action_type=ActionType.BROWSER_ACTION,
                     action_params=action,
                     observation=observation[:1000],  # 限制观察长度
+                    thinking=f"Executing browser action: {action.get('type', 'unknown')}",
+                    execution_code=f"browser.{action.get('type', 'action')}({action})",
                     success=success,
                     error_type=error_type,
                     duration=time.time() - step_start
@@ -172,9 +178,10 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                     "final_result": final_content[:500]
                 }
                 await self.cache.set(task.task_type.value, task.description, cache_data)
-            
             result = TrajectoryResult(
-                task_id=task.task_id,
+                task_name=task.task_id,  # 保持原始task_id作为task_name
+                task_id=trajectory_id,   # 使用新的UUID作为轨迹ID
+                task_description=task.description,
                 runtime_id=self.runtime_id,
                 success=any(s.success for s in steps),
                 steps=steps,
@@ -183,7 +190,8 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 metadata={
                     "final_url": page.url,
                     "total_steps": len(steps),
-                    "cache_hit": False
+                    "cache_hit": False,
+                    "original_task_id": task.task_id
                 }
             )
             
@@ -194,9 +202,10 @@ class MemoryControlledWebRuntime(RuntimeInterface):
             logger.error(f"Error executing web task {task.task_id}: {e}")
             error_type = ErrorType.BROWSER_ERROR
             metrics.record_task_failure(task.task_id, 'web_navigator', error_type.value)
-            
             return TrajectoryResult(
-                task_id=task.task_id,
+                task_name=task.task_id,  # 保持原始task_id作为task_name
+                task_id=trajectory_id,   # 使用新的UUID作为轨迹ID
+                task_description=task.description,
                 runtime_id=self.runtime_id,
                 success=False,
                 steps=steps,
@@ -204,15 +213,17 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 error_type=error_type,
                 error_message=str(e),
                 total_duration=time.time() - start_time,
-                metadata={}
+                metadata={"original_task_id": task.task_id}
             )
         finally:
             if page:
                 await self.browser_manager.return_page(page)
     
-    async def _execute_cached_actions(self, task: TaskSpec, cached_data: Dict) -> TrajectoryResult:
+    async def _execute_cached_actions(self, task: TaskSpec, cached_data: Dict, trajectory_id: str = None) -> TrajectoryResult:
         """执行缓存的动作序列"""
         start_time = time.time()
+        if not trajectory_id:
+            trajectory_id = str(uuid.uuid4())
         
         # 构造缓存结果
         steps = []
@@ -222,19 +233,26 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 action_type=ActionType.BROWSER_ACTION,
                 action_params=action_data["action"],
                 observation="[Cached result]",
+                thinking="Using cached browser action result",
+                execution_code=f"browser.{action_data['action'].get('type', 'action')}()",
                 success=action_data["success"],
                 duration=0.1
             )
             steps.append(step)
         
         return TrajectoryResult(
-            task_id=task.task_id,
+            task_name=task.task_id,  # 保持原始task_id作为task_name
+            task_id=trajectory_id,   # 使用新的UUID作为轨迹ID
+            task_description=task.description,
             runtime_id=self.runtime_id,
             success=True,
             steps=steps,
             final_result=cached_data.get("final_result", ""),
             total_duration=time.time() - start_time,
-            metadata={"cache_hit": True}
+            metadata={
+                "cache_hit": True,
+                "original_task_id": task.task_id
+            }
         )
     
     async def _extract_page_content(self, page: Page) -> str:
@@ -263,13 +281,24 @@ class MemoryControlledWebRuntime(RuntimeInterface):
             return f"Error extracting content: {str(e)}"
     
     async def _generate_next_action(self, task_description: str, page_content: str, current_url: str) -> Dict:
-        """生成下一步动作（简化版）"""
-        # 基于规则的简单动作生成
+        """生成下一步动作（包含智能搜索引擎切换）"""
+        # 检测反机器人阻拦
+        if self._detect_anti_bot_protection(page_content):
+            # 切换到备用搜索引擎
+            alternative_engine = self._get_alternative_search_engine(current_url)
+            if alternative_engine:
+                return {
+                    "type": "navigate",
+                    "url": alternative_engine,
+                    "reason": "Detected anti-bot protection, switching search engine"
+                }
+        
+        # 基于规则的动作生成
         if "search" in task_description.lower():
-            if "google.com" in current_url:
+            if any(domain in current_url for domain in ["google.com", "bing.com", "yahoo.com", "baidu.com", "duckduckgo.com"]):
                 return {
                     "type": "fill_and_submit",
-                    "selector": "input[name='q'], input[type='search']",
+                    "selector": self._get_search_selector(current_url),
                     "text": self._extract_search_terms(task_description)
                 }
             else:
@@ -281,6 +310,59 @@ class MemoryControlledWebRuntime(RuntimeInterface):
             }
         else:
             return {"type": "finish"}
+    
+    def _detect_anti_bot_protection(self, page_content: str) -> bool:
+        """检测反机器人保护"""
+        anti_bot_indicators = [
+            "unusual traffic",
+            "通常と異なるトラフィック",
+            "robot",
+            "captcha",
+            "verify you are human",
+            "人机验证",
+            "请证明您是人类",
+            "blocked",
+            "access denied",
+            "too many requests"
+        ]
+        
+        content_lower = page_content.lower()
+        return any(indicator in content_lower for indicator in anti_bot_indicators)
+    
+    def _get_alternative_search_engine(self, current_url: str) -> str:
+        """获取备用搜索引擎URL"""
+        # 搜索引擎优先级：Google -> Bing -> DuckDuckGo -> Yahoo -> Baidu
+        search_engines = [
+            ("google.com", "https://www.bing.com/search"),
+            ("bing.com", "https://duckduckgo.com"),
+            ("duckduckgo.com", "https://search.yahoo.com"),
+            ("yahoo.com", "https://www.baidu.com"),
+            ("baidu.com", "https://www.google.com")  # 循环回到Google
+        ]
+        
+        for current_engine, alternative in search_engines:
+            if current_engine in current_url:
+                return alternative
+        
+        # 如果当前不在已知搜索引擎，默认使用Bing（反机器人检测较弱）
+        return "https://www.bing.com"
+    
+    def _get_search_selector(self, current_url: str) -> str:
+        """根据搜索引擎获取搜索框选择器"""
+        selectors = {
+            "google.com": "input[name='q'], input[type='search']",
+            "bing.com": "input[name='q'], #sb_form_q",
+            "yahoo.com": "input[name='p'], #uh-search-box",
+            "baidu.com": "input[name='wd'], #kw",
+            "duckduckgo.com": "input[name='q'], #search_form_input"
+        }
+        
+        for domain, selector in selectors.items():
+            if domain in current_url:
+                return selector
+        
+        # 默认选择器
+        return "input[name='q'], input[type='search'], input[name='p'], input[name='wd']"
     
     def _extract_search_terms(self, description: str) -> str:
         """从描述中提取搜索词"""
@@ -320,6 +402,16 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 
                 observation = await self._extract_page_content(page)
                 return True, observation, None
+                
+            elif action_type == "navigate":
+                url = action.get("url")
+                reason = action.get("reason", "Navigating to new URL")
+                
+                # 导航到新URL
+                await page.goto(url, wait_until='networkidle', timeout=15000)
+                
+                observation = await self._extract_page_content(page)
+                return True, f"Navigation successful: {reason}\n\n{observation}", None
                 
             elif action_type == "scroll":
                 # 滚动页面
@@ -376,17 +468,44 @@ class MemoryControlledWebRuntime(RuntimeInterface):
             except Exception as e:
                 logger.error(f"Error in consumer loop: {e}")
                 await asyncio.sleep(5)
-    
+                
     async def _save_trajectory(self, result: TrajectoryResult):
-        """保存轨迹到文件"""
+        """保存轨迹到集合文件"""
         output_dir = "/app/output/trajectories"
         os.makedirs(output_dir, exist_ok=True)
         
-        file_path = os.path.join(output_dir, f"{result.task_id}.json")
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(result.json())
+        # 集合文件路径
+        collection_file = os.path.join(output_dir, "trajectories_collection.json")
         
-        logger.info(f"Trajectory saved: {file_path}")
+        # 读取现有集合或创建新集合
+        trajectories = []
+        if os.path.exists(collection_file):
+            try:
+                with open(collection_file, 'r', encoding='utf-8') as f:
+                    trajectories = json.load(f)
+                    # 确保trajectories是一个列表
+                    if not isinstance(trajectories, list):
+                        trajectories = []
+            except (json.JSONDecodeError, Exception) as e:
+                logger.error(f"Error reading trajectories collection: {e}")
+                # 如果文件损坏，创建新的集合
+                trajectories = []
+        
+        # 将新轨迹添加到集合中
+        trajectories.append(result.to_dict())
+        
+        # 将更新后的集合写入文件
+        with open(collection_file, 'w', encoding='utf-8') as f:
+            json.dump(trajectories, f, indent=2, ensure_ascii=False)
+            
+        logger.info(f"Trajectory added to collection: {collection_file}")
+        
+        # 同时也保存单独的文件（可选）
+        if self.config.get("save_individual_trajectories", False):
+            individual_file = os.path.join(output_dir, f"{result.task_id}.json")
+            with open(individual_file, 'w', encoding='utf-8') as f:
+                f.write(result.json())
+            logger.info(f"Individual trajectory saved: {individual_file}")
     
     async def _register_health(self):
         """注册健康状态"""

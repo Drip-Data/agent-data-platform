@@ -1,5 +1,4 @@
-redis
-aioredis
+redis[hiredis]
 prometheus-client
 aiohttp
 httpx
