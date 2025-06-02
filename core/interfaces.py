@@ -12,6 +12,7 @@ class TaskType(Enum):
     REASONING = "reasoning"
 
 class ActionType(Enum):
+    CODE_GENERATION = "code_generation"
     CODE_EXECUTION = "code_execution"
     BROWSER_ACTION = "browser_action"
     TOOL_CALL = "tool_call"

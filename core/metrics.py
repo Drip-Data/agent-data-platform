@@ -88,7 +88,7 @@ class EnhancedMetrics:
         
     def start_server(self):
         """启动metrics服务器"""
-        start_http_server(self.port, registry=self.registry)
+        start_http_server(self.port, addr='0.0.0.0', registry=self.registry)
     
     def record_task_submitted(self, task_type: str, runtime: str):
         """记录任务提交"""
@@ -132,3 +132,11 @@ class EnhancedMetrics:
     def record_cache_miss(self, cache_type: str = 'template'):
         """记录缓存未命中"""
         self.cache_misses.labels(cache_type=cache_type).inc()
+    
+    def record_task_start(self, task_id: str, runtime: str):
+        """记录任务开始 - 别名方法"""
+        self.record_task_started(task_id, runtime)
+    
+    def record_task_failure(self, task_id: str, runtime: str, error_type: str = 'unknown'):
+        """记录任务失败"""
+        self.record_task_completed(task_id, runtime, success=False, error_type=error_type)

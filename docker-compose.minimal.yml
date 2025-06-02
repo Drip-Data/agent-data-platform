@@ -18,7 +18,9 @@ services:
       - ./output:/app/output
 
   sandbox-runtime:
-    build: ./runtimes/sandbox
+    build:
+      context: .
+      dockerfile: ./runtimes/sandbox/Dockerfile
     environment:
       - REDIS_URL=redis://redis:6379
     depends_on: [redis]

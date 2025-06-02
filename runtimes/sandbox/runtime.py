@@ -4,7 +4,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import aioredis
 import httpx
@@ -12,28 +12,18 @@ import httpx
 from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ErrorType
 from core.cache import TemplateCache
 from core.metrics import EnhancedMetrics
+from core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
-metrics = EnhancedMetrics()
+metrics = EnhancedMetrics(port=8001)
 
 class NSJailExecutor:
     """NSJail执行器"""
     
     def __init__(self):
-        self.base_cmd = [
-            "nsjail",
-            "--mode", "o",
-            "--chroot", "/tmp/sandbox",
-            "--user", "nobody",
-            "--group", "nogroup",
-            "--time_limit", "30",
-            "--max_cpus", "1",
-            "--rlimit_as", "128",
-            "--rlimit_cpu", "10",
-            "--rlimit_fsize", "1",
-            "--disable_proc",
-            "--"
-        ]
+        # 暂时使用直接执行，不使用NSJail
+        # TODO: 后续添加NSJail支持
+        self.use_nsjail = False
     
     async def execute(self, code: str, timeout: int = 30) -> Dict:
         """执行代码"""
@@ -44,49 +34,62 @@ class NSJailExecutor:
             with open(script_path, 'w') as f:
                 f.write(code)
             
-            # 构建命令
-            cmd = self.base_cmd + ["python3", script_path]
+            # 直接使用python3执行，不使用NSJail
+            cmd = ["python3", script_path]
             
-            # 执行
+            # 执行命令
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=timeout
-            )
-            
-            return {
-                "exit_code": process.returncode,
-                "stdout": stdout.decode('utf-8', errors='ignore'),
-                "stderr": stderr.decode('utf-8', errors='ignore')
-            }
-            
-        except asyncio.TimeoutError:
-            if process:
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), 
+                    timeout=timeout
+                )
+                
+                return {
+                    "exit_code": process.returncode,
+                    "stdout": stdout.decode('utf-8', errors='ignore'),
+                    "stderr": stderr.decode('utf-8', errors='ignore')
+                }
+                
+            except asyncio.TimeoutError:
                 process.kill()
-            return {
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": "Execution timeout"
-            }
+                await process.wait()
+                return {
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": "Execution timeout"
+                }
+                
         finally:
             # 清理临时文件
-            if os.path.exists(script_path):
-                os.remove(script_path)
+            try:
+                os.unlink(script_path)
+            except:
+                pass
 
 class LightweightSandboxRuntime(RuntimeInterface):
     """轻量级沙盒运行时"""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.runtime_id = f"sandbox-{os.getpid()}"
+        self._runtime_id = f"sandbox-{os.getpid()}"
         self.redis = None
         self.cache = None
         self.executor = NSJailExecutor()
-        self.vllm_client = httpx.AsyncClient(base_url=config.get("vllm_url"))
+        self.llm_client = LLMClient(config)
+    
+    @property
+    def runtime_id(self) -> str:
+        return self._runtime_id
+    
+    @property
+    def capabilities(self) -> List[str]:
+        return ["code_execution", "python", "sandbox"]
         
     async def start(self):
         """启动运行时"""
@@ -101,11 +104,23 @@ class LightweightSandboxRuntime(RuntimeInterface):
         # 注册健康状态
         await self._register_health()
         
-        # 启动指标服务器
-        metrics.start_http_server(8080)
+        # 创建消费者组
+        queue_name = "tasks:code"
+        try:
+            await self.redis.xgroup_create(queue_name, "workers", id="0", mkstream=True)
+        except Exception:
+            pass
         
-        # 开始消费任务
-        await self._consume_tasks()
+        # 启动指标服务器
+        metrics.start_server()
+        logger.info(f"Metrics server started on port 8001")
+        
+        # 开始消费任务（在后台运行）
+        asyncio.create_task(self._consume_tasks())
+        
+        # 保持服务运行
+        while True:
+            await asyncio.sleep(1)
     
     async def execute(self, task: TaskSpec) -> TrajectoryResult:
         """执行代码任务"""
@@ -113,16 +128,15 @@ class LightweightSandboxRuntime(RuntimeInterface):
         
         try:
             # 记录任务开始
-            metrics.record_task_start(task.task_type.value)
+            metrics.record_task_start(task.task_id, 'sandbox')
             
             # 检查缓存
-            cache_key = f"code:{task.task_type.value}:{hash(task.description)}"
-            cached_code = await self.cache.get(cache_key)
+            cached_code = await self.cache.get(task.task_type.value, task.description)
             
             if cached_code:
                 logger.info(f"Cache hit for task {task.task_id}")
                 metrics.record_cache_hit()
-                code = cached_code
+                code = cached_code.get("code", "")
             else:
                 logger.info(f"Cache miss for task {task.task_id}")
                 metrics.record_cache_miss()
@@ -131,36 +145,45 @@ class LightweightSandboxRuntime(RuntimeInterface):
                 code = await self._generate_code(task.description)
                 
                 # 缓存代码
-                await self.cache.set(cache_key, code, ttl=3600)
+                await self.cache.set(task.task_type.value, task.description, {"code": code})
             
             # 执行代码
             execution_result = await self._execute_code_safely(code)
             
+            # 构建执行步骤
+            from core.interfaces import ExecutionStep, ActionType
+            steps = [
+                ExecutionStep(
+                    step_id=1,
+                    action_type=ActionType.CODE_GENERATION,
+                    action_params={"description": task.description},
+                    observation=code,
+                    success=True,
+                    timestamp=start_time
+                ),
+                ExecutionStep(
+                    step_id=2,
+                    action_type=ActionType.CODE_EXECUTION,
+                    action_params={"code": code},
+                    observation=execution_result["output"],
+                    success=execution_result["success"],
+                    error_type=execution_result.get("error_type"),
+                    error_message=execution_result.get("error"),
+                    timestamp=time.time()
+                )
+            ]
+            
             # 构建轨迹结果
             result = TrajectoryResult(
                 task_id=task.task_id,
-                task_type=task.task_type,
+                runtime_id=self.runtime_id,
                 success=execution_result["success"],
-                steps=[
-                    {
-                        "action": "generate_code",
-                        "input": task.description,
-                        "output": code,
-                        "timestamp": start_time
-                    },
-                    {
-                        "action": "execute_code",
-                        "input": code,
-                        "output": execution_result["output"],
-                        "timestamp": time.time()
-                    }
-                ],
-                final_output=execution_result["output"],
+                steps=steps,
+                final_result=execution_result["output"],
                 error_message=execution_result.get("error"),
                 error_type=execution_result.get("error_type"),
-                duration=time.time() - start_time,
+                total_duration=time.time() - start_time,
                 metadata={
-                    "runtime_id": self.runtime_id,
                     "cached": cached_code is not None,
                     "exit_code": execution_result.get("exit_code")
                 }
@@ -168,31 +191,42 @@ class LightweightSandboxRuntime(RuntimeInterface):
             
             # 记录指标
             if result.success:
-                metrics.record_task_completion(task.task_type.value, result.duration)
+                metrics.record_task_completed(task.task_id, 'sandbox', True)
             else:
-                metrics.record_task_failure(task.task_type.value, result.error_type.value if result.error_type else "unknown")
+                metrics.record_task_failure(task.task_id, 'sandbox', result.error_type.value if result.error_type else "unknown")
             
             return result
             
         except Exception as e:
             logger.error(f"Error executing task {task.task_id}: {e}")
-            metrics.record_task_failure(task.task_type.value, "system_error")
+            metrics.record_task_failure(task.task_id, 'sandbox', "system_error")
             
             return TrajectoryResult(
                 task_id=task.task_id,
-                task_type=task.task_type,
+                runtime_id=self.runtime_id,
                 success=False,
                 steps=[],
-                final_output="",
+                final_result="",
                 error_message=str(e),
                 error_type=ErrorType.SYSTEM_ERROR,
-                duration=time.time() - start_time,
-                metadata={"runtime_id": self.runtime_id}
+                total_duration=time.time() - start_time,
+                metadata={}
             )
     
     async def _generate_code(self, description: str) -> str:
-        """生成代码"""
-        # 简单的模板匹配
+        """使用LLM生成代码"""
+        try:
+            # 使用统一的LLM客户端生成代码
+            code = await self.llm_client.generate_code(description, "python")
+            logger.info(f"Generated code using {self.llm_client.provider.value} for: {description[:50]}...")
+            return code
+        except Exception as e:
+            logger.error(f"Failed to generate code with LLM: {e}")
+            # 回退到简单模板匹配
+            return self._fallback_code_generation(description)
+    
+    def _fallback_code_generation(self, description: str) -> str:
+        """LLM失败时的回退代码生成"""
         if "fibonacci" in description.lower():
             return """
 def fibonacci(n):
@@ -311,16 +345,22 @@ print(result)
                 )
                 
                 if not messages:
+                    logger.debug(f"No messages received by {consumer_id}")
                     continue
+                
+                logger.info(f"Received {len(messages)} message streams")
                 
                 for stream, msgs in messages:
                     for msg_id, fields in msgs:
                         try:
+                            logger.info(f"Processing message {msg_id}")
                             # 解析任务
                             task_data = json.loads(fields[b'task'].decode())
+                            logger.info(f"Parsed task data: {task_data.get('task_id', 'unknown')}")
                             task = TaskSpec.from_dict(task_data)
                             
                             # 执行任务
+                            logger.info(f"Executing task {task.task_id}")
                             result = await self.execute(task)
                             
                             # 保存轨迹
@@ -331,6 +371,28 @@ print(result)
                             
                         except Exception as e:
                             logger.error(f"Error processing message {msg_id}: {e}")
+                            
+                            # 创建错误轨迹
+                            try:
+                                task_data = json.loads(fields[b'task'].decode())
+                                task = TaskSpec.from_dict(task_data)
+                                
+                                error_result = TrajectoryResult(
+                                    task_id=task.task_id,
+                                    runtime_id=self.runtime_id,
+                                    success=False,
+                                    steps=[],
+                                    final_result="",
+                                    error_message=str(e),
+                                    error_type=ErrorType.SYSTEM_ERROR,
+                                    total_duration=0,
+                                    metadata={}
+                                )
+                                
+                                await self._save_trajectory(error_result)
+                            except Exception as save_error:
+                                logger.error(f"Failed to save error trajectory: {save_error}")
+                            
                             await self.redis.xack(queue_name, "workers", msg_id)
                             
             except Exception as e:

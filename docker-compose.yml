@@ -69,18 +69,28 @@ services:
 
   # 轻量代码执行运行时
   sandbox-runtime:
-    build: ./runtimes/sandbox
+    build:
+      context: .
+      dockerfile: ./runtimes/sandbox/Dockerfile
     environment:
       - REDIS_URL=redis://redis:6379
       - VLLM_URL=http://vllm:8000
       - LOG_LEVEL=INFO
+      # 外部API配置 - 主要使用Google Gemini
+      # Google Gemini API配置
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      # DeepSeek API配置（备用）
+      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      # 通用OpenAI兼容API配置（备用）
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - OPENAI_API_BASE=${OPENAI_API_BASE}
     depends_on:
       redis:
         condition: service_healthy
     volumes:
       - ./output:/app/output
-    ports:
-      - "8001:8001"  # metrics
     restart: unless-stopped
     cap_add:
       - SYS_ADMIN
@@ -91,11 +101,23 @@ services:
 
   # Web导航运行时
   web-runtime:
-    build: ./runtimes/web_navigator
+    build:
+      context: .
+      dockerfile: ./runtimes/web_navigator/Dockerfile
     environment:
       - REDIS_URL=redis://redis:6379
       - VLLM_URL=http://vllm:8000
       - LOG_LEVEL=INFO
+      # 外部API配置 - 主要使用Google Gemini
+      # Google Gemini API配置
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      # DeepSeek API配置（备用）
+      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      # 通用OpenAI兼容API配置（备用）
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - OPENAI_API_BASE=${OPENAI_API_BASE}
       - MAX_CONCURRENT=4
     depends_on:
       redis:

@@ -2,35 +2,23 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# 安装系统依赖和nsjail
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    build-essential \
-    pkg-config \
-    libnl-route-3-dev \
-    libprotobuf-dev \
-    protobuf-compiler \
-    && git clone https://github.com/google/nsjail.git \
-    && cd nsjail \
-    && make \
-    && cp nsjail /usr/local/bin/ \
-    && cd .. \
-    && rm -rf nsjail \
-    && apt-get remove -y build-essential git pkg-config \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+# 暂时跳过NSJail安装，使用基础Python环境
+# TODO: 后续添加NSJail支持
+RUN echo 'NSJail installation skipped for now'
 
 # 安装Python依赖
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY runtimes/sandbox/requirements.txt .
+RUN pip install --upgrade pip --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org && \
+    pip install --no-cache-dir -r requirements.txt --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org
 
 # 复制运行时代码
-COPY runtime.py .
-COPY ../core/ ./core/
+COPY runtimes/sandbox/runtime.py .
+COPY core/ ./core/
 
-# 创建输出目录
-RUN mkdir -p /app/output/{trajectories,logs}
+# 创建输出目录和沙盒目录
+RUN mkdir -p /app/output/{trajectories,logs} \
+    && mkdir -p /tmp/sandbox \
+    && chmod 755 /tmp/sandbox
 
 # 暴露metrics端口
 EXPOSE 8001

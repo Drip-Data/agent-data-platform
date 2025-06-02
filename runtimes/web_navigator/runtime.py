@@ -13,10 +13,11 @@ from core.interfaces import (
 )
 from core.metrics import EnhancedMetrics
 from core.cache import TemplateCache
-from .browser_manager import BrowserManager
+from core.llm_client import LLMClient
+from browser_manager import BrowserManager
 
 logger = logging.getLogger(__name__)
-metrics = EnhancedMetrics()
+metrics = EnhancedMetrics(port=8002)
 
 class MemoryControlledWebRuntime(RuntimeInterface):
     """内存控制的Web导航运行时"""
@@ -34,6 +35,7 @@ class MemoryControlledWebRuntime(RuntimeInterface):
         
         self.browser_manager = BrowserManager()
         self.cache = TemplateCache(self.redis)
+        self.llm_client = LLMClient(config)
         
     @property
     def runtime_id(self) -> str:
@@ -56,7 +58,7 @@ class MemoryControlledWebRuntime(RuntimeInterface):
             pass
         
         # 启动metrics服务器
-        metrics.start_http_server(8002)
+        metrics.start_server()
         
         # 注册健康状态
         await self._register_health()
@@ -73,15 +75,13 @@ class MemoryControlledWebRuntime(RuntimeInterface):
     async def _execute_with_browser(self, task: TaskSpec) -> TrajectoryResult:
         """在浏览器中执行任务"""
         start_time = time.time()
-        metrics.record_task_start(task.task_type.value)
+        metrics.record_task_start(task.task_id, 'web_navigator')
         
         page = None
         steps = []
         
-        try:
-            # 检查缓存
-            cache_key = f"web_{task.description}_{task.constraints.get('start_url', '')}"
-            cached_result = await self.cache.get(cache_key)
+        try:            # 检查缓存
+            cached_result = await self.cache.get(task.task_type.value, task.description)
             
             if cached_result:
                 metrics.record_cache_hit()
@@ -89,7 +89,7 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 
                 # 从缓存快速执行
                 result = await self._execute_cached_actions(task, cached_result)
-                metrics.record_task_completion(task.task_type.value, result.duration)
+                metrics.record_task_completed(task.task_id, 'web_navigator', True)
                 return result
             
             # 缓存未命中，执行新导航
@@ -171,41 +171,40 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                     "actions": actions_cache,
                     "final_result": final_content[:500]
                 }
-                await self.cache.set(cache_key, cache_data)
+                await self.cache.set(task.task_type.value, task.description, cache_data)
             
             result = TrajectoryResult(
                 task_id=task.task_id,
-                task_type=task.task_type,
+                runtime_id=self.runtime_id,
                 success=any(s.success for s in steps),
                 steps=steps,
-                final_output=final_content[:1000],
-                duration=time.time() - start_time,
+                final_result=final_content[:1000],
+                total_duration=time.time() - start_time,
                 metadata={
-                    "runtime_id": self.runtime_id,
                     "final_url": page.url,
                     "total_steps": len(steps),
                     "cache_hit": False
                 }
             )
             
-            metrics.record_task_completion(task.task_type.value, result.duration)
+            metrics.record_task_completed(task.task_id, 'web_navigator', True)
             return result
             
         except Exception as e:
             logger.error(f"Error executing web task {task.task_id}: {e}")
             error_type = ErrorType.BROWSER_ERROR
-            metrics.record_task_failure(task.task_type.value, error_type.value)
+            metrics.record_task_failure(task.task_id, 'web_navigator', error_type.value)
             
             return TrajectoryResult(
                 task_id=task.task_id,
-                task_type=task.task_type,
+                runtime_id=self.runtime_id,
                 success=False,
                 steps=steps,
-                final_output="",
+                final_result="",
                 error_type=error_type,
                 error_message=str(e),
-                duration=time.time() - start_time,
-                metadata={"runtime_id": self.runtime_id}
+                total_duration=time.time() - start_time,
+                metadata={}
             )
         finally:
             if page:
@@ -230,12 +229,12 @@ class MemoryControlledWebRuntime(RuntimeInterface):
         
         return TrajectoryResult(
             task_id=task.task_id,
-            task_type=task.task_type,
+            runtime_id=self.runtime_id,
             success=True,
             steps=steps,
-            final_output=cached_data.get("final_result", ""),
-            duration=time.time() - start_time,
-            metadata={"runtime_id": self.runtime_id, "cache_hit": True}
+            final_result=cached_data.get("final_result", ""),
+            total_duration=time.time() - start_time,
+            metadata={"cache_hit": True}
         )
     
     async def _extract_page_content(self, page: Page) -> str:
