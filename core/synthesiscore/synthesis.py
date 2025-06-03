@@ -17,8 +17,9 @@ import redis.asyncio as redis
 import threading
 from pathlib import Path
 from collections import defaultdict
+import uuid
 
-from ..interfaces import TaskSpec, TrajectoryResult, TaskType
+from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType
 from ..llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -383,17 +384,74 @@ class SimpleSynthesizer:
             with open(trajectory_path, 'r', encoding='utf-8') as f:
                 trajectory_data = json.load(f)
             
-            trajectory = TrajectoryResult.from_dict(trajectory_data)
-            
-            # 只处理成功的轨迹
-            if trajectory.success:
-                essence = await self._extract_essence(trajectory)
-                if essence:
-                    self._store_essence(essence)
-                    logger.info(f"Extracted essence from trajectory {trajectory.task_id}")
+            # 如果是轨迹列表，处理每一个轨迹
+            if isinstance(trajectory_data, list):
+                logger.info(f"Processing trajectory collection with {len(trajectory_data)} trajectories")
+                for i, single_trajectory in enumerate(trajectory_data):
+                    if i >= 5:  # 限制处理前5个轨迹
+                        break
+                    try:
+                        trajectory = self._convert_trajectory_format(single_trajectory)
+                        if trajectory and trajectory.success:
+                            essence = await self._extract_essence(trajectory)
+                            if essence:
+                                self._store_essence(essence)
+                                logger.info(f"Extracted essence from trajectory {trajectory.task_id}")
+                    except Exception as e:
+                        logger.error(f"Error processing trajectory {i}: {e}")
+            else:
+                # 单个轨迹对象
+                trajectory = self._convert_trajectory_format(trajectory_data)
+                if trajectory and trajectory.success:
+                    essence = await self._extract_essence(trajectory)
+                    if essence:
+                        self._store_essence(essence)
+                        logger.info(f"Extracted essence from trajectory {trajectory.task_id}")
         
         except Exception as e:
             logger.error(f"Error processing trajectory file {trajectory_path}: {e}")
+    
+    def _convert_trajectory_format(self, data: Dict) -> Optional[TrajectoryResult]:
+        """将轨迹数据转换为TrajectoryResult格式"""
+        try:
+            # 转换steps格式
+            converted_steps = []
+            for step_data in data.get('steps', []):
+                # 映射字段名称
+                converted_step = ExecutionStep(
+                    step_id=step_data.get('step_id', 0),
+                    action_type=ActionType(step_data.get('action_type', 'code_generation')),
+                    action_params=step_data.get('tool_input', {}),
+                    observation=step_data.get('tool_output', ''),
+                    success=step_data.get('success', True),
+                    thinking=step_data.get('thinking'),
+                    execution_code=step_data.get('execution_code'),
+                    error_type=ErrorType(step_data['error_type']) if step_data.get('error_type') else None,
+                    error_message=step_data.get('error_message'),
+                    timestamp=step_data.get('timestamp', time.time()),
+                    duration=step_data.get('duration', 0.0)
+                )
+                converted_steps.append(converted_step)
+            
+            # 创建TrajectoryResult对象
+            return TrajectoryResult(
+                task_id=data.get('task_id', str(uuid.uuid4())),
+                task_name=data.get('task_name', data.get('task_id', 'unknown')),
+                task_description=data.get('task_description', ''),
+                runtime_id=data.get('runtime_id', 'unknown'),
+                success=data.get('success', False),
+                steps=converted_steps,
+                final_result=data.get('final_result', ''),
+                error_type=ErrorType(data['error_type']) if data.get('error_type') else None,
+                error_message=data.get('error_message'),
+                total_duration=data.get('total_duration', 0.0),
+                metadata=data.get('metadata', {}),
+                created_at=data.get('created_at', time.time())
+            )
+            
+        except Exception as e:
+            logger.error(f"Error converting trajectory format: {e}")
+            return None
     
     async def _extract_essence(self, trajectory: TrajectoryResult) -> Optional[TaskEssence]:
         """使用LLM提取轨迹本质"""
