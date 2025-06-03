@@ -78,8 +78,8 @@ class ExecutionStep:
         return {
             'step_id': self.step_id,
             'action_type': self.action_type.value if hasattr(self.action_type, 'value') else str(self.action_type),
-            'action_params': self.action_params,
-            'observation': self.observation,
+            'tool_input': self.action_params,  # 使用tool_input保持一致性
+            'tool_output': self.observation,   # 使用tool_output保持一致性
             'success': self.success,
             'thinking': self.thinking,
             'execution_code': self.execution_code,

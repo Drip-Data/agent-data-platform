@@ -9,6 +9,9 @@ import sys
 import tempfile
 import traceback
 import logging
+import uuid
+import re
+from io import StringIO
 from typing import Dict, Any, Optional
 import subprocess
 
@@ -46,6 +49,8 @@ class PythonExecutorTool:
     
     def __init__(self):
         self.output_dir = "/app/output"
+        # 确保输出目录存在
+        os.makedirs(self.output_dir, exist_ok=True)
         self.temp_dir = tempfile.mkdtemp()
         self._setup_matplotlib()
     
@@ -57,10 +62,38 @@ class PythonExecutorTool:
             plt.rcParams['figure.figsize'] = (10, 6)
             plt.rcParams['font.size'] = 10
     
+    def _is_safe_code(self, code: str) -> tuple[bool, str]:
+        """基本的代码安全检查"""
+        dangerous_patterns = [
+            r'import\s+os\s*;.*os\.system',
+            r'subprocess\.',
+            r'eval\s*\(',
+            r'exec\s*\(',
+            r'__import__',
+            r'open\s*\([^)]*["\'][rwa]',
+            r'file\s*\(',
+            r'input\s*\(',
+            r'raw_input\s*\(',
+        ]
+        
+        for pattern in dangerous_patterns:
+            if re.search(pattern, code, re.IGNORECASE):
+                return False, f"Potentially dangerous code detected: {pattern}"
+        
+        return True, ""
+    
     async def execute_code(self, code: str, timeout: int = 30) -> Dict[str, Any]:
         """执行Python代码"""
-        # 创建临时文件
-        script_path = os.path.join(self.temp_dir, f"script_{asyncio.get_event_loop().time()}.py")
+        # 基本安全检查
+        is_safe, reason = self._is_safe_code(code)
+        if not is_safe:
+            return {
+                "success": False,
+                "error": f"Code execution blocked: {reason}"
+            }
+        
+        # 使用UUID生成唯一文件名避免竞态条件
+        script_path = os.path.join(self.temp_dir, f"script_{uuid.uuid4().hex}.py")
         
         try:
             # 写入代码
@@ -133,9 +166,10 @@ class PythonExecutorTool:
             if operation == "describe":
                 result = df.describe()
             elif operation == "info":
-                buffer = []
+                # 使用StringIO而不是list作为缓冲区
+                buffer = StringIO()
                 df.info(buf=buffer)
-                result = '\n'.join(buffer)
+                result = buffer.getvalue()
             elif operation == "head":
                 result = df.head()
             elif operation == "tail":
@@ -194,7 +228,8 @@ class PythonExecutorTool:
             plt.grid(True, alpha=0.3)
             
             if not save_path:
-                save_path = os.path.join(self.output_dir, f"plot_{int(asyncio.get_event_loop().time())}.png")
+                # 使用UUID生成唯一文件名避免竞态条件
+                save_path = os.path.join(self.output_dir, f"plot_{uuid.uuid4().hex}.png")
             
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
             plt.close()
@@ -216,8 +251,29 @@ class PythonExecutorTool:
                 "traceback": traceback.format_exc()
             }
     
+    def _is_safe_package_name(self, package_name: str) -> bool:
+        """验证包名是否安全"""
+        # 基本的包名验证
+        if not re.match(r'^[a-zA-Z0-9_-]+([.][a-zA-Z0-9_-]+)*$', package_name):
+            return False
+        
+        # 检查是否包含危险字符
+        dangerous_chars = ['&', '|', ';', '`', '$', '(', ')', '{', '}']
+        if any(char in package_name for char in dangerous_chars):
+            return False
+            
+        return True
+    
     async def install_package(self, package_name: str) -> Dict[str, Any]:
         """安装Python包"""
+        # 验证包名安全性
+        if not self._is_safe_package_name(package_name):
+            return {
+                "success": False,
+                "error": "Invalid or potentially unsafe package name",
+                "package": package_name
+            }
+        
         try:
             process = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "pip", "install", package_name,

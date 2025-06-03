@@ -142,25 +142,33 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - VLLM_URL=http://vllm:8000
-      - LOG_LEVEL=INFO
-      # Google Gemini API配置
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_API_URL=${GEMINI_API_URL}
-      # DeepSeek API配置（备用）
-      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      # - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
-      # 通用OpenAI兼容API配置（备用）
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
-      # - OPENAI_API_BASE=${OPENAI_API_BASE}
-      # 推理运行时特有配置（如需要）
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
     depends_on:
       redis:
         condition: service_healthy
+      vllm:
+        condition: service_healthy
     volumes:
       - ./output:/app/output
-    ports:
-      - "8003:8003"
+    networks:
+      - agent_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio; from runtimes.reasoning.runtime import ReasoningRuntime; print('healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
 
   # Prometheus监控
   prometheus:

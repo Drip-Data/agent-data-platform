@@ -207,6 +207,17 @@ class LLMClient:
         api_key = os.getenv('GEMINI_API_KEY')
         api_url = os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta')
         
+        # 验证并使用有效的Gemini模型名称
+        model_name = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')  # 使用稳定版本
+        valid_models = [
+            'gemini-1.5-flash', 'gemini-1.5-pro', 
+            'gemini-1.0-pro', 'gemini-pro'
+        ]
+        
+        if model_name not in valid_models:
+            logger.warning(f"Invalid Gemini model '{model_name}', using default 'gemini-1.5-flash'")
+            model_name = 'gemini-1.5-flash'
+        
         payload = {
             "contents": [
                 {
@@ -221,14 +232,29 @@ class LLMClient:
             }
         }
         
-        response = await self.client.post(
-            f"{api_url}/models/gemini-2.0-flash:generateContent?key={api_key}",
-            json=payload
-        )
-        response.raise_for_status()
-        
-        result = response.json()
-        return result["candidates"][0]["content"]["parts"][0]["text"]
+        try:
+            response = await self.client.post(
+                f"{api_url}/models/{model_name}:generateContent?key={api_key}",
+                json=payload
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            logger.error(f"Gemini API call failed: {e}")
+            # 如果使用了不稳定的模型，尝试回退到稳定版本
+            if model_name != 'gemini-1.5-flash':
+                logger.info("Retrying with stable model 'gemini-1.5-flash'")
+                response = await self.client.post(
+                    f"{api_url}/models/gemini-1.5-flash:generateContent?key={api_key}",
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
+                return result["candidates"][0]["content"]["parts"][0]["text"]
+            else:
+                raise
     
     async def _call_deepseek(self, prompt: str) -> str:
         """调用DeepSeek API"""
@@ -519,9 +545,10 @@ REASON: [判断原因]
         }
         
         try:
-            # 更好的解析策略：处理多行内容
+            # 更好的解析策略：处理多行内容和JSON参数
             current_section = None
             thinking_lines = []
+            parameters_lines = []
             
             lines = response.strip().split('\n')
             for line in lines:
@@ -542,14 +569,8 @@ REASON: [判断原因]
                 elif line.startswith('PARAMETERS:'):
                     current_section = "parameters"
                     param_str = line[11:].strip()
-                    try:
-                        if param_str:
-                            result["parameters"] = json.loads(param_str)
-                        else:
-                            result["parameters"] = {}
-                    except json.JSONDecodeError:
-                        logger.warning(f"Failed to parse parameters JSON: {param_str}")
-                        result["parameters"] = {"raw": param_str}
+                    if param_str:
+                        parameters_lines.append(param_str)
                 elif line.startswith('CONFIDENCE:'):
                     current_section = "confidence"
                     try:
@@ -559,10 +580,29 @@ REASON: [判断原因]
                 elif current_section == "thinking" and line:
                     # 继续收集thinking的多行内容
                     thinking_lines.append(line)
+                elif current_section == "parameters" and line:
+                    # 收集多行PARAMETERS内容
+                    parameters_lines.append(line)
             
             # 组装thinking内容
             if thinking_lines:
                 result["thinking"] = "\n".join(thinking_lines)
+            
+            # 解析PARAMETERS (支持多行JSON)
+            if parameters_lines:
+                parameters_text = "\n".join(parameters_lines)
+                try:
+                    result["parameters"] = json.loads(parameters_text)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse multi-line parameters JSON: {parameters_text}")
+                    # 尝试修复常见的JSON格式问题
+                    try:
+                        # 移除可能的markdown代码块标记
+                        cleaned_params = parameters_text.replace('```json', '').replace('```', '').strip()
+                        result["parameters"] = json.loads(cleaned_params)
+                    except json.JSONDecodeError:
+                        logger.error(f"Could not parse parameters as JSON: {parameters_text}")
+                        result["parameters"] = {"raw": parameters_text}
             
         except Exception as e:
             logger.error(f"Error parsing reasoning response: {e}")

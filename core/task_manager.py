@@ -144,9 +144,18 @@ class TaskManager:
             logger.info(f"Cleaned up {len(expired_tasks)} expired tasks")
     
 def get_runtime(task_type: str):
+    """获取指定类型的运行时实例"""
     if task_type == 'reasoning':
-        from runtimes import ReasoningRuntime
+        from runtimes.reasoning.runtime import ReasoningRuntime
         return ReasoningRuntime()
+    elif task_type == 'code':
+        from runtimes.sandbox.runtime import LightweightSandboxRuntime
+        return LightweightSandboxRuntime()
+    elif task_type == 'web':
+        from runtimes.web_navigator.runtime import MemoryControlledWebRuntime
+        return MemoryControlledWebRuntime()
+    else:
+        raise ValueError(f"Unsupported task type: {task_type}. Supported types: reasoning, code, web")
 
 def start_runtime_service(runtime):
     """启动给定运行时的任务消费服务"""
@@ -154,7 +163,7 @@ def start_runtime_service(runtime):
     import asyncio
     import json
     import redis.asyncio as redis_client
-    from .interfaces import TaskSpec
+    from .interfaces import TaskSpec, ErrorType, TrajectoryResult
 
     async def _run_service():
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -179,9 +188,39 @@ def start_runtime_service(runtime):
                         task = TaskSpec.from_dict(data)
                         result = await runtime.execute(task)
                         # 路径由 runtime 自行保存轨迹
+                        logger.info(f"Task {task.task_id} executed successfully: {result.success}")
                     except Exception as e:
-                        # 可记录错误日志
-                        pass
+                        # 记录详细的错误信息
+                        logger.error(f"Error executing task {data.get('task_id', 'unknown')}: {e}", exc_info=True)
+                        
+                        # 创建错误轨迹结果
+                        try:
+                            error_result = TrajectoryResult(
+                                task_name=data.get('task_id', 'unknown'),
+                                task_id=data.get('task_id', 'unknown'),
+                                task_description=data.get('description', ''),
+                                runtime_id=getattr(runtime, 'runtime_id', 'unknown'),
+                                success=False,
+                                steps=[],
+                                final_result="",
+                                error_message=str(e),
+                                error_type=ErrorType.SYSTEM_ERROR,
+                                total_duration=0,
+                                metadata={"execution_error": True, "error_details": str(e)}
+                            )
+                            
+                            # 尝试保存错误轨迹
+                            await runtime._save_trajectory(error_result)
+                        except Exception as save_error:
+                            logger.error(f"Failed to save error trajectory: {save_error}")
+                        
+                        # 记录指标
+                        if hasattr(runtime, 'metrics'):
+                            runtime.metrics.record_task_failure(
+                                data.get('task_id', 'unknown'), 
+                                getattr(runtime, 'runtime_id', 'unknown'),
+                                "system_error"
+                            )
                     finally:
                         await r.xack(queue_name, group, msg_id)
 

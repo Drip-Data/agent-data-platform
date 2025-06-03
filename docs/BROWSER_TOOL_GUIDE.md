@@ -62,7 +62,7 @@ Agent 在生成 `PARAMETERS` 时，必须遵循以下JSON对象格式：
 *   **失败响应 (`tool_output`) 示例 (无效URL)**：
     ```json
     {
-      "success": False,
+      "success": false,
       "error_type": "InvalidArgument",
       "error": "URL parameter is missing or invalid. It must be a valid HTTP/HTTPS URL.",
       "message": "Failed to navigate due to invalid URL parameter: some_invalid_url"
@@ -71,7 +71,7 @@ Agent 在生成 `PARAMETERS` 时，必须遵循以下JSON对象格式：
 *   **失败响应 (`tool_output`) 示例 (导航错误)**：
     ```json
     {
-      "success": False,
+      "success": false,
       "error_type": "NavigationError",
       "error": "net::ERR_NAME_NOT_RESOLVED at https://nonexistentwebsite12345.com",
       "message": "Failed to navigate to https://nonexistentwebsite12345.com"
@@ -124,7 +124,7 @@ Agent 在生成 `PARAMETERS` 时，必须遵循以下JSON对象格式：
 *   **失败响应 (`tool_output`) 示例 (选择器未找到或页面未初始化)**：
     ```json
     {
-      "success": False,
+      "success": false,
       "error": "Browser not initialized" // 或具体的选择器错误
     }
     ```
@@ -155,14 +155,14 @@ Agent 在生成 `PARAMETERS` 时，必须遵循以下JSON对象格式：
 *   **成功响应 (`tool_output`) 示例**：
     ```json
     {
-      "success": True,
+      "success": true,
       "message": "Successfully clicked button#submit-form"
     }
     ```
 *   **失败响应 (`tool_output`) 示例 (选择器未找到)**：
     ```json
     {
-      "success": False,
+      "success": false,
       "error": "Timeout 30000ms exceeded.\n=========================== logs ===========================\nwaiting for selector \"button#nonexistent-submit-form\"\n============================================================",
       "message": "Failed to click button#nonexistent-submit-form"
     }

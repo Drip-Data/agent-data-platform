@@ -31,10 +31,17 @@ RUN apt-get update --fix-missing && apt-get install -y \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装Node.js (使用官方二进制包作为备选方案)
+# 安装Node.js (使用官方二进制包作为备选方案，包含校验和验证)
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
     apt-get install -y nodejs || \
-    (curl -fsSL https://nodejs.org/dist/v18.19.0/node-v18.19.0-linux-x64.tar.xz | tar -xJ -C /usr/local --strip-components=1)
+    (echo "使用备选Node.js二进制包安装方案..." && \
+     NODE_VERSION="18.19.0" && \
+     NODE_CHECKSUM="1d749fe613950a4900cdcf2fcd96939c8773b2a85aa9ff6cc24c1e0e5b0be9c4" && \
+     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" -o node.tar.xz && \
+     echo "${NODE_CHECKSUM} node.tar.xz" | sha256sum -c - && \
+     tar -xJ -C /usr/local --strip-components=1 -f node.tar.xz && \
+     rm node.tar.xz && \
+     node --version && npm --version)
 
 # 设置工作目录
 WORKDIR /app

@@ -5,6 +5,8 @@ import os
 import subprocess
 import time
 import uuid
+import re
+import threading
 from typing import Dict, Any, Optional, List
 
 import redis.asyncio as redis
@@ -14,6 +16,13 @@ from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ErrorT
 from core.cache import TemplateCache
 from core.metrics import EnhancedMetrics
 from core.llm_client import LLMClient
+
+# 跨平台文件锁导入
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 
 logger = logging.getLogger(__name__)
 metrics = EnhancedMetrics(port=8001)
@@ -26,10 +35,40 @@ class NSJailExecutor:
         # TODO: 后续添加NSJail支持
         self.use_nsjail = False
     
+    def _is_safe_code(self, code: str) -> tuple[bool, str]:
+        """基本的代码安全检查"""
+        dangerous_patterns = [
+            r'import\s+os\s*;.*os\.system',
+            r'subprocess\.',
+            r'eval\s*\(',
+            r'exec\s*\(',
+            r'__import__',
+            r'open\s*\([^)]*["\'][wa]',  # 写入文件操作
+            r'file\s*\(',
+            r'input\s*\(',
+            r'raw_input\s*\(',
+            r'compile\s*\(',
+        ]
+        
+        for pattern in dangerous_patterns:
+            if re.search(pattern, code, re.IGNORECASE):
+                return False, f"Potentially dangerous code detected: {pattern}"
+        
+        return True, ""
+
     async def execute(self, code: str, timeout: int = 30) -> Dict:
         """执行代码"""
-        # 创建临时文件
-        script_path = f"/tmp/script_{int(time.time())}.py"
+        # 基本安全检查
+        is_safe, reason = self._is_safe_code(code)
+        if not is_safe:
+            return {
+                "exit_code": -2,
+                "stdout": "",
+                "stderr": f"Code execution blocked: {reason}"
+            }
+        
+        # 使用UUID生成唯一文件名避免竞态条件
+        script_path = f"/tmp/script_{uuid.uuid4().hex}.py"
         
         try:
             with open(script_path, 'w') as f:
@@ -87,6 +126,10 @@ class LightweightSandboxRuntime(RuntimeInterface):
         
         # 是否同时保存单独的轨迹文件，从环境变量中读取，默认不保存
         self.config["save_individual_trajectories"] = config.get("save_individual_trajectories", False) or os.getenv("SAVE_INDIVIDUAL_TRAJECTORIES", "").lower() in ("1", "true", "yes")
+        
+        # 添加文件锁用于跨平台兼容
+        self._file_locks = {}
+        self._lock_mutex = threading.Lock()
     
     @property
     def runtime_id(self) -> str:
@@ -136,7 +179,8 @@ class LightweightSandboxRuntime(RuntimeInterface):
         try:
             # 记录任务开始
             metrics.record_task_start(task.task_id, 'sandbox')
-              # 是否使用缓存
+            
+            # 是否使用缓存
             cached_code = None
             if not self.disable_cache:
                 # 检查缓存
@@ -197,7 +241,7 @@ LLM提供商: {self.llm_client.provider.value}
                     observation=code,
                     thinking=generation_thinking,
                     execution_code=code,
-                    success=True,
+                    success=True,  # 代码生成成功
                     timestamp=start_time
                 ),
                 ExecutionStep(
@@ -207,7 +251,7 @@ LLM提供商: {self.llm_client.provider.value}
                     observation=execution_result["output"],
                     thinking=execution_thinking,
                     execution_code=code,
-                    success=execution_result["success"],
+                    success=execution_result["success"],  # 基于实际执行结果
                     error_type=execution_result.get("error_type"),
                     error_message=execution_result.get("error"),
                     timestamp=time.time()
@@ -240,7 +284,7 @@ LLM提供商: {self.llm_client.provider.value}
                 metadata=enhanced_metadata            )
             # 记录指标
             if result.success:
-                metrics.record_task_completed(task.task_id, 'sandbox', True)
+                metrics.record_task_completed(task.task_id, 'sandbox', result.success)
             else:
                 metrics.record_task_failure(task.task_id, 'sandbox', result.error_type.value if result.error_type else "unknown")
             return result
@@ -504,36 +548,111 @@ LLM思考过程:
                 logger.error(f"Error in consumer loop: {e}")
                 await asyncio.sleep(5)
     
+    def _acquire_file_lock(self, file_path: str) -> bool:
+        """跨平台文件锁获取"""
+        with self._lock_mutex:
+            if file_path in self._file_locks:
+                return False  # 已被锁定
+            
+            if HAS_FCNTL:
+                # Unix系统使用fcntl
+                try:
+                    lock_file = file_path + ".lock"
+                    fd = os.open(lock_file, os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self._file_locks[file_path] = fd
+                    return True
+                except (OSError, IOError):
+                    return False
+            else:
+                # Windows系统使用线程锁
+                lock = threading.Lock()
+                if lock.acquire(blocking=False):
+                    self._file_locks[file_path] = lock
+                    return True
+                return False
+    
+    def _release_file_lock(self, file_path: str):
+        """释放文件锁"""
+        with self._lock_mutex:
+            if file_path in self._file_locks:
+                lock_obj = self._file_locks.pop(file_path)
+                
+                if HAS_FCNTL and isinstance(lock_obj, int):
+                    # Unix系统释放fcntl锁
+                    try:
+                        fcntl.flock(lock_obj, fcntl.LOCK_UN)
+                        os.close(lock_obj)
+                        # 清理锁文件
+                        lock_file = file_path + ".lock"
+                        if os.path.exists(lock_file):
+                            os.unlink(lock_file)
+                    except (OSError, IOError):
+                        pass
+                elif not HAS_FCNTL and hasattr(lock_obj, 'release'):
+                    # Windows系统释放线程锁
+                    lock_obj.release()
+    
     async def _save_trajectory(self, result: TrajectoryResult):
-        """保存轨迹到集合文件"""
+        """保存轨迹到集合文件（跨平台文件锁保护）"""
         output_dir = "/app/output/trajectories"
         os.makedirs(output_dir, exist_ok=True)
         
         # 集合文件路径
         collection_file = os.path.join(output_dir, "trajectories_collection.json")
         
-        # 读取现有集合或创建新集合
-        trajectories = []
-        if os.path.exists(collection_file):
-            try:
-                with open(collection_file, 'r', encoding='utf-8') as f:
-                    trajectories = json.load(f)
-                    # 确保trajectories是一个列表
-                    if not isinstance(trajectories, list):
-                        trajectories = []
-            except (json.JSONDecodeError, Exception) as e:
-                logger.error(f"Error reading trajectories collection: {e}")
-                # 如果文件损坏，创建新的集合
-                trajectories = []
+        # 尝试获取文件锁，最多等待5秒
+        max_retries = 50
+        retry_delay = 0.1
         
-        # 将新轨迹添加到集合中
-        trajectories.append(result.to_dict())
+        for attempt in range(max_retries):
+            if self._acquire_file_lock(collection_file):
+                break
+            await asyncio.sleep(retry_delay)
+        else:
+            logger.warning(f"Could not acquire file lock for {collection_file}, proceeding without lock")
         
-        # 将更新后的集合写入文件
-        with open(collection_file, 'w', encoding='utf-8') as f:
-            json.dump(trajectories, f, indent=2, ensure_ascii=False)
+        try:
+            # 读取现有集合或创建新集合
+            trajectories = []
+            if os.path.exists(collection_file):
+                try:
+                    with open(collection_file, 'r', encoding='utf-8') as f:
+                        trajectories = json.load(f)
+                        # 确保trajectories是一个列表
+                        if not isinstance(trajectories, list):
+                            trajectories = []
+                except (json.JSONDecodeError, Exception) as e:
+                    logger.error(f"Error reading trajectories collection: {e}")
+                    # 如果文件损坏，创建新的集合
+                    trajectories = []
             
-        logger.info(f"Trajectory added to collection: {collection_file}")
+            # 将新轨迹添加到集合中
+            trajectories.append(result.to_dict())
+            
+            # 原子性写入：先写入临时文件，再重命名
+            temp_file = collection_file + ".tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(trajectories, f, indent=2, ensure_ascii=False)
+            
+            # 原子性重命名
+            os.rename(temp_file, collection_file)
+            
+            logger.info(f"Trajectory safely added to collection: {collection_file}")
+            
+        except Exception as e:
+            logger.error(f"Error saving trajectory: {e}")
+            # 清理可能的临时文件
+            temp_file = collection_file + ".tmp"
+            if os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+            raise
+        finally:
+            # 释放文件锁
+            self._release_file_lock(collection_file)
         
         # 同时也保存单独的文件（可选）
         if self.config.get("save_individual_trajectories", False):
@@ -584,6 +703,11 @@ LLM思考过程:
     
     async def cleanup(self):
         """清理资源"""
+        # 清理所有文件锁
+        with self._lock_mutex:
+            for file_path in list(self._file_locks.keys()):
+                self._release_file_lock(file_path)
+        
         await self.redis.close()
 
 async def main():

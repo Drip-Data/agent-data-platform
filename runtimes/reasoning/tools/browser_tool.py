@@ -20,24 +20,43 @@ class BrowserTool:
         self.browser: Optional[Browser] = None
         self.page: Optional[Page] = None
         self._initialized = False
+        self._init_lock = asyncio.Lock()  # 添加异步锁防止竞态条件
     
     async def initialize(self):
-        """初始化浏览器"""
-        if self._initialized:
-            return
-        
+        """初始化浏览器（线程安全）"""
+        async with self._init_lock:  # 使用锁确保只有一个初始化过程
+            if self._initialized:
+                return
+            
+            try:
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-dev-shm-usage']
+                )
+                self.page = await self.browser.new_page()
+                self._initialized = True
+                logger.info("Browser tool initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize browser: {e}")
+                # 确保在初始化失败时清理已创建的资源
+                await self._cleanup_on_init_failure()
+                raise
+    
+    async def _cleanup_on_init_failure(self):
+        """初始化失败时的清理"""
         try:
-            self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-dev-shm-usage']
-            )
-            self.page = await self.browser.new_page()
-            self._initialized = True
-            logger.info("Browser tool initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize browser: {e}")
-            raise
+            if self.page:
+                await self.page.close()
+                self.page = None
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+            if self.playwright:
+                await self.playwright.stop()
+                self.playwright = None
+        except Exception as cleanup_error:
+            logger.error(f"Error during initialization cleanup: {cleanup_error}")
     
     async def navigate(self, url: str) -> Dict[str, Any]:
         """导航到指定URL"""

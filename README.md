@@ -128,8 +128,14 @@ HEALTH_CHECK_INTERVAL=30
 ### 性能调优
 
 ```bash
-# 扩展运行时实例
+# 扩展运行时实例（注意：每个runtime使用不同的metrics端口）
 docker-compose up -d --scale sandbox-runtime=4 --scale reasoning-runtime=2
+
+# 各运行时的指标端口分配：
+# - sandbox-runtime: 8001
+# - web-runtime: 8002  
+# - reasoning-runtime: 8003
+# - dispatcher: 8004
 
 # 调整并发限制
 export MAX_CONCURRENT_TASKS=20
@@ -144,7 +150,11 @@ export MEMORY_LIMIT=2g
 
 - **Prometheus**: http://localhost:9090
 - **Grafana**: http://localhost:3000 (admin/admin)
-- **Metrics API**: http://localhost:8001/metrics
+- **Runtime Metrics**: 
+  - Sandbox: http://localhost:8001/metrics
+  - Web Navigator: http://localhost:8002/metrics
+  - Reasoning: http://localhost:8003/metrics
+  - Dispatcher: http://localhost:8004/metrics
 
 ### 关键指标
 

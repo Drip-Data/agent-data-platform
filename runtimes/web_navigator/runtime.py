@@ -93,7 +93,8 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 
                 # 从缓存快速执行
                 result = await self._execute_cached_actions(task, cached_result, trajectory_id)
-                metrics.record_task_completed(task.task_id, 'web_navigator', True)
+                # 修复：使用实际结果的成功状态而非硬编码True
+                metrics.record_task_completed(task.task_id, 'web_navigator', result.success)
                 return result
             
             # 缓存未命中，执行新导航
@@ -195,7 +196,8 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 }
             )
             
-            metrics.record_task_completed(task.task_id, 'web_navigator', True)
+            # 修复：使用实际结果的成功状态而非硬编码True
+            metrics.record_task_completed(task.task_id, 'web_navigator', result.success)
             return result
             
         except Exception as e:

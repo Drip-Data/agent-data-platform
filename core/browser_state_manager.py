@@ -82,12 +82,12 @@ class BrowserStateManager:
             self.current_url = url
             self.current_page_title = title
             self.available_links_on_page = []  # Clear links from previous page
-            self.last_extracted_text_snippet = None # Clear text from previous page
+            self.last_extracted_text_snippet = None  # Clear text from previous page
             logger.info(f"Navigation to '{url}' (Title: {title}) recorded as successful.")
         else:
             logger.warning(f"Navigation attempt to '{url}' failed. Error: {error_type_str} - {error_msg}")
-            if error_type_str: # Record the error for this specific action
-                 self.record_action_error("navigate", error_type_str, "browser")
+            if error_type_str:  # Record the error for this specific action
+                self.record_action_error("navigate", error_type_str, "browser")
 
 
     def record_text_extraction(self, text_content: str, snippet_length: int = 250):
