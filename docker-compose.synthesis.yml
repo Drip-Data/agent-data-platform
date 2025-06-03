@@ -1,0 +1,77 @@
+version: '3.8'
+
+# ====================================================================
+# 任务合成器扩展模块 - 独立部署配置
+# 本文件为原agent-data-platform项目的扩展模块
+# 可以独立部署，也可以与原系统集成
+# ====================================================================
+
+services:
+  # =================================================================
+  # Redis服务 - 数据存储和队列
+  # =================================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - agent-data-platform
+    restart: unless-stopped
+
+  # =================================================================
+  # 模块1: 智能任务合成器 (轨迹分析与任务生成)
+  # =================================================================
+  
+  # 任务合成器 - 模块1核心智能组件
+  synthesis:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # 合成器配置
+      - SYNTHESIS_ENABLED=${SYNTHESIS_ENABLED:-false}
+      - SYNTHESIS_DB=${SYNTHESIS_DB:-/app/output/synthesis.db}
+      # LLM API配置 (统一接口)
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+    depends_on:
+      - redis
+    volumes:
+      - ./output:/app/output
+      - ./core:/app/core
+    restart: unless-stopped
+    command: >
+      sh -c "
+      echo '🔧 Starting synthesis service initialization...' &&
+      python -m core.synthesiscore.cli.init_db &&
+      echo '✅ Database pre-initialization completed' &&
+      echo '🚀 Starting synthesis plugin...' &&
+      python -m core.synthesiscore.synthesis_plugin
+      "
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    networks:
+      - agent-data-platform
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3; conn = sqlite3.connect('/app/output/synthesis.db'); conn.execute('SELECT 1 FROM task_essences LIMIT 1'); conn.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  agent-data-platform:
+    external: true
+
+volumes:
+  synthesis_data:
+  redis_data: 

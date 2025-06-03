@@ -135,6 +135,38 @@ class TrajectoryResult:
             'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.created_at))
         }
     
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'TrajectoryResult':
+        """从字典创建TrajectoryResult实例"""
+        # 处理steps
+        steps = []
+        for step_data in data.get('steps', []):
+            step = ExecutionStep(
+                step_id=step_data['step_id'],
+                action_type=ActionType(step_data['action_type']),
+                action_params=step_data['action_params'],
+                observation=step_data['observation'],
+                success=step_data['success'],
+                error_type=ErrorType(step_data['error_type']) if step_data.get('error_type') else None,
+                error_message=step_data.get('error_message'),
+                timestamp=step_data.get('timestamp', time.time()),
+                duration=step_data.get('duration', 0.0)
+            )
+            steps.append(step)
+        
+        return cls(
+            task_id=data['task_id'],
+            runtime_id=data['runtime_id'],
+            success=data['success'],
+            steps=steps,
+            final_result=data['final_result'],
+            error_type=ErrorType(data['error_type']) if data.get('error_type') else None,
+            error_message=data.get('error_message'),
+            total_duration=data.get('total_duration', 0.0),
+            metadata=data.get('metadata', {}),
+            created_at=data.get('created_at', time.time())
+        )
+    
     def json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
 
