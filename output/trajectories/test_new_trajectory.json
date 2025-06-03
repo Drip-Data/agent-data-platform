@@ -1,0 +1,43 @@
+{
+  "trajectories": [
+    {
+      "trajectory_id": "test_2025_001",
+      "task_type": "web",
+      "description": "使用搜索引擎查找机器学习课程信息",
+      "steps": [
+        {
+          "step_id": 1,
+          "action_type": "web_click",
+          "description": "打开浏览器，访问百度搜索页面",
+          "observation": "成功打开百度首页，显示搜索框",
+          "success": true
+        },
+        {
+          "step_id": 2, 
+          "action_type": "web_type",
+          "description": "在搜索框中输入'机器学习在线课程'",
+          "observation": "成功输入搜索关键词",
+          "success": true
+        },
+        {
+          "step_id": 3,
+          "action_type": "web_click", 
+          "description": "点击搜索按钮",
+          "observation": "显示搜索结果页面，包含多个机器学习课程链接",
+          "success": true
+        },
+        {
+          "step_id": 4,
+          "action_type": "web_click",
+          "description": "点击第一个课程链接",
+          "observation": "成功进入课程详情页面，显示课程介绍和价格信息",
+          "success": true
+        }
+      ],
+      "final_result": {
+        "success": true,
+        "summary": "成功找到并查看了机器学习在线课程信息"
+      }
+    }
+  ]
+} 
