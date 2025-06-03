@@ -2,9 +2,20 @@
 
 ## 📋 概述
 
-Synthesis 模块是 Agent Data Platform 的智能任务合成器，用于分析轨迹数据并提取任务本质，存储到数据库中用于后续任务生成。本模块采用**完全容器化架构**，所有操作都通过统一的管理接口进行，确保环境一致性和操作简便性。
+Synthesis 模块是 Agent Data Platform 的智能任务合成器，负责从用户轨迹中提取任务本质并生成新的训练任务。本模块采用**完全容器化架构**，通过统一的管理接口提供轨迹分析、任务提取、数据存储等功能。
 
-## 🏗️ 架构概览
+## 🎯 核心功能
+
+### 💡 主要能力
+
+1. **轨迹分析**：自动分析JSON格式的用户执行轨迹
+2. **本质提取**：使用LLM从轨迹中提取任务本质（类型、领域、描述等）
+3. **任务生成**：基于提取的本质生成相似但不同的新任务
+4. **数据管理**：SQLite数据库存储，支持导出和统计
+5. **HTTP API**：完整的REST API接口
+6. **Redis集成**：支持命令队列和消息分发
+
+## 🏗️ 系统架构
 
 ### 🔧 核心组件
 
@@ -15,6 +26,7 @@ core/synthesiscore/
 ├── synthesis_manager.py      # 服务统一管理器 - 命令行控制接口
 ├── docker_manager.py         # Docker容器管理器 - 容器生命周期管理
 ├── init_synthesis_db.py      # 数据库初始化脚本
+├── generate_tasks.py         # 任务生成工具
 └── __init__.py              # 模块初始化
 ```
 
@@ -22,26 +34,44 @@ core/synthesiscore/
 
 ```
 Docker Compose 服务
-├── synthesis                 # 主服务容器
-│   ├── HTTP API (端口8081)  # REST API服务
-│   ├── Redis Worker         # 队列任务处理
+├── synthesis                 # 主服务容器 (8081端口)
+│   ├── HTTP API             # REST API服务
+│   ├── Redis Worker         # 队列任务处理器
 │   └── 数据库管理           # SQLite数据库操作
-├── redis                    # Redis服务 (端口6379) 
+├── redis                    # Redis服务 (6379端口) 
 └── agent-data-platform      # Docker网络
+```
+
+### 📊 数据流程
+
+```
+轨迹文件 → Synthesis分析 → LLM提取本质 → 存储数据库 → 生成新任务
+    ↓
+output/trajectories/ → synthesis容器 → Gemini API → SQLite DB → Redis队列
 ```
 
 ## 🚀 快速开始
 
-### 1. 环境准备
+### 1. 环境要求
 
-确保系统已安装：
-- Docker (推荐 20.10+)
-- Docker Compose (推荐 2.0+)
+**必需环境：**
+- Docker 20.10+
+- Docker Compose 2.0+
 - Python 3.9+ (用于管理工具)
 
-### 2. 镜像构建与部署
+**API密钥配置：**
+```bash
+# 设置Gemini API密钥（必需）
+export GEMINI_API_KEY="your_gemini_api_key"
 
-#### 🎯 一键完整部署
+# 可选的其他LLM API配置
+export DEEPSEEK_API_KEY="your_deepseek_key"
+export OPENAI_API_KEY="your_openai_key"
+```
+
+### 2. 一键部署
+
+#### 🎯 完整部署（推荐）
 
 ```bash
 # 完整部署流程 - 自动构建镜像、创建网络、启动服务
@@ -49,12 +79,12 @@ python core/synthesiscore/docker_manager.py deploy
 ```
 
 这个命令会自动执行：
-1. 检查Docker环境
-2. 创建Docker网络
-3. 构建synthesis镜像  
-4. 启动所有服务
-5. 等待服务健康检查
-6. 显示部署状态
+1. ✅ 检查Docker环境
+2. 🌐 创建Docker网络
+3. 🔨 构建synthesis镜像  
+4. 🚀 启动所有服务
+5. ⏳ 等待服务健康检查
+6. 📊 显示部署状态
 
 #### 🔧 分步部署（高级用户）
 
@@ -85,7 +115,7 @@ python core/synthesiscore/synthesis_manager.py health
 python core/synthesiscore/docker_manager.py status
 ```
 
-预期输出：
+**预期输出：**
 ```
 ✅ Synthesis服务运行正常
    Redis状态: connected
@@ -190,22 +220,36 @@ python core/synthesiscore/synthesis_manager.py clear
 
 ### 🎯 轨迹处理和任务生成
 
-#### 轨迹分析
+#### 轨迹分析操作
 
 ```bash
-# 处理指定轨迹文件中的所有轨迹
-python core/synthesiscore/synthesis_manager.py generate /path/to/trajectory_file.json
-
-# 通过HTTP API触发处理所有轨迹文件
+# 方法1: 使用HTTP API处理所有轨迹文件
 curl -X POST http://localhost:8081/trigger/full
 
-# 只处理新的（未处理的）轨迹
+# 方法2: 只处理新的（未处理的）轨迹
 curl -X POST http://localhost:8081/trigger/new  
 
-# 处理指定轨迹文件
+# 方法3: 处理指定轨迹文件
 curl -X POST http://localhost:8081/trigger/specific \
   -H "Content-Type: application/json" \
   -d '{"filename": "trajectory_20241220_001.json"}'
+
+# 方法4: 使用命令行工具
+python core/synthesiscore/synthesis_manager.py generate /path/to/trajectory_file.json
+```
+
+#### 任务生成操作
+
+```bash
+# 基于现有本质手动生成2个任务
+curl -X POST http://localhost:8081/generate \
+  -H "Content-Type: application/json" \
+  -d '{"count": 2}'
+
+# 基于指定本质生成任务
+curl -X POST http://localhost:8081/generate/essence \
+  -H "Content-Type: application/json" \
+  -d '{"essence_id": "essence_xxx"}'
 ```
 
 #### 数据查看和分析
@@ -224,28 +268,44 @@ curl -s http://localhost:8081/db/tasks | python -m json.tool
 curl -s http://localhost:8081/db/stats | python -m json.tool
 ```
 
-## 📊 API 接口文档
+## 📊 HTTP API 接口完整文档
 
-### HTTP API 端点
+### API 基础信息
 
-synthesis服务提供完整的HTTP API接口（端口8081）：
+- **基础URL**: `http://localhost:8081`
+- **响应格式**: JSON
+- **健康检查**: `GET /health`
+
+### 完整端点列表
 
 ```bash
 # 查看所有可用端点
 curl -s http://localhost:8081/ | python -m json.tool
 ```
 
-#### 核心功能端点
+#### 🔧 系统管理端点
 
 | 端点 | 方法 | 功能 | 示例 |
 |------|------|------|------|
 | `/health` | GET | 健康检查 | `curl http://localhost:8081/health` |
 | `/status` | GET | 服务状态 | `curl http://localhost:8081/status` |
+| `/init-db` | POST | 初始化数据库 | `curl -X POST http://localhost:8081/init-db` |
+
+#### 🎯 轨迹处理端点
+
+| 端点 | 方法 | 功能 | 示例 |
+|------|------|------|------|
 | `/trigger/full` | POST | 处理所有轨迹 | `curl -X POST http://localhost:8081/trigger/full` |
 | `/trigger/new` | POST | 处理新轨迹 | `curl -X POST http://localhost:8081/trigger/new` |
 | `/trigger/specific` | POST | 处理指定轨迹 | `curl -X POST -H "Content-Type: application/json" -d '{"filename":"file.json"}' http://localhost:8081/trigger/specific` |
 
-#### 数据库管理端点
+#### 🧬 任务生成端点
+
+| 端点 | 方法 | 功能 | 示例 |
+|------|------|------|------|
+| `/generate` | POST | 生成新任务 | `curl -X POST -H "Content-Type: application/json" -d '{"count":3}' http://localhost:8081/generate` |
+
+#### 📊 数据库操作端点
 
 | 端点 | 方法 | 功能 | 示例 |
 |------|------|------|------|
@@ -253,7 +313,39 @@ curl -s http://localhost:8081/ | python -m json.tool
 | `/db/stats` | GET | 数据库统计 | `curl http://localhost:8081/db/stats` |
 | `/db/export` | GET | 导出数据 | `curl http://localhost:8081/db/export` |
 | `/db/clear` | POST | 清空数据库 | `curl -X POST http://localhost:8081/db/clear` |
-| `/init-db` | POST | 初始化数据库 | `curl -X POST http://localhost:8081/init-db` |
+| `/view` | GET | 查看数据库内容 | `curl http://localhost:8081/view` |
+
+### API 响应示例
+
+#### 健康检查响应
+```json
+{
+    "status": "healthy",
+    "redis": "connected"
+}
+```
+
+#### 数据库统计响应
+```json
+{
+    "essences": {
+        "total": 6,
+        "by_type": {
+            "code": 2,
+            "web": 4
+        },
+        "by_domain": {
+            "algorithm": 2,
+            "web_automation": 4
+        }
+    },
+    "generated_tasks": {
+        "total": 2,
+        "executed": 0,
+        "pending": 2
+    }
+}
+```
 
 ## 🔧 配置说明
 
@@ -285,6 +377,35 @@ environment:
 volumes:
   - ./output:/app/output              # 轨迹和数据库文件
   - ./core:/app/core                  # 源代码（开发模式）
+```
+
+### 轨迹文件格式
+
+支持的轨迹文件格式：
+
+```json
+{
+  "trajectories": [
+    {
+      "trajectory_id": "test_001",
+      "task_type": "web",
+      "description": "任务描述",
+      "steps": [
+        {
+          "step_id": 1,
+          "action_type": "web_click",
+          "description": "操作描述",
+          "observation": "观察结果",
+          "success": true
+        }
+      ],
+      "final_result": {
+        "success": true,
+        "summary": "任务执行结果"
+      }
+    }
+  ]
+}
 ```
 
 ## 🔍 故障排除
@@ -344,6 +465,21 @@ docker-compose -f docker-compose.synthesis.yml restart redis
 docker-compose -f docker-compose.synthesis.yml exec redis redis-cli ping
 ```
 
+#### 5. LLM API调用失败
+
+```bash
+# 检查API密钥是否设置
+echo $GEMINI_API_KEY
+
+# 查看worker日志中的API调用错误
+python core/synthesiscore/docker_manager.py logs synthesis | grep "httpx"
+
+# 手动测试API连接
+curl -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"contents":[{"parts":[{"text":"Hello"}]}]}'
+```
+
 ### 重置和重新部署
 
 ```bash
@@ -380,6 +516,9 @@ python core/synthesiscore/synthesis_manager.py stats
 
 # 导出处理报告
 python core/synthesiscore/synthesis_manager.py export --format jsonl > synthesis_report.jsonl
+
+# 查看Redis队列状态
+docker exec -it agent-data-platform-redis-1 redis-cli XLEN synthesis:commands
 ```
 
 ## 🚨 重要注意事项
@@ -394,7 +533,7 @@ python core/synthesiscore/synthesis_manager.py export --format jsonl > synthesis
 
 1. **存储空间**：监控 `output/` 目录的磁盘使用情况
 2. **内存使用**：synthesis服务可能消耗较多内存，建议分配至少2GB
-3. **API限制**：注意LLM API的调用频率限制
+3. **API限制**：注意LLM API的调用频率限制和配额
 
 ### 版本兼容
 
@@ -430,8 +569,6 @@ python core/synthesiscore/synthesis_manager.py stats
 python core/synthesiscore/synthesis_manager.py clear
 python core/synthesiscore/synthesis_manager.py init
 ```
-
----
 
 ## 📚 完整命令参考
 
@@ -470,4 +607,35 @@ python core/synthesiscore/synthesis_manager.py [命令]
   status     # 服务状态
 ```
 
-通过这个统一的管理架构，你可以轻松地管理整个synthesis系统，从容器部署到功能操作，一切都通过标准化的命令接口完成！
+## 🎯 使用示例
+
+### 完整工作流程示例
+
+```bash
+# 1. 部署服务
+python core/synthesiscore/docker_manager.py deploy
+
+# 2. 检查状态
+python core/synthesiscore/synthesis_manager.py health
+
+# 3. 准备轨迹文件到 output/trajectories/ 目录
+
+# 4. 处理轨迹文件
+curl -X POST http://localhost:8081/trigger/full
+
+# 5. 查看提取的本质
+curl -s http://localhost:8081/db/stats | python -m json.tool
+
+# 6. 生成新任务
+curl -X POST http://localhost:8081/generate \
+  -H "Content-Type: application/json" \
+  -d '{"count": 5}'
+
+# 7. 查看生成的任务
+python core/synthesiscore/synthesis_manager.py tasks
+
+# 8. 导出数据
+python core/synthesiscore/synthesis_manager.py export --format jsonl > tasks.jsonl
+```
+
+通过这个统一的管理架构，你可以轻松地管理整个synthesis系统，从容器部署到功能操作，一切都通过标准化的命令接口完成！🚀

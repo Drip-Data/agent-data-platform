@@ -166,9 +166,12 @@ class SimpleSynthesizer:
         logger.info("2. Redis command: XADD synthesis:commands command process_trajectories")
         logger.info("3. Redis command: XADD synthesis:commands command process_specific trajectory_file.json")
         
+        # 首先处理队列中现有的命令
+        await self._process_pending_commands()
+        
         while True:
             try:
-                # 监听synthesis:commands队列
+                # 监听synthesis:commands队列，使用$表示从当前最新位置开始读取新消息
                 streams = {"synthesis:commands": "$"}
                 result = await self.redis.xread(streams, count=1, block=5000)  # 5秒超时
                 
@@ -182,6 +185,28 @@ class SimpleSynthesizer:
             except Exception as e:
                 logger.error(f"Error listening for synthesis commands: {e}")
                 await asyncio.sleep(10)
+
+    async def _process_pending_commands(self):
+        """处理队列中现有的待处理命令"""
+        try:
+            # 读取队列中所有现有命令
+            result = await self.redis.xread({"synthesis:commands": "0"}, count=100)
+            
+            if result:
+                for stream_name, messages in result:
+                    logger.info(f"Found {len(messages)} pending commands in queue")
+                    for message_id, fields in messages:
+                        logger.info(f"Processing pending command: {message_id}")
+                        await self._handle_synthesis_command(fields)
+                        # 删除已处理的命令
+                        await self.redis.xdel("synthesis:commands", message_id)
+                        
+                logger.info("✅ All pending commands processed")
+            else:
+                logger.info("No pending commands found")
+                
+        except Exception as e:
+            logger.error(f"Error processing pending commands: {e}")
 
     async def _handle_synthesis_command(self, command_fields: dict):
         """处理合成指令"""

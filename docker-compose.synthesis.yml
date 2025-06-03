@@ -56,7 +56,10 @@ services:
       echo '📝 Initializing database...' &&
       python -m core.synthesiscore.init_synthesis_db &&
       echo '🔄 Starting synthesis worker and API...' &&
-      python -m core.synthesiscore.synthesis &
+      python -m core.synthesiscore.synthesis > /tmp/synthesis_worker.log 2>&1 &
+      echo 'Worker started with PID:' $! &&
+      sleep 2 &&
+      echo 'Starting API server...' &&
       python -m core.synthesiscore.synthesis_api
       "
     logging:
