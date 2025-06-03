@@ -25,6 +25,7 @@ class ErrorType(Enum):
     BROWSER_ERROR = "browser_error"
     SYSTEM_ERROR = "system_error"
     TOOL_ERROR = "tool_error"
+    EXECUTION_ERROR = "ExecutionError"
 
 @dataclass
 class TaskSpec:
@@ -75,6 +76,14 @@ class ExecutionStep:
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式，用于日志和序列化"""
+        # 安全处理error_type，可能是字符串或ErrorType枚举
+        error_type_value = None
+        if self.error_type:
+            if hasattr(self.error_type, 'value'):
+                error_type_value = self.error_type.value
+            else:
+                error_type_value = str(self.error_type)
+        
         return {
             'step_id': self.step_id,
             'action_type': self.action_type.value if hasattr(self.action_type, 'value') else str(self.action_type),
@@ -83,7 +92,7 @@ class ExecutionStep:
             'success': self.success,
             'thinking': self.thinking,
             'execution_code': self.execution_code,
-            'error_type': self.error_type.value if self.error_type else None,
+            'error_type': error_type_value,
             'error_message': self.error_message,
             'timestamp': self.timestamp,
             'duration': self.duration
@@ -106,6 +115,14 @@ class TrajectoryResult:
     created_at: float = field(default_factory=time.time)
     
     def to_dict(self) -> Dict:
+        # 安全处理error_type
+        error_type_value = None
+        if self.error_type:
+            if hasattr(self.error_type, 'value'):
+                error_type_value = self.error_type.value
+            else:
+                error_type_value = str(self.error_type)
+        
         return {
             'task_id': self.task_id,  # 将task_id放在第一行
             'task_name': self.task_name,
@@ -121,14 +138,14 @@ class TrajectoryResult:
                     'thinking': s.thinking,
                     'execution_code': s.execution_code,
                     'success': s.success,
-                    'error_type': s.error_type.value if s.error_type else None,
+                    'error_type': s.error_type.value if s.error_type and hasattr(s.error_type, 'value') else (str(s.error_type) if s.error_type else None),
                     'error_message': s.error_message,
                     'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(s.timestamp)),
                     'duration': s.duration
                 } for s in self.steps
             ],
             'final_result': self.final_result,
-            'error_type': self.error_type.value if self.error_type else None,
+            'error_type': error_type_value,
             'error_message': self.error_message,
             'total_duration': self.total_duration,
             'metadata': self.metadata,

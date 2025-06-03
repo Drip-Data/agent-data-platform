@@ -1,23 +1,37 @@
 #!/usr/bin/env python3
 """
-简单任务合成器MVP - 集成到现有系统
-复用现有LLM客户端，实现基础的轨迹反馈和任务生成
+任务合成器模块 - 基于轨迹学习的种子任务生成系统
+
+专注于通过分析agent执行轨迹，提取任务本质，并生成高质量的种子任务。
+完全移除数据库依赖，使用JSON文件进行数据存储。
+
+主要功能：
+1. 轨迹分析：深度理解agent行为模式
+2. 本质提取：识别任务的核心特征和成功要素  
+3. 种子生成：基于本质创造新的训练任务
+4. 自动监控：实时跟踪轨迹文件变化
 """
 
-import asyncio
-import json
-import logging
 import os
-import time
-import sqlite3
-from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
-from datetime import datetime
-import redis.asyncio as redis
+import sys
+import json
+import asyncio
+import logging
 import threading
-from pathlib import Path
-from collections import defaultdict
+import time
 import uuid
+import hashlib
+from datetime import datetime
+from pathlib import Path
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Any
+from collections import defaultdict
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+import aiofiles
+import redis
+import redis.asyncio as async_redis
 
 from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType
 from ..llm_client import LLMClient
@@ -36,127 +50,465 @@ class TaskEssence:
     extracted_at: str
     source_trajectory_id: str
 
+class TrajectoryHandler(FileSystemEventHandler):
+    """轨迹文件变化处理器"""
+    
+    def __init__(self, synthesis_instance, target_file_path):
+        self.synthesis = synthesis_instance
+        self.target_file_path = target_file_path
+        
+    def on_created(self, event):
+        if not event.is_directory and event.src_path == self.target_file_path:
+            logger.info(f"🔔 检测到轨迹集合文件创建: {event.src_path}")
+            # 使用线程安全的方式触发处理
+            self._trigger_processing()
+    
+    def on_modified(self, event):
+        if not event.is_directory and event.src_path == self.target_file_path:
+            logger.info(f"🔔 检测到轨迹集合文件修改: {event.src_path}")
+            # 使用线程安全的方式触发处理
+            self._trigger_processing()
+    
+    def _trigger_processing(self):
+        """线程安全地触发轨迹处理"""
+        try:
+            # 使用Redis发送处理命令，而不是直接调用异步函数
+            redis_client = redis.from_url(self.synthesis.config["redis_url"])
+            redis_client.xadd(
+                "synthesis:commands",
+                {
+                    "command": "process_trajectories",
+                    "timestamp": time.time(),
+                    "source": "file_watcher"
+                }
+            )
+            logger.info("📨 已发送轨迹处理命令到Redis队列")
+        except Exception as e:
+            logger.error(f"❌ 发送处理命令失败: {e}")
+
 class SimpleSynthesizer:
-    """简单任务合成器 - MVP版本"""
+    """简单任务合成器 - 基于JSON文件存储"""
     
     def __init__(self, config: Dict):
         self.config = config
-        self.redis = redis.from_url(config["redis_url"])
+        self.redis = async_redis.from_url(config["redis_url"])  # 使用异步redis客户端
         self.llm_client = LLMClient(config)
-        self.db_path = config.get("synthesis_db", "/app/output/synthesis.db")
         self.enabled = config.get("synthesis_enabled", False)
-        self.processed_json_path = "/app/output/processed_trajectories.json"
-        self._processed_lock = threading.Lock()
-        self._ensure_processed_json()
         
-        # 初始化数据库
-        self._init_database()
+        # 使用容器内路径
+        self.task_essences_path = "/app/output/task_essences.json"
+        self.seed_tasks_path = "/app/output/seed_tasks.jsonl"
+        self.processed_trajectories_path = "/app/output/processed_trajectories.json"  # 新增：已处理轨迹记录文件
+        self.auto_monitor_enabled = config.get("auto_monitor_trajectories", True)
+        self.auto_export_seeds = config.get("auto_export_seeds", True)
+        
+        # 指定监控的轨迹集合文件 - 使用容器内路径
+        self.trajectories_collection_path = "/app/output/trajectories/trajectories_collection.json"
+        self.observer = None
+        
+        # 文件锁
+        self._file_lock = threading.Lock()
+        
+        # 已处理轨迹的记录（从文件加载）
+        self.processed_trajectories = set()
+        
+        # 初始化JSON文件
+        self._init_json_files()
+        
+        # 加载已处理的轨迹列表
+        self._load_processed_trajectories()
     
-    def _init_database(self):
-        """初始化SQLite数据库，带重试机制"""
-        max_retries = 5
-        retry_delay = 2  # 秒
-        
-        for attempt in range(max_retries):
-            try:
-                os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-                
-                with sqlite3.connect(self.db_path) as conn:
-                    # 设置数据库参数提高稳定性
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    conn.execute("PRAGMA synchronous=NORMAL")
-                    conn.execute("PRAGMA cache_size=10000")
-                    
-                    # 创建任务本质表
-                    conn.execute('''
-                        CREATE TABLE IF NOT EXISTS task_essences (
-                            essence_id TEXT PRIMARY KEY,
-                            task_type TEXT,
-                            domain TEXT,
-                            query TEXT,
-                            complexity_level TEXT,
-                            success_pattern TEXT,
-                            extracted_at TEXT,
-                            source_trajectory_id TEXT
-                        )
-                    ''')
-                    
-                    # 创建生成任务表
-                    conn.execute('''
-                        CREATE TABLE IF NOT EXISTS generated_tasks (
-                            task_id TEXT PRIMARY KEY,
-                            source_essence_id TEXT,
-                            task_spec TEXT,
-                            generated_at TEXT,
-                            executed BOOLEAN DEFAULT FALSE
-                        )
-                    ''')
-                    
-                    # 验证表是否创建成功
-                    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                    tables = [row[0] for row in cursor.fetchall()]
-                    
-                    if 'task_essences' not in tables or 'generated_tasks' not in tables:
-                        raise Exception("Failed to create required tables")
-                    
-                    # 测试写入权限
-                    conn.execute("INSERT OR IGNORE INTO task_essences VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-                               ("test_init", "test", "test", "test", "test", "{}", 
-                                datetime.now().isoformat(), "test"))
-                    conn.execute("DELETE FROM task_essences WHERE essence_id = ?", ("test_init",))
-                    
-                    conn.commit()
-                    
-                logger.info(f"Database initialized successfully at {self.db_path}")
-                return
-                
-            except Exception as e:
-                logger.warning(f"Database initialization attempt {attempt + 1}/{max_retries} failed: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # 指数退避
-                else:
-                    raise Exception(f"Failed to initialize database after {max_retries} attempts: {e}")
-
-    def _verify_database_ready(self) -> bool:
-        """验证数据库是否准备就绪"""
+    def _init_json_files(self):
+        """初始化JSON存储文件"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                # 检查表是否存在且可用
-                conn.execute("SELECT COUNT(*) FROM task_essences LIMIT 1")
-                conn.execute("SELECT COUNT(*) FROM generated_tasks LIMIT 1")
-                return True
+            # 创建输出目录
+            os.makedirs(os.path.dirname(self.task_essences_path), exist_ok=True)
+            os.makedirs(os.path.dirname(self.seed_tasks_path), exist_ok=True)
+            
+            # 初始化任务本质文件
+            if not os.path.exists(self.task_essences_path):
+                self._save_json_file(self.task_essences_path, [])
+                logger.info(f"✅ 初始化任务本质文件: {self.task_essences_path}")
+            
+            # 初始化种子任务文件目录
+            if not os.path.exists(self.seed_tasks_path):
+                Path(self.seed_tasks_path).touch()
+                logger.info(f"✅ 初始化种子任务文件: {self.seed_tasks_path}")
+            
+            # 初始化已处理轨迹记录文件
+            if not os.path.exists(self.processed_trajectories_path):
+                self._save_json_file(self.processed_trajectories_path, [])
+                logger.info(f"✅ 初始化已处理轨迹记录文件: {self.processed_trajectories_path}")
+                
+            logger.info("✅ JSON文件存储初始化完成")
         except Exception as e:
-            logger.error(f"Database verification failed: {e}")
-            return False
+            logger.error(f"❌ JSON文件存储初始化失败: {e}")
+            raise
+
+    def _load_processed_trajectories(self):
+        """从文件加载已处理的轨迹列表"""
+        try:
+            processed_list = self._load_json_file(self.processed_trajectories_path, [])
+            self.processed_trajectories = set(processed_list)
+            
+            if self.processed_trajectories:
+                logger.info(f"📋 从文件加载了 {len(self.processed_trajectories)} 个已处理轨迹记录")
+                logger.debug(f"已处理轨迹列表: {list(self.processed_trajectories)[:5]}{'...' if len(self.processed_trajectories) > 5 else ''}")
+            else:
+                logger.info("📋 未发现已处理轨迹记录，从空白状态开始")
+                
+        except Exception as e:
+            logger.error(f"❌ 加载已处理轨迹记录失败: {e}")
+            self.processed_trajectories = set()
+
+    def _save_processed_trajectories(self):
+        """将已处理轨迹列表保存到文件"""
+        try:
+            processed_list = list(self.processed_trajectories)
+            success = self._save_json_file(self.processed_trajectories_path, processed_list)
+            if success:
+                logger.debug(f"💾 已保存 {len(processed_list)} 个已处理轨迹记录到文件")
+            else:
+                logger.error("❌ 保存已处理轨迹记录失败")
+        except Exception as e:
+            logger.error(f"❌ 保存已处理轨迹记录时出错: {e}")
+
+    def _load_json_file(self, filepath: str, default_value=None):
+        """线程安全地加载JSON文件"""
+        with self._file_lock:
+            try:
+                if os.path.exists(filepath):
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                else:
+                    return default_value if default_value is not None else []
+            except Exception as e:
+                logger.error(f"加载JSON文件失败 {filepath}: {e}")
+                return default_value if default_value is not None else []
+    
+    def _save_json_file(self, filepath: str, data):
+        """线程安全地保存JSON文件"""
+        with self._file_lock:
+            try:
+                # 创建临时文件，确保原子写入
+                temp_filepath = filepath + '.tmp'
+                with open(temp_filepath, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                
+                # 原子替换
+                os.replace(temp_filepath, filepath)
+                return True
+            except Exception as e:
+                logger.error(f"保存JSON文件失败 {filepath}: {e}")
+                return False
 
     async def start(self):
-        """启动合成器，等待触发指令而非自动处理"""
+        """启动合成器，支持自动轨迹监控和种子数据导出"""
         if not self.enabled:
             logger.info("Task synthesis is disabled")
             return
             
-        logger.info("Starting simple task synthesizer...")
+        logger.info("🚀 启动基于JSON的任务合成器...")
         
-        # 等待数据库初始化完成
-        max_wait = 30  # 最大等待30秒
-        wait_interval = 2
-        elapsed = 0
+        # 启动自动轨迹监控（如果启用）
+        if self.auto_monitor_enabled:
+            await self._start_trajectory_monitoring()
         
-        while elapsed < max_wait:
-            if self._verify_database_ready():
-                logger.info("Database verification passed, ready for manual synthesis")
-                break
-            
-            logger.info(f"Waiting for database initialization... ({elapsed}s/{max_wait}s)")
-            await asyncio.sleep(wait_interval)
-            elapsed += wait_interval
-        else:
-            logger.error("Database initialization timeout, exiting")
-            return
-        
-        # 启动指令监听器，而非自动处理
+        # 启动指令监听器
         await self._listen_for_synthesis_commands()
+
+    async def _start_trajectory_monitoring(self):
+        """启动轨迹文件自动监控 - 专门监控trajectories_collection.json"""
+        try:
+            logger.info("🔍 启动轨迹集合文件监控...")
+            
+            # 检查目标文件是否存在
+            target_dir = os.path.dirname(self.trajectories_collection_path)
+            if not os.path.exists(target_dir):
+                logger.warning(f"⚠️ 轨迹目录不存在，创建目录: {target_dir}")
+                os.makedirs(target_dir, exist_ok=True)
+            
+            logger.info(f"📁 监控文件: {self.trajectories_collection_path}")
+            
+            # 创建文件监控器
+            self.observer = Observer()
+            handler = TrajectoryHandler(self, self.trajectories_collection_path)
+            
+            # 监控轨迹集合文件所在目录
+            self.observer.schedule(handler, target_dir, recursive=False)
+            self.observer.start()
+            
+            logger.info(f"✅ 自动轨迹监控已启动，监控文件: {self.trajectories_collection_path}")
+            
+            # 处理现有的轨迹集合文件（如果存在）
+            if os.path.exists(self.trajectories_collection_path):
+                await self._process_trajectories_collection()
+            else:
+                logger.info(f"📝 轨迹集合文件尚不存在: {self.trajectories_collection_path}")
+                
+        except Exception as e:
+            logger.error(f"❌ 启动轨迹监控失败: {e}")
+    
+    async def _process_trajectories_collection(self):
+        """处理trajectories_collection.json文件中的轨迹"""
+        try:
+            if not os.path.exists(self.trajectories_collection_path):
+                logger.warning(f"⚠️ 轨迹集合文件不存在: {self.trajectories_collection_path}")
+                return
+            
+            logger.info(f"🔄 开始处理轨迹集合文件: {self.trajectories_collection_path}")
+            
+            # 读取轨迹集合数据
+            with open(self.trajectories_collection_path, 'r', encoding='utf-8') as f:
+                trajectories_data = json.load(f)
+            
+            if not isinstance(trajectories_data, list):
+                logger.error("❌ 轨迹集合文件格式错误，应为轨迹数组")
+                return
+            
+            new_essences = []
+            new_seed_tasks = []
+            processed_count = 0
+            skipped_count = 0
+            
+            logger.info(f"📊 轨迹集合包含 {len(trajectories_data)} 个轨迹")
+            
+            for i, trajectory_data in enumerate(trajectories_data):
+                try:
+                    # 生成轨迹唯一标识符
+                    trajectory_id = trajectory_data.get('task_id', f'trajectory_{i}')
+                    
+                    # 避免重复处理
+                    if self._is_trajectory_processed(trajectory_id):
+                        skipped_count += 1
+                        logger.debug(f"⏩ 跳过已处理的轨迹: {trajectory_id}")
+                        continue
+                    
+                    # 转换轨迹格式
+                    trajectory = self._convert_trajectory_format(trajectory_data)
+                    if trajectory and self._should_process_trajectory(trajectory):
+                        # 提取任务本质
+                        essence = await self._extract_essence(trajectory)
+                        if essence:
+                            # 保存本质到JSON文件
+                            new_essences.append(asdict(essence))
+                            
+                            # 直接转换为种子任务
+                            seed_task = self._convert_essence_to_seed(essence)
+                            if seed_task:
+                                new_seed_tasks.append(seed_task)
+                                processed_count += 1
+                                logger.info(f"✅ 生成任务本质和种子任务: {trajectory_id}")
+                                
+                                # 标记为已处理
+                                self._mark_trajectory_processed(trajectory_id)
+                        
+                except Exception as e:
+                    logger.error(f"❌ 处理第{i+1}个轨迹时出错: {e}")
+                    continue
+            
+            # 保存新的任务本质
+            if new_essences:
+                await self._save_new_essences(new_essences)
+                logger.info(f"💾 保存 {len(new_essences)} 个任务本质")
+            
+            # 直接追加到种子文件
+            if new_seed_tasks:
+                await self._append_seed_tasks(new_seed_tasks)
+                logger.info(f"📤 成功添加 {len(new_seed_tasks)} 个种子任务")
+            
+            logger.info(f"✅ 轨迹集合处理完成: 新处理 {processed_count} 个，跳过 {skipped_count} 个")
+                
+        except Exception as e:
+            logger.error(f"❌ 处理轨迹集合文件失败: {e}")
+    
+    async def _save_new_essences(self, new_essences: List[Dict]):
+        """保存新的任务本质到JSON文件"""
+        try:
+            # 读取现有本质
+            existing_essences = self._load_json_file(self.task_essences_path, [])
+            
+            # 添加新本质
+            existing_essences.extend(new_essences)
+            
+            # 保存回文件
+            self._save_json_file(self.task_essences_path, existing_essences)
+            
+            logger.info(f"💾 已保存 {len(new_essences)} 个新任务本质到 {self.task_essences_path}")
+            
+            # 统计信息
+            type_stats = defaultdict(int)
+            domain_stats = defaultdict(int)
+            for essence in new_essences:
+                type_stats[essence['task_type']] += 1
+                domain_stats[essence['domain']] += 1
+            
+            logger.info(f"📊 新增本质分布 - 类型: {dict(type_stats)}, 领域: {dict(domain_stats)}")
+            
+        except Exception as e:
+            logger.error(f"❌ 保存任务本质失败: {e}")
+
+    async def _process_existing_trajectories(self):
+        """处理现有的轨迹集合文件"""
+        logger.info("🔄 检查现有轨迹集合文件...")
+        
+        if os.path.exists(self.trajectories_collection_path):
+            await self._process_trajectories_collection()
+        else:
+            logger.info("📝 没有现有的轨迹集合文件")
+
+    async def _process_new_trajectory_file(self, trajectory_path: str):
+        """处理轨迹集合文件（保持兼容性）"""
+        if trajectory_path == self.trajectories_collection_path:
+            await self._process_trajectories_collection()
+        else:
+            logger.debug(f"⏩ 忽略非目标文件: {trajectory_path}")
+    
+    def _convert_essence_to_seed(self, essence: TaskEssence) -> Optional[Dict]:
+        """将任务本质直接转换为种子任务"""
+        try:
+            # 生成种子任务ID
+            task_id = f"seed_{essence.task_type}_{self._generate_task_id_suffix(essence.query)}"
+            
+            # 推断预期工具
+            success_pattern = essence.success_pattern
+            expected_tools = success_pattern.get('tools_used', [])
+            if not expected_tools:
+                expected_tools = self._infer_expected_tools(essence.task_type, essence.domain)
+            
+            # 推断最大步数
+            max_steps = self._infer_max_steps(essence.complexity_level, essence.task_type)
+            
+            seed_task = {
+                "task_id": task_id,
+                "task_type": essence.task_type,
+                "description": essence.query,
+                "expected_tools": expected_tools,
+                "max_steps": max_steps,
+                "domain": essence.domain,
+                "complexity": essence.complexity_level,
+                "confidence": success_pattern.get('confidence', 0.8),
+                "source_essence_id": essence.essence_id,
+                "source_trajectory": essence.source_trajectory_id,
+                "extracted_at": essence.extracted_at
+            }
+            
+            return seed_task
+            
+        except Exception as e:
+            logger.error(f"转换任务本质为种子任务时出错: {e}")
+            return None
+    
+    async def _append_seed_tasks(self, seed_tasks: List[Dict]):
+        """追加种子任务到文件"""
+        with self._file_lock:
+            try:
+                async with aiofiles.open(self.seed_tasks_path, 'a', encoding='utf-8') as f:
+                    for seed_task in seed_tasks:
+                        await f.write(json.dumps(seed_task, ensure_ascii=False) + '\n')
+                
+                logger.info(f"✅ 成功追加 {len(seed_tasks)} 个种子任务到 {self.seed_tasks_path}")
+                
+                # 统计信息
+                type_stats = defaultdict(int)
+                for task in seed_tasks:
+                    type_stats[task['task_type']] += 1
+                
+                logger.info(f"📊 新增种子任务分布: {dict(type_stats)}")
+                
+            except Exception as e:
+                logger.error(f"❌ 追加种子任务失败: {e}")
+
+    async def _export_seed_tasks(self):
+        """导出种子任务统计和状态报告"""
+        try:
+            if not os.path.exists(self.seed_tasks_path):
+                logger.info("📝 种子任务文件尚不存在")
+                return
+            
+            # 读取并统计种子任务
+            seed_count = 0
+            type_stats = defaultdict(int)
+            domain_stats = defaultdict(int)
+            
+            with open(self.seed_tasks_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            task = json.loads(line.strip())
+                            seed_count += 1
+                            type_stats[task.get('task_type', 'unknown')] += 1
+                            domain_stats[task.get('domain', 'unknown')] += 1
+                        except json.JSONDecodeError:
+                            continue
+            
+            logger.info("📊 种子任务导出统计:")
+            logger.info(f"  总数量: {seed_count}")
+            logger.info(f"  任务类型分布: {dict(type_stats)}")
+            logger.info(f"  领域分布: {dict(domain_stats)}")
+            logger.info(f"  文件路径: {self.seed_tasks_path}")
+            
+            # 发布统计信息到Redis
+            export_stats = {
+                "total_seeds": seed_count,
+                "type_distribution": dict(type_stats),
+                "domain_distribution": dict(domain_stats),
+                "file_path": self.seed_tasks_path,
+                "exported_at": datetime.now().isoformat()
+            }
+            
+            await self.redis.xadd(
+                "synthesis:seed_export",
+                {
+                    "timestamp": time.time(),
+                    "stats": json.dumps(export_stats)
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ 导出种子任务统计失败: {e}")
+
+    def _generate_task_id_suffix(self, description: str) -> str:
+        """根据描述生成任务ID后缀"""
+        # 使用描述的哈希值生成短后缀
+        hash_obj = hashlib.md5(description.encode('utf-8'))
+        return hash_obj.hexdigest()[:8]
+    
+    def _infer_expected_tools(self, task_type: str, domain: str) -> List[str]:
+        """根据任务类型和领域推断预期工具"""
+        tools_map = {
+            'code': ['python_executor'],
+            'web': ['browser', 'selenium'],
+            'reasoning': ['browser', 'python_executor']
+        }
+        
+        base_tools = tools_map.get(task_type, [])
+        
+        # 根据领域进一步细化
+        if domain == 'data_analysis':
+            base_tools.extend(['matplotlib', 'pandas', 'numpy'])
+        elif domain == 'web_automation':
+            base_tools.extend(['BeautifulSoup', 'requests'])
+        elif domain == 'algorithm':
+            base_tools.extend(['math'])
+        
+        return list(set(base_tools))  # 去重
+    
+    def _infer_max_steps(self, complexity_level: str, task_type: str) -> int:
+        """根据复杂度和任务类型推断最大步数"""
+        base_steps = {
+            'simple': 5,
+            'medium': 10,
+            'complex': 15
+        }
+        
+        steps = base_steps.get(complexity_level, 8)
+        
+        # reasoning任务通常需要更多步骤
+        if task_type == 'reasoning':
+            steps += 5
+        
+        return min(steps, 20)  # 最大不超过20步
 
     async def _listen_for_synthesis_commands(self):
         """监听合成指令"""
@@ -217,10 +569,16 @@ class SimpleSynthesizer:
             if command == "trigger_synthesis":
                 # 触发完整的轨迹处理
                 await self._process_all_trajectories_once()
+                # 自动导出种子数据
+                if self.auto_export_seeds:
+                    await self._export_seed_tasks()
                 
             elif command == "process_trajectories":
                 # 处理所有未处理的轨迹
                 await self._process_unprocessed_trajectories()
+                # 自动导出种子数据
+                if self.auto_export_seeds:
+                    await self._export_seed_tasks()
                 
             elif command.startswith("process_specific"):
                 # 处理指定的轨迹文件
@@ -228,12 +586,40 @@ class SimpleSynthesizer:
                 if len(parts) > 1:
                     filename = parts[1]
                     await self._process_specific_trajectory(filename)
+                    # 自动导出种子数据
+                    if self.auto_export_seeds:
+                        await self._export_seed_tasks()
+                    
+            elif command == "export_seeds":
+                # 手动导出种子任务
+                await self._export_seed_tasks()
+                
+            elif command == "start_monitoring":
+                # 启动轨迹监控
+                if not self.observer or not self.observer.is_alive():
+                    await self._start_trajectory_monitoring()
+                    logger.info("✅ 轨迹监控已启动")
+                else:
+                    logger.info("⚠️ 轨迹监控已在运行")
+                    
+            elif command == "stop_monitoring":
+                # 停止轨迹监控
+                if self.observer and self.observer.is_alive():
+                    self.observer.stop()
+                    self.observer.join()
+                    logger.info("🛑 轨迹监控已停止")
+                else:
+                    logger.info("⚠️ 轨迹监控未运行")
                     
             elif command == "generate_tasks":
                 # 手动生成任务
                 count = int(command_fields.get(b'count', b'3').decode('utf-8'))
                 tasks = await self.generate_tasks_manually(count)
                 logger.info(f"Generated {len(tasks)} tasks manually")
+                
+            elif command == "generate_seeds_from_essences":
+                # 从现有任务本质生成种子任务
+                await self._generate_seeds_from_existing_essences()
                 
             elif command == "status":
                 # 报告状态
@@ -290,19 +676,107 @@ class SimpleSynthesizer:
             
             processed_count = 0
             
-            # 获取所有未处理的轨迹
+            # 获取所有轨迹文件并处理其中未处理的轨迹
             for filename in os.listdir(trajectories_dir):
-                if filename.endswith('.json') and not self._is_trajectory_processed(filename):
+                if filename.endswith('.json'):
                     trajectory_path = os.path.join(trajectories_dir, filename)
-                    await self._process_trajectory_file(trajectory_path)
-                    self._mark_trajectory_processed(filename)
-                    processed_count += 1
-                    logger.info(f"✅ Processed new trajectory: {filename}")
+                    # 处理文件中所有未处理的轨迹
+                    file_processed_count = await self._process_unprocessed_in_file(trajectory_path)
+                    processed_count += file_processed_count
             
             logger.info(f"🎯 Unprocessed trajectories completed: {processed_count} new trajectories processed")
             
         except Exception as e:
             logger.error(f"Error processing unprocessed trajectories: {e}")
+
+    async def _process_unprocessed_in_file(self, trajectory_path: str) -> int:
+        """处理单个文件中未处理的轨迹，返回处理数量"""
+        try:
+            logger.info(f"🔍 Checking for unprocessed trajectories in: {trajectory_path}")
+            with open(trajectory_path, 'r', encoding='utf-8') as f:
+                trajectory_data = json.load(f)
+            
+            processed_count = 0
+            new_seed_tasks = []  # 收集新生成的种子任务
+            
+            # 如果是轨迹列表，处理每一个未处理的轨迹
+            if isinstance(trajectory_data, list):
+                logger.info(f"📊 Found trajectory collection with {len(trajectory_data)} trajectories")
+                for i, single_trajectory in enumerate(trajectory_data):
+                    if processed_count >= 10:  # 处理数量限制
+                        logger.info(f"⏹️ Reached processing limit of 10 trajectories")
+                        break
+                    try:
+                        trajectory = self._convert_trajectory_format(single_trajectory)
+                        if trajectory:
+                            # 基于轨迹ID检查是否已处理
+                            if not self._is_trajectory_processed(trajectory.task_id):
+                                should_process = self._should_process_trajectory(trajectory)
+                                logger.info(f"📋 New trajectory {trajectory.task_id}: runtime={trajectory.runtime_id}, success={trajectory.success}, should_process={should_process}")
+                                
+                                if should_process:
+                                    essence = await self._extract_essence(trajectory)
+                                    if essence:
+                                        self._store_essence(essence)
+                                        
+                                        # 立即生成种子任务
+                                        seed_task = self._convert_essence_to_seed(essence)
+                                        if seed_task:
+                                            new_seed_tasks.append(seed_task)
+                                            logger.info(f"🌱 Generated seed task from essence: {essence.essence_id}")
+                                        
+                                        # 标记这个轨迹ID已处理
+                                        self._mark_trajectory_processed(trajectory.task_id)
+                                        processed_count += 1
+                                        logger.info(f"✅ Extracted essence {essence.task_type}/{essence.domain} from trajectory {trajectory.task_id}")
+                                    else:
+                                        logger.warning(f"❌ Failed to extract essence from trajectory {trajectory.task_id}")
+                                        # 即使提取失败也标记为已处理，避免重复尝试
+                                        self._mark_trajectory_processed(trajectory.task_id)
+                                else:
+                                    logger.info(f"⏭️ Skipping trajectory {trajectory.task_id} (not worth processing)")
+                                    # 标记为已处理
+                                    self._mark_trajectory_processed(trajectory.task_id)
+                            else:
+                                logger.debug(f"⏭️ Trajectory {trajectory.task_id} already processed")
+                    except Exception as e:
+                        logger.error(f"❌ Error processing trajectory {i}: {e}")
+                
+                # 批量保存种子任务
+                if new_seed_tasks:
+                    await self._append_seed_tasks(new_seed_tasks)
+                    logger.info(f"💾 Saved {len(new_seed_tasks)} seed tasks to file")
+                
+                if processed_count > 0:
+                    logger.info(f"🎯 Successfully processed {processed_count} new trajectories from {trajectory_path}")
+                return processed_count
+                
+            else:
+                # 单个轨迹对象
+                trajectory = self._convert_trajectory_format(trajectory_data)
+                if trajectory and not self._is_trajectory_processed(trajectory.task_id):
+                    if self._should_process_trajectory(trajectory):
+                        essence = await self._extract_essence(trajectory)
+                        if essence:
+                            self._store_essence(essence)
+                            
+                            # 立即生成种子任务
+                            seed_task = self._convert_essence_to_seed(essence)
+                            if seed_task:
+                                await self._append_seed_tasks([seed_task])
+                                logger.info(f"🌱 Generated and saved seed task from essence: {essence.essence_id}")
+                            
+                            self._mark_trajectory_processed(trajectory.task_id)
+                            logger.info(f"✅ Extracted essence from single trajectory {trajectory.task_id}")
+                            return 1
+                    else:
+                        self._mark_trajectory_processed(trajectory.task_id)
+                
+                return 0
+        
+        except Exception as e:
+            logger.error(f"❌ Error processing trajectory file {trajectory_path}: {e}")
+            return 0
 
     async def _process_specific_trajectory(self, filename: str):
         """处理指定的轨迹文件"""
@@ -326,36 +800,62 @@ class SimpleSynthesizer:
     async def _report_synthesis_status(self):
         """报告合成服务状态"""
         try:
-            # 统计数据库中的本质数量
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
-                cursor = conn.execute("SELECT COUNT(*) FROM task_essences")
-                essence_count = cursor.fetchone()[0]
-                
-                cursor = conn.execute("SELECT COUNT(*) FROM generated_tasks")
-                generated_count = cursor.fetchone()[0]
-                
-                cursor = conn.execute("SELECT task_type, COUNT(*) FROM task_essences GROUP BY task_type")
-                type_distribution = dict(cursor.fetchall())
+            # 统计种子任务文件
+            seed_count = 0
+            seed_type_stats = defaultdict(int)
+            if os.path.exists(self.seed_tasks_path):
+                with open(self.seed_tasks_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            try:
+                                task = json.loads(line.strip())
+                                seed_count += 1
+                                seed_type_stats[task.get('task_type', 'unknown')] += 1
+                            except json.JSONDecodeError:
+                                continue
             
-            # 统计处理的轨迹数量
-            processed = self._load_processed()
-            processed_count = len(processed)
+            # 统计任务本质文件
+            essence_count = 0
+            essence_type_stats = defaultdict(int)
+            essence_domain_stats = defaultdict(int)
+            if os.path.exists(self.task_essences_path):
+                essences_data = self._load_json_file(self.task_essences_path, [])
+                essence_count = len(essences_data)
+                for essence in essences_data:
+                    essence_type_stats[essence.get('task_type', 'unknown')] += 1
+                    essence_domain_stats[essence.get('domain', 'unknown')] += 1
             
-            # 统计轨迹目录中的文件数量
-            trajectories_dir = "/app/output/trajectories"
-            total_trajectories = 0
-            if os.path.exists(trajectories_dir):
-                total_trajectories = len([f for f in os.listdir(trajectories_dir) if f.endswith('.json')])
+            # 统计轨迹集合状态
+            collection_exists = os.path.exists(self.trajectories_collection_path)
+            collection_size = 0
+            if collection_exists:
+                try:
+                    with open(self.trajectories_collection_path, 'r', encoding='utf-8') as f:
+                        collection_data = json.load(f)
+                        collection_size = len(collection_data) if isinstance(collection_data, list) else 0
+                except:
+                    collection_size = 0
+            
+            processed_count = len(self.processed_trajectories)
             
             status_info = {
                 "synthesis_enabled": self.enabled,
-                "database_ready": self._verify_database_ready(),
-                "total_essences": essence_count,
-                "generated_tasks": generated_count,
-                "essence_distribution": type_distribution,
+                "storage_type": "JSON文件存储",
+                "monitoring_enabled": self.auto_monitor_enabled,
+                "target_file": self.trajectories_collection_path,
+                "collection_exists": collection_exists,
+                "collection_size": collection_size,
                 "processed_trajectories": processed_count,
-                "total_trajectory_files": total_trajectories,
-                "unprocessed_count": total_trajectories - processed_count
+                "unprocessed_count": max(0, collection_size - processed_count),
+                "total_task_essences": essence_count,
+                "essence_type_distribution": dict(essence_type_stats),
+                "essence_domain_distribution": dict(essence_domain_stats),
+                "total_seed_tasks": seed_count,
+                "seed_type_distribution": dict(seed_type_stats),
+                "essence_file_path": self.task_essences_path,
+                "seed_file_path": self.seed_tasks_path,
+                "observer_running": self.observer.is_alive() if self.observer else False,
+                "auto_export_seeds": self.auto_export_seeds
             }
             
             logger.info("📊 Synthesis Status Report:")
@@ -403,38 +903,88 @@ class SimpleSynthesizer:
                 logger.error(f"Error processing trajectory feedback: {e}")
                 await asyncio.sleep(30)
     
-    async def _process_trajectory_file(self, trajectory_path: str):
-        """处理单个轨迹文件"""
+    def _should_process_trajectory(self, trajectory: TrajectoryResult) -> bool:
+        """判断轨迹是否值得处理"""
+        # 1. 成功的轨迹总是处理
+        if trajectory.success:
+            return True
+        
+        # 2. 有执行步骤且runtime_id包含特定类型的轨迹
+        if len(trajectory.steps) > 0:
+            runtime_id = trajectory.runtime_id.lower()
+            
+            # reasoning runtime的轨迹，即使失败也可能有价值
+            if 'reasoning' in runtime_id:
+                logger.info(f"🧠 Found reasoning trajectory: {trajectory.task_id}")
+                return True
+            
+            # 有多个步骤的复杂任务，即使失败也可能有价值
+            if len(trajectory.steps) >= 2:
+                return True
+        
+        # 3. 任务描述包含特定关键词
+        task_desc = trajectory.task_description.lower()
+        valuable_keywords = ['reasoning', '推理', '分析', 'analysis', 'compare', '对比', '研究']
+        if any(keyword in task_desc for keyword in valuable_keywords):
+            logger.info(f"🔎 Found valuable keywords in task description: {trajectory.task_id}")
+            return True
+        
+        return False
+
+    async def _process_trajectory_file(self, trajectory_path: str) -> bool:
+        """处理单个轨迹文件，返回处理是否成功"""
         try:
+            logger.info(f"🔍 Processing trajectory file: {trajectory_path}")
             with open(trajectory_path, 'r', encoding='utf-8') as f:
                 trajectory_data = json.load(f)
             
+            processed_count = 0
+            
             # 如果是轨迹列表，处理每一个轨迹
             if isinstance(trajectory_data, list):
-                logger.info(f"Processing trajectory collection with {len(trajectory_data)} trajectories")
+                logger.info(f"📊 Processing trajectory collection with {len(trajectory_data)} trajectories")
                 for i, single_trajectory in enumerate(trajectory_data):
-                    if i >= 5:  # 限制处理前5个轨迹
+                    if processed_count >= 10:  # 增加处理数量限制
+                        logger.info(f"⏹️ Reached processing limit of 10 trajectories")
                         break
                     try:
                         trajectory = self._convert_trajectory_format(single_trajectory)
-                        if trajectory and trajectory.success:
-                            essence = await self._extract_essence(trajectory)
-                            if essence:
-                                self._store_essence(essence)
-                                logger.info(f"Extracted essence from trajectory {trajectory.task_id}")
+                        if trajectory:
+                            # 增强轨迹处理逻辑：处理更多类型的轨迹
+                            should_process = self._should_process_trajectory(trajectory)
+                            logger.info(f"📋 Trajectory {trajectory.task_id}: runtime={trajectory.runtime_id}, success={trajectory.success}, should_process={should_process}")
+                            
+                            if should_process:
+                                essence = await self._extract_essence(trajectory)
+                                if essence:
+                                    self._store_essence(essence)
+                                    processed_count += 1
+                                    logger.info(f"✅ Extracted essence {essence.task_type}/{essence.domain} from trajectory {trajectory.task_id}")
+                                else:
+                                    logger.warning(f"❌ Failed to extract essence from trajectory {trajectory.task_id}")
+                            else:
+                                logger.info(f"⏭️ Skipping trajectory {trajectory.task_id} (not worth processing)")
                     except Exception as e:
-                        logger.error(f"Error processing trajectory {i}: {e}")
+                        logger.error(f"❌ Error processing trajectory {i}: {e}")
+                
+                logger.info(f"🎯 Successfully processed {processed_count} trajectories from collection")
+                return processed_count > 0
+                
             else:
                 # 单个轨迹对象
                 trajectory = self._convert_trajectory_format(trajectory_data)
-                if trajectory and trajectory.success:
+                if trajectory and self._should_process_trajectory(trajectory):
                     essence = await self._extract_essence(trajectory)
                     if essence:
                         self._store_essence(essence)
-                        logger.info(f"Extracted essence from trajectory {trajectory.task_id}")
+                        logger.info(f"✅ Extracted essence from single trajectory {trajectory.task_id}")
+                        return True
+                
+                return False
         
         except Exception as e:
-            logger.error(f"Error processing trajectory file {trajectory_path}: {e}")
+            logger.error(f"❌ Error processing trajectory file {trajectory_path}: {e}")
+            return False
     
     def _convert_trajectory_format(self, data: Dict) -> Optional[TrajectoryResult]:
         """将轨迹数据转换为TrajectoryResult格式"""
@@ -495,33 +1045,125 @@ class SimpleSynthesizer:
             return None
     
     def _build_extraction_prompt(self, trajectory: TrajectoryResult) -> str:
-        """构建本质提取提示"""
-        # 简化轨迹信息
-        steps_summary = []
-        for i, step in enumerate(trajectory.steps[:3]):  # 只取前3步
-            steps_summary.append(f"步骤{i+1}: {step.action_type} - {step.observation[:100]}...")
+        """构建本质提取提示 - 提供完整轨迹信息"""
+        # 构建完整的执行步骤信息
+        steps_detail = []
+        for i, step in enumerate(trajectory.steps, 1):
+            step_info = f"""步骤 {i}:
+  动作类型: {step.action_type}
+  执行参数: {json.dumps(step.action_params, ensure_ascii=False)[:300]}
+  执行结果: {step.observation[:500]}{"..." if len(step.observation) > 500 else ""}
+  是否成功: {step.success}
+  思考过程: {step.thinking[:300] if step.thinking else "无"}{"..." if step.thinking and len(step.thinking) > 300 else ""}
+  耗时: {step.duration:.2f}秒"""
+            
+            if step.error_message:
+                step_info += f"\n  错误信息: {step.error_message[:200]}"
+            
+            steps_detail.append(step_info)
         
-        return f"""分析以下任务执行轨迹，提取任务本质信息：
+        # 提取runtime信息和智能提示
+        runtime_analysis = ""
+        if hasattr(trajectory, 'runtime_id') and trajectory.runtime_id:
+            runtime_id = trajectory.runtime_id.lower()
+            if 'reasoning' in runtime_id:
+                runtime_analysis = """
+这是一个Reasoning Runtime执行的任务，特点：
+- 通常涉及多个工具的协同使用（浏览器+代码执行等）
+- 需要复杂的决策和推理过程
+- 任务目标往往是分析、对比、研究类问题"""
+            elif 'web' in runtime_id:
+                runtime_analysis = """
+这是一个Web Runtime执行的任务，特点：
+- 主要使用浏览器进行网页操作
+- 涉及信息搜索、网页导航、数据提取
+- 任务目标通常是获取特定网页信息"""
+            elif 'sandbox' in runtime_id or 'code' in runtime_id:
+                runtime_analysis = """
+这是一个Code Runtime执行的任务，特点：
+- 主要进行Python代码生成和执行
+- 解决计算、算法、数据处理问题
+- 任务目标通常是实现特定功能或计算"""
+        
+        # 构建工具使用分析
+        tools_used = set()
+        for step in trajectory.steps:
+            if 'browser' in str(step.action_type).lower():
+                tools_used.add("浏览器操作")
+            if 'python' in str(step.observation).lower() or 'code' in str(step.action_type).lower():
+                tools_used.add("Python代码")
+            if 'navigate' in str(step.action_params) or 'url' in str(step.action_params):
+                tools_used.add("网页导航")
+        
+        tools_analysis = f"使用的工具类型: {', '.join(tools_used) if tools_used else '未明确'}"
+        
+        return f"""请分析以下完整的任务执行轨迹，提取任务的本质特征并生成优化的任务描述：
 
+=== 任务基本信息 ===
 任务ID: {trajectory.task_id}
-执行成功: {trajectory.success}
-总耗时: {trajectory.total_duration:.1f}秒
-最终结果: {trajectory.final_result[:200]}...
+原始描述: {trajectory.task_description}
+执行环境: {trajectory.runtime_id}
+执行状态: {"成功" if trajectory.success else "失败"}
+总步骤数: {len(trajectory.steps)}
+总耗时: {trajectory.total_duration:.2f}秒
+最终结果: {trajectory.final_result[:400]}{"..." if len(trajectory.final_result) > 400 else ""}
 
-执行步骤:
-{chr(10).join(steps_summary)}
+{runtime_analysis}
 
-请提取：
-1. task_type: 任务类型 (code/web/reasoning)
-2. domain: 领域 (algorithm/data_processing/web_automation/search等)
-3. query: 核心任务描述（20字以内）
-4. complexity: 复杂度 (simple/medium/complex)
+=== 工具使用分析 ===
+{tools_analysis}
 
-返回JSON格式：
-{{"task_type": "...", "domain": "...", "query": "...", "complexity": "..."}}"""
+=== 完整执行轨迹 ===
+{chr(10).join(steps_detail)}
+
+=== 分析要求 ===
+请基于以上完整轨迹信息，进行深度分析并提取：
+
+1. **任务类型分类** (task_type):
+   - "reasoning": 多工具协同任务，涉及复杂分析、对比研究、决策推理等
+   - "web": 纯网页操作任务，专注于信息搜索、网站导航、数据提取等  
+   - "code": 纯编程任务，专注于算法实现、计算、数据处理等
+
+2. **任务领域** (domain):
+   - algorithm: 算法、数学计算、数据结构
+   - data_analysis: 数据分析、统计、可视化
+   - web_automation: 网页自动化、信息提取
+   - research: 研究调查、对比分析  
+   - comparison: 对比评估、竞品分析
+   - stock_analysis: 金融分析、股票研究
+   - educational: 教育、学习、知识获取
+   - 其他合适的领域
+
+3. **优化任务描述** (optimized_description):
+   基于轨迹分析，生成一个清晰、具体、可执行的任务描述，要求：
+   - 明确说明任务目标
+   - 指出需要使用的主要工具或方法
+   - 突出任务的核心价值和难点
+   - 长度控制在50-100字
+
+4. **复杂度评估** (complexity):
+   - simple: 单步骤或简单操作
+   - medium: 多步骤协调或中等难度分析
+   - complex: 深度分析、多工具集成或高难度推理
+
+5. **关键特征** (key_features):
+   列出这个任务的3-5个关键特征
+
+请严格按照以下JSON格式返回分析结果：
+
+{{
+  "task_type": "...",
+  "domain": "...", 
+  "optimized_description": "...",
+  "complexity": "...",
+  "key_features": ["特征1", "特征2", "特征3"],
+  "confidence": 0.9
+}}
+
+注意：请确保分析准确、描述清晰、分类合理。"""
     
     def _parse_extraction_response(self, response: str, trajectory: TrajectoryResult) -> Optional[TaskEssence]:
-        """解析LLM响应"""
+        """解析LLM响应，处理优化后的JSON格式"""
         try:
             # 提取JSON
             import re
@@ -529,198 +1171,380 @@ class SimpleSynthesizer:
             if json_match:
                 parsed = json.loads(json_match.group())
                 
+                # 获取LLM分析的结果
+                llm_task_type = parsed.get("task_type", "").lower()
+                llm_domain = parsed.get("domain", "general")
+                optimized_description = parsed.get("optimized_description", "")
+                complexity = parsed.get("complexity", "medium")
+                key_features = parsed.get("key_features", [])
+                confidence = parsed.get("confidence", 0.8)
+                
+                # 智能任务类型推断和验证
+                final_task_type = self._infer_task_type(trajectory, llm_task_type)
+                
+                # 智能领域推断和验证
+                final_domain = self._infer_domain(trajectory, llm_domain, final_task_type)
+                
+                # 使用优化后的描述，如果没有则回退到原始描述
+                final_query = optimized_description if optimized_description else trajectory.task_description[:50]
+                
+                # 构建增强的成功模式
+                enhanced_success_pattern = {
+                    "duration": trajectory.total_duration,
+                    "steps_count": len(trajectory.steps),
+                    "key_features": key_features,
+                    "confidence": confidence,
+                    "tools_used": self._extract_tools_from_trajectory(trajectory)
+                }
+                
+                logger.info(f"🧠 Enhanced task analysis:")
+                logger.info(f"   Type: {llm_task_type} → {final_task_type}")
+                logger.info(f"   Domain: {final_domain}")
+                logger.info(f"   Optimized description: {final_query[:80]}...")
+                logger.info(f"   Key features: {key_features}")
+                logger.info(f"   Confidence: {confidence}")
+                
                 return TaskEssence(
                     essence_id=f"essence_{int(time.time())}_{trajectory.task_id}",
-                    task_type=parsed.get("task_type", "code"),
-                    domain=parsed.get("domain", "general"),
-                    query=parsed.get("query", "基础任务"),
-                    complexity_level=parsed.get("complexity", "medium"),
-                    success_pattern={"duration": trajectory.total_duration},
+                    task_type=final_task_type,
+                    domain=final_domain,
+                    query=final_query,
+                    complexity_level=complexity,
+                    success_pattern=enhanced_success_pattern,
                     extracted_at=datetime.now().isoformat(),
                     source_trajectory_id=trajectory.task_id
                 )
+            else:
+                logger.error(f"Failed to parse JSON response from LLM for essence {trajectory.task_id}")
+                logger.warning(f"Response content: {response[:200]}...")
+                return None
+                
         except Exception as e:
-            logger.error(f"Error parsing extraction response: {e}")
+            logger.error(f"Error parsing enhanced extraction response: {e}")
+            logger.warning(f"Response content: {response[:500]}...")
+            # 即使解析失败，也尝试基于轨迹特征创建基础本质
+            return self._create_fallback_essence(trajectory)
         
         return None
     
-    def _store_essence(self, essence: TaskEssence):
-        """存储任务本质到数据库，带重试机制"""
-        max_retries = 3
-        retry_delay = 1
+    def _extract_tools_from_trajectory(self, trajectory: TrajectoryResult) -> List[str]:
+        """从轨迹中提取使用的工具"""
+        tools = set()
         
-        for attempt in range(max_retries):
-            try:
-                with sqlite3.connect(self.db_path, timeout=10) as conn:
-                    # 确保数据库连接正常
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    
-                    conn.execute('''
-                        INSERT OR REPLACE INTO task_essences 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        essence.essence_id,
-                        essence.task_type,
-                        essence.domain,
-                        essence.query,
-                        essence.complexity_level,
-                        json.dumps(essence.success_pattern),
-                        essence.extracted_at,
-                        essence.source_trajectory_id
-                    ))
-                    
-                    conn.commit()
-                    logger.info(f"Successfully stored essence {essence.essence_id}")
-                    return
-                    
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e).lower() or "no such table" in str(e).lower():
-                    logger.warning(f"Database operation failed (attempt {attempt + 1}/{max_retries}): {e}")
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
-                        retry_delay *= 2
-                        # 尝试重新初始化数据库
-                        if "no such table" in str(e).lower():
-                            try:
-                                self._init_database()
-                            except Exception as init_e:
-                                logger.error(f"Failed to re-initialize database: {init_e}")
-                        continue
-                else:
-                    logger.error(f"Database error: {e}")
-                    break
-            except Exception as e:
-                logger.error(f"Unexpected error storing essence: {e}")
-                break
+        for step in trajectory.steps:
+            # 基于action_type识别工具
+            action_type_str = str(step.action_type).lower()
+            if 'browser' in action_type_str or 'navigate' in action_type_str:
+                tools.add("browser")
+            elif 'code' in action_type_str or 'python' in action_type_str:
+                tools.add("python")
+            elif 'search' in action_type_str:
+                tools.add("search")
+            
+            # 基于action_params识别工具
+            if step.action_params:
+                params_str = str(step.action_params).lower()
+                if 'url' in params_str or 'navigate' in params_str:
+                    tools.add("browser")
+                if 'code' in params_str or 'python' in params_str:
+                    tools.add("python")
+                if 'search' in params_str or 'query' in params_str:
+                    tools.add("search")
+            
+            # 基于observation识别工具输出
+            if step.observation:
+                obs_str = str(step.observation).lower()
+                if 'browser' in obs_str or 'page' in obs_str or 'website' in obs_str:
+                    tools.add("browser")
+                if 'python' in obs_str or 'execution' in obs_str:
+                    tools.add("python")
         
-        logger.error(f"Failed to store essence {essence.essence_id} after {max_retries} attempts")
+        return list(tools)
     
-    async def generate_tasks_manually(self, count: int = 3) -> List[TaskSpec]:
-        """手动生成指定数量的任务"""
-        generated_tasks = []
+    def _infer_task_type(self, trajectory: TrajectoryResult, llm_suggestion: str) -> str:
+        """智能推断任务类型"""
+        # 1. 基于runtime_id的强规则
+        if hasattr(trajectory, 'runtime_id') and trajectory.runtime_id:
+            runtime_id = trajectory.runtime_id.lower()
+            if 'reasoning' in runtime_id:
+                return "reasoning"
+            elif 'web' in runtime_id:
+                return "web"  
+            elif 'sandbox' in runtime_id or 'code' in runtime_id:
+                return "code"
         
+        # 2. 基于任务描述的关键词
+        desc = trajectory.task_description.lower()
+        reasoning_keywords = ['分析', '对比', '研究', '推理', 'analysis', 'compare', 'research', 'reasoning', '影响']
+        web_keywords = ['搜索', '访问', '浏览器', 'search', 'visit', 'browser', 'google', 'github']
+        code_keywords = ['计算', '算法', '代码', '函数', 'calculate', 'algorithm', 'function', 'code', '矩阵']
+        
+        if any(keyword in desc for keyword in reasoning_keywords):
+            return "reasoning"
+        elif any(keyword in desc for keyword in web_keywords):
+            return "web"
+        elif any(keyword in desc for keyword in code_keywords):
+            return "code"
+        
+        # 3. 基于执行步骤分析
+        if len(trajectory.steps) > 0:
+            # 检查是否有浏览器操作
+            has_browser = any('browser' in str(step.action_type).lower() or 'navigate' in str(step.action_params) for step in trajectory.steps)
+            # 检查是否有代码执行
+            has_code = any('code' in str(step.action_type).lower() or 'python' in str(step.observation).lower() for step in trajectory.steps)
+            
+            if has_browser and has_code:
+                return "reasoning"  # 多工具协同
+            elif has_browser:
+                return "web"
+            elif has_code:
+                return "code"
+        
+        # 4. 使用LLM建议（如果有效）
+        if llm_suggestion in ['reasoning', 'web', 'code']:
+            return llm_suggestion
+        
+        # 5. 默认值
+        return "code"
+    
+    def _infer_domain(self, trajectory: TrajectoryResult, llm_domain: str, task_type: str) -> str:
+        """智能推断任务领域"""
+        desc = trajectory.task_description.lower()
+        
+        # 基于关键词的领域映射
+        domain_keywords = {
+            'algorithm': ['算法', '计算', '数学', 'algorithm', 'calculate', 'math', '排序', '搜索'],
+            'data_analysis': ['数据', '分析', '统计', 'data', 'analysis', 'statistics', '图表'],
+            'web_automation': ['网页', '浏览器', '搜索', 'web', 'browser', 'search', 'google'],
+            'research': ['研究', '对比', '调查', 'research', 'compare', 'study', '影响'],
+            'comparison': ['对比', '比较', 'vs', 'compare', 'comparison', '区别'],
+            'stock_analysis': ['股票', '股价', 'stock', 'price', '投资', 'investment']
+        }
+        
+        for domain, keywords in domain_keywords.items():
+            if any(keyword in desc for keyword in keywords):
+                return domain
+        
+        # 基于任务类型的默认领域
+        type_domain_map = {
+            'reasoning': 'research',
+            'web': 'web_automation', 
+            'code': 'algorithm'
+        }
+        
+        return type_domain_map.get(task_type, llm_domain if llm_domain != "general" else "general")
+    
+    def _create_fallback_essence(self, trajectory: TrajectoryResult) -> Optional[TaskEssence]:
+        """创建备用本质（当LLM解析失败时）"""
         try:
-            # 获取种子数据
-            essences = self._get_random_essences(count)
-            if not essences:
-                logger.warning("No task essences available for generation")
-                return generated_tasks
+            task_type = self._infer_task_type(trajectory, "")
+            domain = self._infer_domain(trajectory, "general", task_type)
             
-            # 为每个essence生成变异任务
-            for essence in essences:
-                new_task = await self._generate_task_from_essence(essence)
-                if new_task:
-                    await self._publish_task(new_task)
-                    self._record_generated_task(new_task, essence.essence_id)
-                    generated_tasks.append(new_task)
-                    logger.info(f"Generated new task: {new_task.task_id}")
+            return TaskEssence(
+                essence_id=f"essence_{int(time.time())}_{trajectory.task_id}",
+                task_type=task_type,
+                domain=domain,
+                query=trajectory.task_description[:20],
+                complexity_level="medium",
+                success_pattern={"duration": trajectory.total_duration},
+                extracted_at=datetime.now().isoformat(),
+                source_trajectory_id=trajectory.task_id
+            )
+        except Exception as e:
+            logger.error(f"Failed to create fallback essence: {e}")
+            return None
+    
+    def _store_essence(self, essence: TaskEssence):
+        """存储任务本质到JSON文件"""
+        try:
+            # 读取现有本质
+            existing_essences = self._load_json_file(self.task_essences_path, [])
             
-            return generated_tasks
+            # 添加新本质
+            essence_dict = asdict(essence)
+            existing_essences.append(essence_dict)
+            
+            # 保存回文件
+            if self._save_json_file(self.task_essences_path, existing_essences):
+                logger.info(f"💾 成功保存任务本质: {essence.essence_id}")
+                logger.info(f"  类型: {essence.task_type}")
+                logger.info(f"  领域: {essence.domain}")
+                logger.info(f"  描述: {essence.query[:50]}...")
+                logger.info(f"  复杂度: {essence.complexity_level}")
+                logger.info(f"  来源轨迹: {essence.source_trajectory_id}")
+            else:
+                logger.error(f"❌ 保存任务本质失败: {essence.essence_id}")
             
         except Exception as e:
-            logger.error(f"Error generating manual tasks: {e}")
-            return generated_tasks
+            logger.error(f"❌ 存储任务本质时出错: {e}")
+
+    async def _generate_seeds_from_existing_essences(self):
+        """从现有的任务本质生成种子任务"""
+        try:
+            logger.info("🌱 开始从现有任务本质生成种子任务...")
+            
+            # 读取现有任务本质
+            essences_data = self._load_json_file(self.task_essences_path, [])
+            if not essences_data:
+                logger.warning("⚠️ 没有找到任务本质数据")
+                return
+            
+            logger.info(f"📊 找到 {len(essences_data)} 个任务本质")
+            
+            # 转换为TaskEssence对象并生成种子任务
+            seed_tasks = []
+            for essence_data in essences_data:
+                try:
+                    # 重构TaskEssence对象
+                    essence = TaskEssence(
+                        essence_id=essence_data['essence_id'],
+                        task_type=essence_data['task_type'],
+                        domain=essence_data['domain'],
+                        query=essence_data['query'],
+                        complexity_level=essence_data['complexity_level'],
+                        success_pattern=essence_data['success_pattern'],
+                        extracted_at=essence_data['extracted_at'],
+                        source_trajectory_id=essence_data['source_trajectory_id']
+                    )
+                    
+                    # 生成种子任务
+                    seed_task = self._convert_essence_to_seed(essence)
+                    if seed_task:
+                        seed_tasks.append(seed_task)
+                        logger.debug(f"✅ 从本质 {essence.essence_id} 生成种子任务")
+                    
+                except Exception as e:
+                    logger.error(f"❌ 处理任务本质时出错: {e}")
+                    continue
+            
+            # 保存生成的种子任务
+            if seed_tasks:
+                await self._append_seed_tasks(seed_tasks)
+                logger.info(f"🎯 成功生成并保存 {len(seed_tasks)} 个种子任务")
+                
+                # 统计信息
+                type_stats = defaultdict(int)
+                domain_stats = defaultdict(int)
+                for task in seed_tasks:
+                    type_stats[task['task_type']] += 1
+                    domain_stats[task['domain']] += 1
+                
+                logger.info(f"📊 种子任务类型分布: {dict(type_stats)}")
+                logger.info(f"📊 种子任务领域分布: {dict(domain_stats)}")
+            else:
+                logger.warning("⚠️ 没有成功生成任何种子任务")
+                
+        except Exception as e:
+            logger.error(f"❌ 从任务本质生成种子任务失败: {e}")
+
+    async def generate_tasks_manually(self, count: int = 3) -> List[TaskSpec]:
+        """手动生成指定数量的任务（暂时禁用，因为没有本质存储）"""
+        logger.warning("⚠️ 手动任务生成功能已禁用，请使用轨迹处理生成种子任务")
+        return []
 
     async def generate_task_from_specific_essence(self, essence_id: str) -> Optional[TaskSpec]:
-        """基于指定的任务本质生成新任务"""
-        try:
-            # 从数据库获取指定的本质
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute('''
-                    SELECT * FROM task_essences WHERE essence_id = ?
-                ''', (essence_id,))
-                
-                row = cursor.fetchone()
-                if not row:
-                    logger.warning(f"Essence {essence_id} not found")
-                    return None
-                
-                essence = TaskEssence(
-                    essence_id=row[0],
-                    task_type=row[1],
-                    domain=row[2],
-                    query=row[3],
-                    complexity_level=row[4],
-                    success_pattern=json.loads(row[5]),
-                    extracted_at=row[6],
-                    source_trajectory_id=row[7]
-                )
-            
-            # 生成任务
-            new_task = await self._generate_task_from_essence(essence)
-            if new_task:
-                await self._publish_task(new_task)
-                self._record_generated_task(new_task, essence.essence_id)
-                logger.info(f"Generated task {new_task.task_id} from essence {essence_id}")
-                return new_task
-            
-        except Exception as e:
-            logger.error(f"Error generating task from essence {essence_id}: {e}")
-        
+        """基于指定的任务本质生成新任务（暂时禁用）"""
+        logger.warning("⚠️ 指定本质任务生成功能已禁用，请使用轨迹处理生成种子任务")
         return None
     
     def _get_random_essences(self, count: int) -> List[TaskEssence]:
-        """获取随机的种子本质，带错误处理"""
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                with sqlite3.connect(self.db_path, timeout=10) as conn:
-                    cursor = conn.execute('''
-                        SELECT * FROM task_essences 
-                        ORDER BY RANDOM() 
-                        LIMIT ?
-                    ''', (count,))
-                    
-                    essences = []
-                    for row in cursor.fetchall():
-                        essences.append(TaskEssence(
-                            essence_id=row[0],
-                            task_type=row[1],
-                            domain=row[2],
-                            query=row[3],
-                            complexity_level=row[4],
-                            success_pattern=json.loads(row[5]),
-                            extracted_at=row[6],
-                            source_trajectory_id=row[7]
-                        ))
-                    
-                    return essences
-                    
-            except sqlite3.OperationalError as e:
-                logger.warning(f"Database read failed (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    logger.error(f"Failed to read essences after {max_retries} attempts")
-                    return []
-            except Exception as e:
-                logger.error(f"Unexpected error reading essences: {e}")
-                return []
-        
+        """获取随机的种子本质（暂时禁用）"""
+        logger.warning("⚠️ 随机本质获取功能已禁用，请使用轨迹处理生成种子任务")
         return []
+        
+    def _record_generated_task(self, task: TaskSpec, essence_id: str):
+        """记录生成的任务（简化版，仅记录日志）"""
+        try:
+            logger.info(f"✅ 记录生成任务: {task.task_id}")
+            logger.info(f"  来源本质: {essence_id}")
+            logger.info(f"  任务类型: {task.task_type}")
+            logger.info(f"  生成时间: {datetime.now().isoformat()}")
+                
+        except Exception as e:
+            logger.error(f"❌ 记录生成任务时出错: {e}")
+
+    def _is_trajectory_processed(self, trajectory_id: str) -> bool:
+        """检查轨迹是否已处理（基于持久化存储）"""
+        is_processed = trajectory_id in self.processed_trajectories
+        if is_processed:
+            logger.debug(f"🔍 轨迹已处理过: {trajectory_id}")
+        return is_processed
+    
+    def _mark_trajectory_processed(self, trajectory_id: str):
+        """标记轨迹已处理（持久化到文件）"""
+        if trajectory_id not in self.processed_trajectories:
+            self.processed_trajectories.add(trajectory_id)
+            # 立即保存到文件
+            self._save_processed_trajectories()
+            logger.info(f"✅ 标记轨迹已处理并保存: {trajectory_id}")
+        else:
+            logger.debug(f"⚠️ 轨迹已经在处理记录中: {trajectory_id}")
     
     async def _generate_task_from_essence(self, essence: TaskEssence) -> Optional[TaskSpec]:
         """基于本质生成新任务"""
         try:
-            # 构建变异提示
-            prompt = f"""基于以下任务本质，生成一个相似但不同的新任务：
+            # 解析增强的成功模式
+            success_pattern = essence.success_pattern
+            key_features = success_pattern.get("key_features", [])
+            tools_used = success_pattern.get("tools_used", [])
+            confidence = success_pattern.get("confidence", 0.8)
+            
+            # 构建增强的变异提示
+            prompt = f"""基于以下高质量任务本质，生成一个相似但创新的新任务：
 
-原任务类型: {essence.task_type}
-原任务领域: {essence.domain}
-原任务描述: {essence.query}
-复杂度: {essence.complexity_level}
+=== 原任务分析 ===
+任务类型: {essence.task_type}
+任务领域: {essence.domain}
+优化描述: {essence.query}
+复杂度等级: {essence.complexity_level}
+提取置信度: {confidence}
 
-请生成一个新的类似任务，要求：
-1. 保持相同的任务类型和领域
-2. 适当调整参数或场景
-3. 保持相似的复杂度
+=== 关键特征 ===
+{chr(10).join(f"- {feature}" for feature in key_features)}
 
-返回JSON格式：
-{{"description": "新任务描述", "expected_tools": ["工具列表"]}}"""
+=== 工具使用模式 ===
+主要工具: {', '.join(tools_used) if tools_used else '未指定'}
+
+=== 任务生成要求 ===
+请基于上述分析，创造一个新的同类型任务，要求：
+
+1. **保持核心特征**：
+   - 任务类型必须是 {essence.task_type}
+   - 领域应该是 {essence.domain} 或相关领域
+   - 复杂度保持在 {essence.complexity_level} 级别
+
+2. **创新变化**：
+   - 改变具体的目标对象或参数
+   - 调整场景设定或应用背景
+   - 保持任务的挑战性和价值
+
+3. **实用性要求**：
+   - 任务描述清晰具体，可直接执行
+   - 说明预期使用的工具和方法
+   - 确保任务有明确的成功标准
+
+4. **质量标准**：
+   - 任务描述长度60-120字
+   - 避免过于简单或过于复杂
+   - 确保任务具有实际应用价值
+
+=== 示例格式参考 ===
+{essence.task_type}类型任务示例：
+- reasoning: "使用浏览器搜索和Python分析，对比分析ChatGPT和Claude在代码生成能力上的差异，从准确性、效率和可读性三个维度进行评估"
+- web: "访问GitHub搜索最受欢迎的机器学习项目，筛选star数量超过10k的项目，提取项目名称、简介和主要技术栈信息"  
+- code: "实现一个高效的快速排序算法，要求支持自定义比较函数，并添加性能测试代码验证在不同数据规模下的执行效率"
+
+请严格按照以下JSON格式返回：
+
+{{
+  "description": "新任务的详细描述",
+  "expected_tools": ["工具1", "工具2"],
+  "success_criteria": "成功标准描述",
+  "estimated_steps": 数字,
+  "innovation_points": ["创新点1", "创新点2"]
+}}
+
+注意：确保生成的任务既保持原有特征，又具有创新性和实用价值。"""
             
             response = await self.llm_client._call_api(prompt)
             
@@ -730,22 +1554,50 @@ class SimpleSynthesizer:
             if json_match:
                 parsed = json.loads(json_match.group())
                 
-                # 构建TaskSpec
-                task_id = f"synth_{int(time.time())}_{essence.essence_id.split('_')[-1]}"
+                # 构建增强的TaskSpec
+                task_id = f"synth_{essence.task_type}_{essence.domain}_{int(time.time())}"
+                
+                # 确定expected_tools，结合原有工具和新建议
+                expected_tools = parsed.get("expected_tools", tools_used if tools_used else ["python_executor"])
+                
+                # 根据复杂度调整max_steps
+                complexity_steps_map = {
+                    "simple": 3,
+                    "medium": 6, 
+                    "complex": 10
+                }
+                max_steps = complexity_steps_map.get(essence.complexity_level, 5)
+                
+                # 如果LLM提供了估计步骤数，使用它
+                if "estimated_steps" in parsed:
+                    max_steps = min(parsed["estimated_steps"], 15)  # 最大不超过15步
+                
+                logger.info(f"✨ Generated enhanced task:")
+                logger.info(f"   Task ID: {task_id}")
+                logger.info(f"   Description: {parsed.get('description', '')[:80]}...")
+                logger.info(f"   Expected tools: {expected_tools}")
+                logger.info(f"   Max steps: {max_steps}")
                 
                 return TaskSpec(
                     task_id=task_id,
                     task_type=TaskType(essence.task_type),
                     description=parsed.get("description", essence.query),
-                    expected_tools=parsed.get("expected_tools", ["python_executor"]),
-                    constraints={},
-                    max_steps=5,
+                    expected_tools=expected_tools,
+                    constraints={
+                        "success_criteria": parsed.get("success_criteria", ""),
+                        "innovation_points": parsed.get("innovation_points", []),
+                        "source_essence": essence.essence_id
+                    },
+                    max_steps=max_steps,
                     priority=1
                 )
+            else:
+                logger.error(f"Failed to parse JSON response from LLM for essence {essence.essence_id}")
+                logger.warning(f"Response content: {response[:200]}...")
+                return None
         
         except Exception as e:
-            logger.error(f"Error generating task from essence: {e}")
-        
+            logger.error(f"Error generating task from essence {essence.essence_id}: {e}")
         return None
     
     async def _publish_task(self, task: TaskSpec):
@@ -767,99 +1619,50 @@ class SimpleSynthesizer:
                 "source": "synthesis"
             }
         )
-    
-    def _record_generated_task(self, task: TaskSpec, essence_id: str):
-        """记录生成的任务，带重试机制"""
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                with sqlite3.connect(self.db_path, timeout=10) as conn:
-                    conn.execute('''
-                        INSERT OR REPLACE INTO generated_tasks 
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (
-                        task.task_id,
-                        essence_id,
-                        task.json(),
-                        datetime.now().isoformat(),
-                        False
-                    ))
-                    conn.commit()
-                    logger.info(f"Successfully recorded generated task {task.task_id}")
-                    return
-                    
-            except sqlite3.OperationalError as e:
-                logger.warning(f"Database write failed (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    logger.error(f"Failed to record task {task.task_id} after {max_retries} attempts")
-            except Exception as e:
-                logger.error(f"Unexpected error recording task {task.task_id}: {e}")
-                break
-    
-    def _ensure_processed_json(self):
-        """确保集中标记文件存在"""
-        if not os.path.exists(self.processed_json_path):
-            with open(self.processed_json_path, 'w', encoding='utf-8') as f:
-                json.dump({}, f)
-    
-    def _load_processed(self) -> dict:
-        with self._processed_lock:
-            try:
-                with open(self.processed_json_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-    
-    def _save_processed(self, processed: dict):
-        with self._processed_lock:
-            with open(self.processed_json_path, 'w', encoding='utf-8') as f:
-                json.dump(processed, f, ensure_ascii=False, indent=2)
-    
-    def _is_trajectory_processed(self, filename: str) -> bool:
-        """检查轨迹是否已处理（集中管理）"""
-        processed = self._load_processed()
-        return filename in processed
-    
-    def _mark_trajectory_processed(self, filename: str):
-        """标记轨迹已处理（集中管理）"""
-        processed = self._load_processed()
-        processed[filename] = int(time.time())
-        self._save_processed(processed)
 
 async def main():
     """任务合成器主程序"""
     config = {
         "redis_url": os.getenv("REDIS_URL", "redis://redis:6379"),
-        "synthesis_db": os.getenv("SYNTHESIS_DB", "/app/output/synthesis.db"),
         "synthesis_enabled": os.getenv("SYNTHESIS_ENABLED", "false").lower() == "true",
+        "auto_monitor_trajectories": os.getenv("AUTO_MONITOR_TRAJECTORIES", "true").lower() == "true",
+        "auto_export_seeds": os.getenv("AUTO_EXPORT_SEEDS", "true").lower() == "true",
         "vllm_url": os.getenv("VLLM_URL", "http://vllm:8000")
     }
+    
+    # 输出配置信息
+    logger.info("🚀 启动基于JSON的任务合成器，配置如下:")
+    logger.info(f"  合成器启用: {config['synthesis_enabled']}")
+    logger.info(f"  自动轨迹监控: {config['auto_monitor_trajectories']}")
+    logger.info(f"  自动种子导出: {config['auto_export_seeds']}")
+    logger.info(f"  存储方式: JSON文件")
     
     synthesizer = SimpleSynthesizer(config)
     
     try:
         if config["synthesis_enabled"]:
-            logger.info("Starting task synthesis service...")
+            logger.info("🎯 开始启动任务合成服务...")
             await synthesizer.start()
         else:
-            logger.info("Task synthesis is disabled, service will wait...")
+            logger.info("⚠️ 任务合成功能已禁用，服务将等待...")
             # 保持服务运行，但不执行合成逻辑
             while True:
                 await asyncio.sleep(60)
                 logger.info("Synthesis service waiting (disabled)...")
     except KeyboardInterrupt:
-        logger.info("Synthesis service interrupted")
+        logger.info("🛑 合成服务被中断")
     finally:
         try:
+            # 停止文件监控
+            if hasattr(synthesizer, 'observer') and synthesizer.observer and synthesizer.observer.is_alive():
+                synthesizer.observer.stop()
+                synthesizer.observer.join()
+                logger.info("📁 文件监控已停止")
+            
             await synthesizer.redis.aclose()  # 使用aclose()替代close()
+            logger.info("🔌 Redis连接已关闭")
         except Exception as e:
-            logger.warning(f"Error closing Redis connection: {e}")
+            logger.warning(f"⚠️ 关闭资源时出错: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

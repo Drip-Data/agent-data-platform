@@ -168,7 +168,35 @@ def start_runtime_service(runtime):
     async def _run_service():
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         r = redis_client.from_url(redis_url)
-        queue_name = "tasks:reasoning"
+        
+        # 根据runtime的能力确定队列名
+        queue_name = None
+        if hasattr(runtime, 'capabilities') and runtime.capabilities:
+            # 推理runtime处理reasoning队列
+            if 'browser' in runtime.capabilities and 'python_executor' in runtime.capabilities:
+                queue_name = "tasks:reasoning"
+            # 代码执行runtime处理code队列
+            elif 'python_code_execution' in runtime.capabilities:
+                queue_name = "tasks:code"
+            # Web导航runtime处理web队列
+            elif 'browser_navigation' in runtime.capabilities:
+                queue_name = "tasks:web"
+        
+        # 如果无法从capabilities确定，尝试从runtime类名推断
+        if not queue_name:
+            runtime_class = runtime.__class__.__name__.lower()
+            if 'reasoning' in runtime_class:
+                queue_name = "tasks:reasoning"
+            elif 'sandbox' in runtime_class or 'code' in runtime_class:
+                queue_name = "tasks:code"
+            elif 'web' in runtime_class or 'navigator' in runtime_class:
+                queue_name = "tasks:web"
+            else:
+                # 默认为reasoning队列
+                queue_name = "tasks:reasoning"
+        
+        logger.info(f"Runtime {runtime.runtime_id} starting to consume from queue: {queue_name}")
+        
         group = "workers"
         consumer_id = runtime.runtime_id
         # 创建消费者组
@@ -186,6 +214,7 @@ def start_runtime_service(runtime):
                     try:
                         data = json.loads(fields[b'task'].decode())
                         task = TaskSpec.from_dict(data)
+                        logger.info(f"Processing task {task.task_id} from queue {queue_name}")
                         result = await runtime.execute(task)
                         # 路径由 runtime 自行保存轨迹
                         logger.info(f"Task {task.task_id} executed successfully: {result.success}")
@@ -210,7 +239,8 @@ def start_runtime_service(runtime):
                             )
                             
                             # 尝试保存错误轨迹
-                            await runtime._save_trajectory(error_result)
+                            if hasattr(runtime, '_save_trajectory'):
+                                await runtime._save_trajectory(error_result)
                         except Exception as save_error:
                             logger.error(f"Failed to save error trajectory: {save_error}")
                         

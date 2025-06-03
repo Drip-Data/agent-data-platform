@@ -24,7 +24,7 @@ services:
     networks:
       - agent_network
 
-  # vLLM推理服务（可选）
+  # vLLM推理服务（可选 - 可以不启动，reasoning-runtime将使用外部API）
   vllm:
     image: vllm/vllm-openai:v0.2.7
     environment:
@@ -49,6 +49,8 @@ services:
     restart: unless-stopped
     networks:
       - agent_network
+    profiles:
+      - optional  # 标记为可选服务，需要时手动启动
 
   # 任务分发器
   dispatcher:
@@ -155,11 +157,22 @@ services:
       - VLLM_URL=http://vllm:8000
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
+      # 外部API配置 - 主要使用Google Gemini
+      # Google Gemini API配置
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      # DeepSeek API配置（备用）
+      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      # 通用OpenAI兼容API配置（备用）
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - OPENAI_API_BASE=${OPENAI_API_BASE}
     depends_on:
       redis:
         condition: service_healthy
-      vllm:
-        condition: service_healthy
+      # 移除vllm依赖 - reasoning-runtime可以独立启动，使用外部API
+      # vllm:
+      #   condition: service_healthy
     volumes:
       - ./output:/app/output
     networks:

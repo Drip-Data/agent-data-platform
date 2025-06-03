@@ -29,6 +29,21 @@
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
+                      📄 tasks.jsonl
+                             ↓
+                    🚀 Dispatcher (分发器)
+                             ↓
+            ┌────────────────┼────────────────┐
+            ↓                ↓                ↓
+    📝 tasks:code    🌐 tasks:web    🧠 tasks:reasoning
+            ↓                ↓                ↓
+   🏃 Sandbox Runtime  🌐 Web Runtime   🧠 Reasoning Runtime
+            ↓                ↓                ↓
+    直接执行Python代码  浏览器自动化操作    智能推理+工具调用
+                                              ↓
+                                    内置browser_tool
+                                    内置python_executor_tool
+
 ## 🚀 快速开始
 
 ### 前置要求
@@ -38,21 +53,56 @@
 - 8GB+ RAM (推荐)
 - 20GB+ 磁盘空间
 
-### 一键部署
+### 🎯 一键部署所有Runtime Workers（推荐）
 
 ```bash
 # 1. 克隆项目
 git clone <repository-url>
 cd agent-data-platform
 
-# 2. 构建镜像
-./build.sh
+# 2. 设置LLM API密钥 (选择其一)
+export GEMINI_API_KEY=your_gemini_api_key_here
+# 或者
+export DEEPSEEK_API_KEY=your_deepseek_api_key_here  
+# 或者
+export OPENAI_API_KEY=your_openai_api_key_here
 
-# 3. 启动服务
-./deploy.sh
+# 3. 一键启动所有服务（自动跳过vLLM）
+docker-compose up -d
 
 # 4. 监控进度
 watch -n5 'echo "完成任务数: $(ls output/trajectories 2>/dev/null | wc -l)"'
+```
+
+**现在默认启动的服务包括：**
+- ✅ Redis队列服务
+- ✅ Dispatcher（任务分发器）  
+- ✅ Reasoning Runtime（智能推理）
+- ✅ Sandbox Runtime（代码执行）
+- ✅ Web Runtime（浏览器导航）
+- ✅ Prometheus + Grafana（监控）
+- 🔕 vLLM服务（可选，需要时手动启动）
+
+### 🔧 可选：启动本地vLLM（需要GPU）
+
+```bash
+# 如果你有GPU并希望使用本地推理
+docker-compose --profile optional up -d vllm
+```
+
+### 🧠 仅启动Reasoning Runtime（轻量模式）
+
+如果你只需要智能推理功能：
+
+```bash
+# 1. 设置API密钥
+export GEMINI_API_KEY=your_gemini_api_key_here
+
+# 2. 启动核心服务
+docker-compose up -d redis dispatcher reasoning-runtime
+
+# 3. 可选：启动监控
+docker-compose up -d prometheus grafana
 ```
 
 ### 验证部署
@@ -61,8 +111,10 @@ watch -n5 'echo "完成任务数: $(ls output/trajectories 2>/dev/null | wc -l)"
 # 检查服务状态
 docker-compose ps
 
-# 检查健康状态
-curl http://localhost:8001/health
+# 检查各Runtime健康状态
+curl http://localhost:8001/health  # Sandbox Runtime
+curl http://localhost:8002/health  # Web Runtime  
+curl http://localhost:8003/health  # Reasoning Runtime
 
 # 查看实时指标
 curl http://localhost:8001/metrics

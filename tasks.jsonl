@@ -14,3 +14,13 @@
 {"task_id": "tech_company_comparison", "task_type": "reasoning", "description": "对比分析Google和Microsoft两家科技公司。使用浏览器搜索两家公司的最新财报信息和市值数据，然后用Python创建数据可视化图表，分析它们的业务表现和发展趋势。", "expected_tools": ["browser", "python_executor"], "max_steps": 14}
 {"task_id": "open_source_license_study", "task_type": "reasoning", "description": "研究开源软件许可证类型。使用浏览器访问GitHub上不同开源项目，收集MIT、GPL、Apache等许可证的使用情况，然后用Python统计分析各种许可证的流行度，并解释它们的主要区别。", "expected_tools": ["browser", "python_executor"], "max_steps": 13}
 {"task_id": "programming_language_trends", "task_type": "reasoning", "description": "分析编程语言发展趋势。使用浏览器访问Stack Overflow Developer Survey和GitHub语言统计页面，收集主流编程语言的使用数据，然后用Python创建趋势分析图表，预测未来几年的语言发展方向。", "expected_tools": ["browser", "python_executor"], "max_steps": 16}
+{"task_id": "demo_task_1748970722", "task_type": "code", "description": "创建一个函数计算两个数的最大公约数", "expected_tools": ["python_executor"], "max_steps": 3}
+{"task_id": "demo_gcd_task", "task_type": "code", "description": "创建一个函数计算两个数的最大公约数", "expected_tools": ["python_executor"], "max_steps": 3}
+{"task_id": "nus_iora_professors", "task_type": "web", "description": "搜索新加坡国立大学(NUS) IORA研究所有哪些教授，获取教授姓名和研究领域信息", "expected_tools": ["browser"], "max_steps": 10}
+{"task_id": "ai_education_impact_analysis", "task_type": "reasoning", "description": "分析人工智能对教育行业的影响，包括优势、挑战和未来发展趋势。需要从多个角度进行深入分析，包括技术、经济、社会和伦理层面", "expected_tools": ["browser", "python_executor"], "max_steps": 15}
+{"task_id": "test_reasoning_new_task", "task_type": "reasoning", "description": "测试新的reasoning runtime是否正常工作。分析云计算和边缘计算的区别，使用浏览器搜索相关信息，然后用Python生成对比分析报告。", "expected_tools": ["browser", "python_executor"], "max_steps": 8}
+{"task_id": "test_code_runtime_matrix", "task_type": "code", "description": "测试代码执行运行时。创建一个3x3的单位矩阵，然后计算它的行列式和迹，并打印结果。使用numpy库进行矩阵运算。", "expected_tools": ["python_executor"], "max_steps": 5}
+{"task_id": "test_web_runtime_github", "task_type": "web", "description": "测试Web导航运行时。访问GitHub主页，搜索'machine learning'相关的仓库，获取搜索结果页面中前3个仓库的名称和描述信息。", "expected_tools": ["browser"], "max_steps": 8}
+{"task_id": "test_reasoning_runtime_stocks", "task_type": "reasoning", "description": "测试推理运行时的完整工作流程。研究苹果公司(AAPL)和特斯拉(TSLA)两只股票的表现。首先使用浏览器查找这两只股票的当前价格和市值信息，然后用Python创建价格对比图表，最后分析哪只股票更值得投资及其原因。", "expected_tools": ["browser", "python_executor"], "max_steps": 12}
+{"task_id": "synth_web_python_requests", "task_type": "web", "description": "在Google上搜索Python requests库的文档，并提取该库中`get`方法的详细参数说明", "expected_tools": ["selenium", "BeautifulSoup"], "max_steps": 5}
+{"task_id": "synth_code_gcd_algorithm", "task_type": "code", "description": "求解126和210的最大公约数，并使用欧几里得算法描述求解过程", "expected_tools": [], "max_steps": 5}

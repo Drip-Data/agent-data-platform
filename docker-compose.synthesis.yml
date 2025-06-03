@@ -1,9 +1,10 @@
 version: '3.8'
 
 # ====================================================================
-# 任务合成器扩展模块 - 独立部署配置
+# 任务合成器扩展模块 - 基于JSON文件存储的独立部署配置
 # 本文件为原agent-data-platform项目的扩展模块
 # 可以独立部署，也可以与原系统集成
+# 完全移除数据库依赖，使用JSON文件存储
 # ====================================================================
 
 services:
@@ -14,14 +15,26 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 4gb 
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
     volumes:
       - redis_data:/data
-    networks:
-      - agent-data-platform
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
+    networks:
+      - agent_network
 
   # =================================================================
-  # 模块1: 智能任务合成器 (轨迹分析与任务生成)
+  # 模块1: 智能任务合成器 (轨迹分析与任务生成) - JSON文件存储版本
   # =================================================================
   
   # 任务合成器 - 模块1核心智能组件
@@ -30,9 +43,11 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # 合成器配置
+      # 合成器配置 - 基于JSON文件存储
       - SYNTHESIS_ENABLED=true
-      - SYNTHESIS_DB=${SYNTHESIS_DB:-/app/output/synthesis.db}
+      # 自动化功能配置
+      - AUTO_MONITOR_TRAJECTORIES=${AUTO_MONITOR_TRAJECTORIES:-true}
+      - AUTO_EXPORT_SEEDS=${AUTO_EXPORT_SEEDS:-true}
       # LLM API配置 (统一接口)
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_API_URL=${GEMINI_API_URL}
@@ -40,46 +55,26 @@ services:
       - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_API_BASE=${OPENAI_API_BASE}
-      - API_PORT=8081
-      - API_HOST=0.0.0.0
-    ports:
-      - "8081:8081"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     volumes:
       - ./output:/app/output
       - ./core:/app/core
+      - ./start_synthesis.py:/app/start_synthesis.py
     restart: unless-stopped
-    command: >
-      sh -c "
-      echo '🚀 Starting synthesis services...' &&
-      echo '📝 Initializing database...' &&
-      python -m core.synthesiscore.init_synthesis_db &&
-      echo '🔄 Starting synthesis worker and API...' &&
-      python -m core.synthesiscore.synthesis > /tmp/synthesis_worker.log 2>&1 &
-      echo 'Worker started with PID:' $! &&
-      sleep 2 &&
-      echo 'Starting API server...' &&
-      python -m core.synthesiscore.synthesis_api
-      "
+    command: python /app/start_synthesis.py
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
         max-file: "3"
     networks:
-      - agent-data-platform
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      - agent_network
 
 networks:
-  agent-data-platform:
-    external: true
+  agent_network:
+    driver: bridge
 
 volumes:
-  synthesis_data:
   redis_data: 

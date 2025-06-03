@@ -188,10 +188,17 @@ class ReasoningRuntime(RuntimeInterface):
                     # Append step for complete_task and break from step_id loop
                     duration = time.time() - tool_start
                     steps.append(ExecutionStep(
-                        step_id=step_id, action_type=action_type, action_params=params,
-                        observation=observation, success=True, thinking=thinking,
-                        execution_code=execution_code, timestamp=time.time(), duration=duration,
-                        # retries_attempted=attempt # Optional: add retries to ExecutionStep
+                        step_id=step_id, 
+                        action_type=action_type, 
+                        action_params=params,
+                        observation=observation, 
+                        success=True, 
+                        thinking=thinking,
+                        execution_code=execution_code, 
+                        error_type=None,
+                        error_message=None,
+                        timestamp=time.time(), 
+                        duration=duration
                     ))
                     # 结构化日志：StepLog
                     logger.debug(json.dumps({
@@ -220,20 +227,35 @@ class ReasoningRuntime(RuntimeInterface):
                     try:
                         tool_response_data = json.loads(observation)
                         if isinstance(tool_response_data, dict):
-                            # Prefer error_type from tool if available
-                            current_attempt_err_type = tool_response_data.get("error_type", current_attempt_err_type)
+                            # 安全处理error_type，确保是ErrorType枚举
+                            error_type_raw = tool_response_data.get("error_type", current_attempt_err_type)
+                            if error_type_raw:
+                                if isinstance(error_type_raw, str):
+                                    # 尝试转换字符串为ErrorType枚举
+                                    try:
+                                        current_attempt_err_type = ErrorType(error_type_raw)
+                                    except ValueError:
+                                        # 如果无法转换，使用默认的TOOL_ERROR
+                                        current_attempt_err_type = ErrorType.TOOL_ERROR
+                                elif isinstance(error_type_raw, ErrorType):
+                                    current_attempt_err_type = error_type_raw
+                                else:
+                                    current_attempt_err_type = ErrorType.TOOL_ERROR
+                            else:
+                                current_attempt_err_type = ErrorType.TOOL_ERROR
+                            
                             current_attempt_err_msg = tool_response_data.get("error",
                                                                 tool_response_data.get("message",
                                                                                         str(tool_response_data)))
-                            if not current_attempt_err_type: # If tool doesn't provide error_type
-                                current_attempt_err_type = ErrorType.TOOL_ERROR
                     except json.JSONDecodeError:
                         current_attempt_err_msg = observation if isinstance(observation, str) else "Unknown tool error"
-                        if not current_attempt_err_type: current_attempt_err_type = ErrorType.TOOL_ERROR
+                        if not current_attempt_err_type: 
+                            current_attempt_err_type = ErrorType.TOOL_ERROR
                     except Exception as e_parse:
                         logger.error(f"Error parsing tool's error response on attempt {attempt + 1}: {e_parse}")
                         current_attempt_err_msg = f"Could not parse tool error: {observation[:200]}"
-                        if not current_attempt_err_type: current_attempt_err_type = ErrorType.TOOL_ERROR
+                        if not current_attempt_err_type: 
+                            current_attempt_err_type = ErrorType.TOOL_ERROR
                 
                 if tool_success:
                     break # Successful attempt, exit retry loop
@@ -243,12 +265,16 @@ class ReasoningRuntime(RuntimeInterface):
                         f"ErrorType: {current_attempt_err_type}, ErrorMsg: {current_attempt_err_msg}"
                     )
                     is_retryable = False
-                    if current_attempt_err_type == "NavigationError" and \
-                       current_attempt_err_msg and "timeout" in current_attempt_err_msg.lower():
+                    # 安全的错误类型检查，支持ErrorType枚举和字符串
+                    is_navigation_error = False
+                    if isinstance(current_attempt_err_type, ErrorType):
+                        is_navigation_error = (current_attempt_err_type == ErrorType.NETWORK_ERROR or 
+                                             current_attempt_err_type.value == "NavigationError")
+                    elif isinstance(current_attempt_err_type, str):
+                        is_navigation_error = current_attempt_err_type == "NavigationError"
+                    
+                    if is_navigation_error and current_attempt_err_msg and "timeout" in current_attempt_err_msg.lower():
                         is_retryable = True
-                    # Add other specific retryable error_types here, e.g.:
-                    # elif current_attempt_err_type == ErrorType.NETWORK_ERROR: # Assuming such an ErrorType exists
-                    #     is_retryable = True
 
                     if is_retryable and attempt < max_retries:
                         logger.info(f"Retrying action {action} after {retry_delay_seconds}s delay...")
