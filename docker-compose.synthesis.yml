@@ -61,9 +61,8 @@ services:
     volumes:
       - ./output:/app/output
       - ./core:/app/core
-      - ./start_synthesis.py:/app/start_synthesis.py
     restart: unless-stopped
-    command: python /app/start_synthesis.py
+    command: python -m core.synthesiscore.synthesis
     logging:
       driver: "json-file"
       options:
