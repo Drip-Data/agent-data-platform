@@ -113,9 +113,10 @@ class ReasoningRuntime(RuntimeInterface):
                     # The 'res' from deep_research_tool is expected to be a dict.
                     # We need to decide how to determine 'success' from this dict.
                     # For now, let's assume if 'final_answer' is present, it's a success.
-                    tool_success = 'final_answer' in res
-                    observation = json.dumps(res) # res is already a dict
-                    action_type = ActionType.TOOL_CALL # Or a new ActionType like DEEP_RESEARCH_ACTION
+                    tool_success = res.get('success', False) # 使用deep_research_tool返回的success状态
+                    # 确保结果是JSON可序列化的，deep_research_tool._process_result已处理
+                    observation = json.dumps(res)
+                    action_type = ActionType.TOOL_CALL
                 elif action == 'python_execute' and tool_name == 'python_executor':
                     code = params.get('code', '')
                     logger.debug(f"Attempt {attempt + 1}: Python execute")
@@ -325,37 +326,64 @@ class ReasoningRuntime(RuntimeInterface):
             }
         )
           # 保存轨迹到集合文件
+        logger.info(f"Attempting to save trajectory. Overall task success status: {success}")
         out_dir = os.getenv('OUTPUT_DIR', '/app/output/trajectories')
         os.makedirs(out_dir, exist_ok=True)
+        logger.info(f"Trajectory output directory: {out_dir}")
         
         # 集合文件路径
         collection_file = os.path.join(out_dir, "trajectories_collection.json")
+        logger.info(f"Trajectory collection file path: {collection_file}")
         
         # 读取现有集合或创建新集合
-        trajectories = []
+        trajectories_list = [] # Renamed to avoid conflict with the trajectory object
         if os.path.exists(collection_file):
             try:
                 with open(collection_file, 'r', encoding='utf-8') as f:
-                    trajectories = json.load(f)
-                    # 确保trajectories是一个列表
-                    if not isinstance(trajectories, list):
-                        trajectories = []
-            except (json.JSONDecodeError, Exception) as e:
-                logging.error(f"Error reading trajectories collection: {e}")
-                # 如果文件损坏，创建新的集合
-                trajectories = []
+                    content = f.read()
+                    if content.strip(): # Check if file is not empty
+                        trajectories_list = json.loads(content)
+                        if not isinstance(trajectories_list, list):
+                            logger.warning(f"Trajectories collection file {collection_file} did not contain a list. Reinitializing.")
+                            trajectories_list = []
+                    else: # File is empty
+                        trajectories_list = []
+            except json.JSONDecodeError as e:
+                logger.error(f"Error decoding JSON from trajectories collection {collection_file}: {e}. Reinitializing trajectories list.")
+                trajectories_list = []
+            except Exception as e:
+                logger.error(f"Error reading trajectories collection {collection_file}: {e}. Reinitializing trajectories list.")
+                trajectories_list = []
         
-        logger.debug(f"Appending new trajectory; total before append: {len(trajectories)} to {collection_file}")
-        # 将新轨迹添加到集合中
-        trajectories.append(trajectory.to_dict())
+        try:
+            trajectory_dict = trajectory.to_dict()
+            logger.debug(f"Trajectory data to be appended (type: {type(trajectory_dict)}):")
+            # Log a summary of the trajectory_dict to avoid excessively long logs
+            # For example, log keys and types of complex objects
+            summary_trajectory_dict = {k: type(v).__name__ for k, v in trajectory_dict.items()}
+            logger.debug(f"Summary of trajectory_dict: {json.dumps(summary_trajectory_dict, indent=2, ensure_ascii=False)}")
+            # If you need to see full content for debugging, uncomment the next line carefully:
+            # logger.debug(f"Full trajectory_dict: {json.dumps(trajectory_dict, indent=2, ensure_ascii=False)}")
+
+        except Exception as e:
+            logger.error(f"Error converting trajectory to dict: {e}", exc_info=True)
+            # If conversion fails, we cannot proceed to save this trajectory
+            return trajectory # Return original trajectory, though saving failed
+
+        logger.debug(f"Appending new trajectory; total before append: {len(trajectories_list)} to {collection_file}")
+        trajectories_list.append(trajectory_dict)
         
         # 将更新后的集合写入文件
-        logger.debug(f"Writing {len(trajectories)} trajectories to {collection_file}")
-        with open(collection_file, 'w', encoding='utf-8') as f:
-            json.dump(trajectories, f, indent=2, ensure_ascii=False)
+        logger.debug(f"Writing {len(trajectories_list)} trajectories to {collection_file}")
+        try:
+            with open(collection_file, 'w', encoding='utf-8') as f:
+                json.dump(trajectories_list, f, indent=2, ensure_ascii=False)
+            logging.info(f"Trajectory successfully added and collection saved to: {collection_file}")
+        except Exception as e:
+            logger.error(f"Failed to write trajectories to {collection_file}: {e}", exc_info=True)
+            # Optionally, re-raise or handle this critical error
+            # For now, we log and the trajectory object is still returned
             
-        logging.info(f"Trajectory added to collection: {collection_file}")
-        
         # 同时也保存单独的文件（可选）
         if self.config.get("save_individual_trajectories", False):
             individual_file = os.path.join(out_dir, f"{trajectory.task_id}.json")

@@ -97,8 +97,7 @@ class DeepResearchTool:
             return {
                 "success": False,
                 "error": str(e),
-                "error_type": "DEEP_RESEARCH_ERROR",
-                "final_answer": f"深度研究过程中发生错误: {str(e)}",
+                "error_type": "DEEP_RESEARCH_ERROR",                "final_answer": f"深度研究过程中发生错误: {str(e)}",
                 "messages": [{"type": "ai", "content": f"研究失败: {str(e)}"}],
                 "sources_gathered": [],
                 "web_research_result": [],
@@ -107,56 +106,49 @@ class DeepResearchTool:
     
     def _process_result(self, raw_result: Dict[str, Any]) -> Dict[str, Any]:
         """
-        处理原始研究结果，提取关键信息
+        处理原始研究结果，提取关键信息并确保JSON可序列化
         
         Args:
             raw_result: LangGraph 返回的原始结果
             
         Returns:
-            处理后的结果字典
-        """
+            处理后的结果字典（JSON可序列化）        """
         try:
-            # 提取最终答案
-            final_answer = ""
+            # 处理messages，确保JSON可序列化
             messages = raw_result.get("messages", [])
+            processed_messages = self._process_messages(messages)
             
-            if messages:
-                # 获取最后一条消息作为最终答案
-                last_message = messages[-1]
-                if isinstance(last_message, dict):
-                    final_answer = last_message.get("content", "")
-                else:
-                    final_answer = getattr(last_message, "content", "")
+            # 增强的 final_answer 提取逻辑
+            final_answer = self._extract_final_answer(raw_result, processed_messages)
             
-            # 如果没有从messages中获取到答案，尝试直接获取
-            if not final_answer:
-                final_answer = raw_result.get("final_answer", "")
-            
-            # 处理源文档
+            # 处理源文档（完整内容，无长度限制）
             sources_gathered = raw_result.get("sources_gathered", [])
-            processed_sources = []
+            processed_sources = self._process_sources(sources_gathered)
             
-            for source in sources_gathered:
-                if isinstance(source, dict):
-                    processed_sources.append({
-                        "title": source.get("title", "未知来源"),
-                        "url": source.get("value", source.get("short_url", "")),
-                        "short_url": source.get("short_url", "")
-                    })
+            # 提取所有可序列化的原始数据
+            raw_data = self._extract_serializable_data(raw_result)
             
-            # 构建处理后的结果
+            # 构建处理后的结果（完全JSON可序列化）
             processed_result = {
                 "success": True,
-                "final_answer": final_answer,
-                "messages": messages,
+                "final_answer": str(final_answer),
+                "messages": processed_messages,
                 "sources_gathered": processed_sources,
                 "web_research_result": raw_result.get("web_research_result", []),
                 "search_query": raw_result.get("search_query", []),
                 "research_loop_count": raw_result.get("research_loop_count", 0),
+                
+                # 保留原始数据以确保完整性
+                "raw_data": raw_data,
+                
                 "metadata": {
                     "total_sources": len(processed_sources),
                     "total_queries": len(raw_result.get("search_query", [])),
-                    "research_loops": raw_result.get("research_loop_count", 0)
+                    "research_loops": raw_result.get("research_loop_count", 0),
+                    "messages_processed": len(processed_messages),
+                    "final_answer_length": len(final_answer),
+                    "total_content_length": sum(len(str(s.get("content", ""))) for s in processed_sources),
+                    "has_complete_data": bool(final_answer and processed_sources)
                 }
             }
             
@@ -164,15 +156,149 @@ class DeepResearchTool:
             
         except Exception as e:
             logger.error(f"结果处理失败: {str(e)}")
-            return {
-                "success": False,
-                "error": f"结果处理失败: {str(e)}",
-                "final_answer": "结果处理过程中发生错误",
-                "messages": [],
-                "sources_gathered": [],
-                "web_research_result": [],
-                "search_query": []
+            return self._create_error_result(str(e))
+
+    def _process_messages(self, messages: list) -> list:
+        """处理消息列表，确保JSON可序列化"""
+        processed_messages = []
+        
+        for msg in messages:
+            if isinstance(msg, dict):
+                # 已经是字典，直接使用
+                processed_messages.append({
+                    "type": msg.get("type", "unknown"),
+                    "content": str(msg.get("content", ""))
+                })
+            else:
+                # LangChain消息对象，提取属性
+                msg_type = self._extract_message_type(msg)
+                msg_content = self._extract_message_content(msg)
+                
+                processed_messages.append({
+                    "type": msg_type,
+                    "content": msg_content
+                })
+        
+        return processed_messages
+    
+    def _extract_message_type(self, msg) -> str:
+        """提取消息类型"""
+        if hasattr(msg, '__class__'):
+            class_name = msg.__class__.__name__
+            if 'Human' in class_name:
+                return "human"
+            elif 'AI' in class_name:
+                return "ai"
+            elif 'System' in class_name:
+                return "system"
+        return "unknown"
+    
+    def _extract_message_content(self, msg) -> str:
+        """提取消息内容"""
+        if hasattr(msg, 'content'):
+            return str(msg.content)
+        else:
+            return str(msg)
+    
+    def _extract_final_answer(self, raw_result: Dict[str, Any], processed_messages: list) -> str:
+        """增强的最终答案提取逻辑"""
+        # 按优先级尝试从不同字段提取最终答案
+        answer_fields = [
+            "final_answer", 
+            "final_report", 
+            "conclusion", 
+            "summary", 
+            "answer", 
+            "result",
+            "response"
+        ]
+        
+        for field in answer_fields:
+            if raw_result.get(field):
+                answer = str(raw_result[field]).strip()
+                if answer:
+                    return answer
+        
+        # 从处理后的消息中提取最后一条AI消息
+        for msg in reversed(processed_messages):
+            if msg.get("type") == "ai" and msg.get("content"):
+                content = str(msg["content"]).strip()
+                if content:
+                    return content
+        
+        # 最后尝试从任何消息中提取
+        if processed_messages:
+            last_content = processed_messages[-1].get("content", "")
+            if last_content:
+                return str(last_content)
+        
+        return "未能提取到完整的研究结论"
+    
+    def _process_sources(self, sources_gathered: list) -> list:
+        """处理源文档，保留完整内容"""
+        processed_sources = []
+        
+        for source in sources_gathered:
+            if isinstance(source, dict):
+                processed_sources.append({
+                    "title": source.get("title", "未知来源"),
+                    "url": source.get("value", source.get("url", source.get("short_url", ""))),
+                    "short_url": source.get("short_url", ""),
+                    "content": source.get("content", ""),  # 完整内容，无长度限制
+                    "snippet": source.get("snippet", ""),
+                    "metadata": {
+                        key: value for key, value in source.items() 
+                        if key not in ["title", "url", "value", "short_url", "content", "snippet"]
+                        and isinstance(value, (str, int, float, bool))
+                    }
+                })
+        
+        return processed_sources
+    
+    def _extract_serializable_data(self, raw_result: Dict[str, Any]) -> Dict[str, Any]:
+        """提取所有可JSON序列化的原始数据"""
+        serializable_data = {}
+        
+        for key, value in raw_result.items():
+            # 跳过已经处理的字段
+            if key in ["messages", "sources_gathered"]:
+                continue
+                
+            # 只保留可序列化的数据类型
+            if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+                try:
+                    # 测试是否可以序列化
+                    import json
+                    json.dumps(value)
+                    serializable_data[key] = value
+                except (TypeError, ValueError):
+                    # 如果不能序列化，转为字符串
+                    serializable_data[key] = str(value)
+        
+        return serializable_data
+    
+    def _create_error_result(self, error_message: str) -> Dict[str, Any]:
+        """创建错误结果"""
+        return {
+            "success": False,
+            "error": f"结果处理失败: {error_message}",
+            "error_type": "RESULT_PROCESSING_ERROR",
+            "final_answer": "结果处理过程中发生错误",
+            "messages": [],
+            "sources_gathered": [],
+            "web_research_result": [],
+            "search_query": [],
+            "raw_data": {},
+            "metadata": {
+                "total_sources": 0,
+                "total_queries": 0,
+                "research_loops": 0,
+                "messages_processed": 0,
+                "final_answer_length": 0,
+                "total_content_length": 0,
+                "has_complete_data": False
             }
+        }
     
     def execute_sync(self, query: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """

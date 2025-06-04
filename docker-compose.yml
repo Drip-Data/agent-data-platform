@@ -133,6 +133,10 @@ services:
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
       # - OPENAI_API_BASE=${OPENAI_API_BASE}
       - MAX_CONCURRENT=4
+      # 网络故障恢复配置
+      - ENABLE_OFFLINE_MODE=true
+      - FALLBACK_TO_GITHUB=true
+      - SKIP_GOOGLE_SEARCH=true
     depends_on:
       redis:
         condition: service_healthy
@@ -146,6 +150,21 @@ services:
       replicas: 1
     networks:
       - agent_network
+    # 企业网络环境优化配置
+    dns:
+      - 114.114.114.114  # 国内DNS
+      - 8.8.8.8          # Google DNS
+      - 8.8.4.4          # Google DNS备用
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "github.com:20.205.243.166"  # 使用已知可用的GitHub IP
+    # 企业网络兼容性配置
+    sysctls:
+      - net.ipv4.ip_forward=1
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   # 推理运行时服务
   reasoning-runtime:

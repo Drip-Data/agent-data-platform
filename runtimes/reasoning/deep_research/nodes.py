@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.types import Send
 from google.genai import Client
+from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 
 from .state import (
     OverallState, 
@@ -161,14 +162,17 @@ async def web_research(state: WebSearchState, config: Dict[str, Any] = None) -> 
         
         logger.info(f"执行网络搜索 - 查询: {state['search_query']}")
         
-        # 使用 Google Search API 进行搜索
+        # 使用 Gemini 2.0 新的 Google Search API 格式
+        google_search_tool = Tool(google_search=GoogleSearch())
+        
         response = genai_client.models.generate_content(
             model=research_config.query_generator_model,
             contents=prompt,
-            config={
-                "tools": [{"google_search": {}}],
-                "temperature": 0,
-            },
+            config=GenerateContentConfig(
+                tools=[google_search_tool],
+                response_modalities=["TEXT"],
+                temperature=0,
+            ),
         )
         
         # 处理搜索结果
@@ -181,17 +185,54 @@ async def web_research(state: WebSearchState, config: Dict[str, Any] = None) -> 
             sources_gathered = []
             
             if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
-                grounding_chunks = getattr(candidate.grounding_metadata, 'grounding_chunks', None)
-                if grounding_chunks is not None:
-                    resolved_urls = resolve_urls(grounding_chunks, int(state["id"]))
-                    citations = get_citations(response, resolved_urls)
-                    sources_gathered = [
-                        item for citation in citations
-                        for item in citation.get("segments", [])
-                        if citation.get("segments")
-                    ]
+                grounding_metadata = candidate.grounding_metadata
+                
+                # 优先使用Gemini 2.0的search_entry_point (新方式)
+                if hasattr(grounding_metadata, 'search_entry_point') and grounding_metadata.search_entry_point:
+                    search_entry = grounding_metadata.search_entry_point
+                    if hasattr(search_entry, 'rendered_content') and search_entry.rendered_content:
+                        rendered_content = search_entry.rendered_content
+                        logger.info(f"使用search_entry_point - 内容长度: {len(rendered_content)}")
+                        
+                        # 将rendered_content作为搜索结果
+                        sources_gathered = [{
+                            "content": rendered_content,
+                            "source": "google_search_entry_point",
+                            "search_query": state["search_query"]
+                        }]
+                        
+                        # 也检查是否有grounding_chunks用于引用
+                        grounding_chunks = getattr(grounding_metadata, 'grounding_chunks', None)
+                        if grounding_chunks:
+                            try:
+                                resolved_urls = resolve_urls(grounding_chunks, int(state["id"]))
+                                citations = get_citations(response, resolved_urls)
+                                chunk_sources = [
+                                    item for citation in citations
+                                    for item in citation.get("segments", [])
+                                    if citation.get("segments")
+                                ]
+                                sources_gathered.extend(chunk_sources)
+                            except Exception as e:
+                                logger.warning(f"处理grounding_chunks时出错: {e}")
+                    else:
+                        logger.warning("search_entry_point存在但rendered_content为空")
+                        sources_gathered = []
                 else:
-                    logger.warning("grounding_chunks为空，无法提取引用信息")
+                    # 回退到旧方式：使用grounding_chunks
+                    grounding_chunks = getattr(grounding_metadata, 'grounding_chunks', None)
+                    if grounding_chunks is not None:
+                        logger.info(f"使用grounding_chunks回退方式 - 数量: {len(grounding_chunks) if grounding_chunks else 0}")
+                        resolved_urls = resolve_urls(grounding_chunks, int(state["id"]))
+                        citations = get_citations(response, resolved_urls)
+                        sources_gathered = [
+                            item for citation in citations
+                            for item in citation.get("segments", [])
+                            if citation.get("segments")
+                        ]
+                    else:
+                        logger.warning("grounding_chunks为空，无法提取引用信息")
+                        sources_gathered = []
             
             # 插入引用标记
             modified_text = insert_citation_markers(response.text, citations)

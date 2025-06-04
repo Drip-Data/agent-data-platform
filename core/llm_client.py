@@ -336,39 +336,85 @@ class LLMClient:
     def _build_reasoning_prompt(self, task_description: str, available_tools: List[str],
                                 previous_steps: List[Dict] = None,
                                 browser_context: Optional[Dict[str, Any]] = None) -> str:
-        """构建推理提示"""
-        tool_descriptions = []
+        """构建推理提示, 动态生成工具和动作描述"""
+        tool_specific_descriptions = []
+        tool_action_parameter_details = []
+        possible_actions = ["complete_task", "error"] # Base actions
+
+        logger.debug(f"Building reasoning prompt with available_tools: {available_tools}")
+
         for tool_name in available_tools:
-            # 强制使用严格的工具调用格式和示例，详见 docs/AGENT_IMPROVEMENT_PLAN.md
-            logger.debug("构建推理提示：应用严格的工具使用规则和示例")
-            if tool_name == 'browser':
-                browser_desc = (
+            logger.debug(f"Processing tool: {tool_name} for prompt generation.")
+            if tool_name == 'browser': # Should not be selected if not in reasoning runtime's capabilities
+                desc = (
                     f"- browser: 用于与网页交互的工具。支持以下主要 ACTION:\n"
                     f"    - `browser_navigate`: 导航到指定URL。PARAMETERS: `{{ \"url\": \"<完整的HTTP/HTTPS URL>\" }}`\n"
                     f"    - `browser_get_text`: 提取页面文本。PARAMETERS: `{{ \"selector\": \"<CSS选择器(可选)>\" }}` (若无selector，则提取body文本)\n"
-                    f"    - `browser_click`: 点击指定元素。PARAMETERS: `{{ \"selector\": \"<CSS选择器>\" }}`\n"
-                    f"    (更多操作如 browser_fill_form, browser_extract_links 等请参考工具文档，并确保 PARAMETERS 格式正确)"
+                    f"    - `browser_click`: 点击指定元素。PARAMETERS: `{{ \"selector\": \"<CSS选择器>\" }}`"
                 )
-                tool_descriptions.append(browser_desc)
+                tool_specific_descriptions.append(desc)
+                possible_actions.extend(["browser_navigate", "browser_get_text", "browser_click"])
+                tool_action_parameter_details.append(
+                    "  - **对于 `browser_navigate` ACTION**:\n"
+                    "    - `PARAMETERS` 必须是 `{{ \"url\": \"<完整的、有效的HTTP或HTTPS URL>\" }}` 的格式。\n"
+                    "    - 示例: `{{ \"url\": \"https://www.google.com\" }}`\n"
+                    "  - **对于 `browser_click` ACTION**:\n"
+                    "    - `PARAMETERS` 必须是 `{{ \"selector\": \"<CSS选择器>\" }}` 的格式。\n"
+                    "    - 示例: `{{ \"selector\": \"button#submit\" }}`\n"
+                    "  - **对于 `browser_get_text` ACTION**:\n"
+                    "    - `PARAMETERS` 可以是 `{{ \"selector\": \"<CSS选择器>\" }}` (提取特定元素文本) 或 `{{}}` (提取整个body文本)。\n"
+                    "    - 示例: `{{ \"selector\": \"div.article-content\" }}` 或 `{{}}`"
+                )
             elif tool_name == 'python_executor':
-                python_desc = (
-                    f"- python_executor: 用于执行Python代码。主要 ACTION:\n"
-                    f"    - `python_execute`: 执行Python代码。PARAMETERS: `{{ \"code\": \"<Python代码字符串>\" }}`"
+                actions_for_python = [
+                    "`python_execute`: 执行Python代码。PARAMETERS: `{{ \"code\": \"<Python代码字符串>\" }}`",
+                    "`python_analyze`: 分析数据。PARAMETERS: `{{ \"data\": <数据>, \"operation\": \"<操作类型，如 describe, info, correlation>\" }}`",
+                    "`python_visualize`: 创建数据可视化。PARAMETERS: `{{ \"data\": <数据>, \"plot_type\": \"<图表类型，如 line, bar, scatter>\", \"title\": \"<图表标题(可选)>\" }}`"
+                ]
+                desc = (
+                    f"- python_executor: 用于执行Python代码和数据分析。支持以下主要 ACTION:\n" +
+                    "\n".join([f"    - {action_def}" for action_def in actions_for_python])
                 )
-                tool_descriptions.append(python_desc)
+                tool_specific_descriptions.append(desc)
+                possible_actions.extend(["python_execute", "python_analyze", "python_visualize"])
+                tool_action_parameter_details.append(
+                    "  - **对于 `python_execute` ACTION**:\n"
+                    "    - `PARAMETERS` 必须是 `{{ \"code\": \"<Python代码字符串>\" }}`。\n"
+                    "  - **对于 `python_analyze` ACTION**:\n"
+                    "    - `PARAMETERS` 必须是 `{{ \"data\": <数据>, \"operation\": \"<操作类型，例如 'describe', 'info', 'correlation'>\" }}`。\n"
+                    "  - **对于 `python_visualize` ACTION**:\n"
+                    "    - `PARAMETERS` 必须是 `{{ \"data\": <数据>, \"plot_type\": \"<图表类型，例如 'line', 'bar', 'scatter'>\", \"title\": \"<图表标题(可选)>\" }}`。"
+                )
+            elif tool_name == 'deep_research':
+                desc = (
+                    f"- deep_research: 用于进行深度研究和分析。主要 ACTION:\n"
+                    f"    - `deep_research`: 执行深度研究。PARAMETERS: `{{ \"query\": \"<研究查询字符串>\" }}`"
+                )
+                tool_specific_descriptions.append(desc)
+                possible_actions.append("deep_research")
+                tool_action_parameter_details.append(
+                    "  - **对于 `deep_research` ACTION**:\n"
+                    "    - `PARAMETERS` 必须是 `{{ \"query\": \"<研究查询字符串>\" }}`。"
+                )
             else:
-                tool_descriptions.append(f"- {tool_name}")
-        tools_desc = "\n".join(tool_descriptions)
-        
+                # For generic tools not explicitly detailed, provide a basic entry.
+                tool_specific_descriptions.append(f"- {tool_name}: (这是一个通用工具，请根据其功能和预期输入来决定 ACTION 和 PARAMETERS)")
+                # We cannot reliably add to possible_actions or tool_action_parameter_details without more info.
+                # The LLM would need to infer or this tool needs a more specific description if it's to be used effectively.
+                logger.warning(f"Tool '{tool_name}' does not have a detailed description for prompt generation.")
+
+        tools_desc_str = "\n".join(tool_specific_descriptions)
+        parameters_details_str = "\n".join(tool_action_parameter_details)
+        action_list_str = ", ".join(sorted(list(set(possible_actions)))) # Unique, sorted list of actions
+
         browser_context_str = ""
-        if browser_context:
-            bc = browser_context # shortcut
-            # Ensuring consistent indentation for the f-string block
+        if browser_context: # This section might be irrelevant if 'browser' tool is not available
+            bc = browser_context
             browser_context_str = (
-                f"\n\n当前浏览器状态:\n"
+                f"\n\n当前浏览器状态 (仅当 'browser' 工具可用时相关):\n"
                 f"- 当前URL: {bc.get('current_url', 'N/A')}\n"
                 f"- 页面标题: {bc.get('current_page_title', 'N/A')}\n"
-                f"- 最近导航历史:\n  {bc.get('recent_navigation_summary', '无导航历史').replace(chr(10), chr(10) + '  ')}\n" # Indent multi-line summary
+                f"- 最近导航历史:\n  {bc.get('recent_navigation_summary', '无导航历史').replace(chr(10), chr(10) + '  ')}\n"
                 f"- 上次提取文本片段: {bc.get('last_text_snippet', '无')}\n"
                 f"- 当前页面链接摘要: {bc.get('links_on_page_summary', '无')}"
             )
@@ -376,21 +422,19 @@ class LLMClient:
         previous_steps_str = ""
         if previous_steps:
             previous_steps_str = "\n\n之前的执行步骤:\n"
-            for i, step in enumerate(previous_steps[-3:], 1):  # 只显示最近3步
+            for i, step in enumerate(previous_steps[-3:], 1):
                 action_str = step.get('action', step.get('action_type', 'unknown_action'))
                 observation_str = str(step.get('observation', ''))[:200]
                 previous_steps_str += f"  {i}. Action: {action_str}, Observation: {observation_str}...\n"
 
-        # The f-string for prompt_template starts here.
-        # All lines of the f-string content should be at least at this indentation level or further indented.
-        logger.debug("Applying strict tool usage rules from AGENT_IMPROVEMENT_PLAN.md")
+        logger.debug("Applying strict tool usage rules from AGENT_IMPROVEMENT_PLAN.md with dynamic actions/params.")
         prompt_template = f"""你是一个智能推理助手，需要逐步解决用户的任务。
 你的目标是准确、高效地完成任务，并清晰地展示你的决策过程。
 
 任务描述: {task_description}
 
-可用工具:
-{tools_desc}
+可用工具 (及其支持的 ACTION 和 PARAMETERS 格式):
+{tools_desc_str}
 {browser_context_str}
 {previous_steps_str}
 请分析当前情况（包括任务描述、可用工具、浏览器状态和之前的步骤），输出你的思考过程和下一步行动。格式如下:
@@ -398,34 +442,24 @@ class LLMClient:
 THINKING:
 [在这里详细描述你的思考过程。分析任务需求，回顾之前的步骤和观察结果（如果有），评估当前状态，并解释你为什么选择下一步的行动和工具。如果之前的步骤失败，请分析失败原因并说明你将如何调整策略。]
 
-ACTION: [选择一个行动类型。可用行动包括: browser_navigate, browser_click, browser_get_text, python_execute, python_analyze, python_visualize, complete_task, error]
+ACTION: [从“可用工具”描述中列出的 ACTION 中选择一个行动类型。具体可选项包括: {action_list_str}。务必选择一个在上面明确列出的 ACTION。]
 
-TOOL: [如果你选择的ACTION需要工具，请指定使用的具体工具名称，例如：browser, python_executor。如果ACTION是 complete_task 或 error，则TOOL应为 None 或留空。]
+TOOL: [如果你选择的ACTION需要工具 (即非 complete_task 或 error)，请指定使用的具体工具名称，例如：deep_research, python_executor。此工具名称必须是“可用工具”中列出的一个。如果ACTION是 complete_task 或 error，则TOOL应为 None 或留空。]
 
 PARAMETERS:
 [提供一个JSON对象格式的工具参数。严格遵守以下规则：
-1.  **对于 `browser_navigate` ACTION**:
-    -   `PARAMETERS` 必须是 `{{ \"url\": \"<完整的、有效的HTTP或HTTPS URL>\" }}` 的格式。
-    -   示例: `{{ \"url\": \"https://www.google.com\" }}`
-2.  **对于 `browser_click` ACTION**:
-    -   `PARAMETERS` 必须是 `{{ \"selector\": \"<CSS选择器>\" }}` 的格式。
-    -   示例: `{{ \"selector\": \"button#submit\" }}`
-3.  **对于 `browser_get_text` ACTION**:
-    -   `PARAMETERS` 可以是 `{{ \"selector\": \"<CSS选择器>\" }}` (提取特定元素文本) 或 `{{}}` (提取整个body文本)。
-    -   示例: `{{ \"selector\": \"div.article-content\" }}` 或 `{{}}`
-4.  **对于 `python_execute` ACTION**:
-    -   `PARAMETERS` 必须是 `{{ \"code\": \"<Python代码字符串>\" }}`。
-5.  **对于其他 ACTION**: 请根据工具的具体需求提供参数。
-6.  **如果ACTION是 `complete_task` 或 `error`**: `PARAMETERS` 应为 `{{}}`。
-7.  **绝对禁止使用 `{{\"raw\": ...}}` 作为 `PARAMETERS` 的主要结构。所有参数都应该有明确的键名。**
-8.  在生成参数前，请在THINKING中确认所有必需的参数值（尤其是URL）已经从任务描述、之前的步骤或你的分析中获取。如果缺少关键参数，你的ACTION应该是error，并在THINKING中说明原因。
+1.  **根据你选择的 ACTION，参考上面“可用工具”部分对应 ACTION 的 PARAMETERS 描述来构建参数。**
+{parameters_details_str}
+2.  **如果ACTION是 `complete_task` 或 `error`**: `PARAMETERS` 应为 `{{}}`。
+3.  **绝对禁止使用 `{{\"raw\": ...}}` 作为 `PARAMETERS` 的主要结构。所有参数都应该有明确的键名。**
+4.  在生成参数前，请在THINKING中确认所有必需的参数值（尤其是URL、查询、代码等）已经从任务描述、之前的步骤或你的分析中获取。如果缺少关键参数，你的ACTION应该是error，并在THINKING中说明原因。
 ]
 
 CONFIDENCE: [提供一个0.0到1.0之间的小数，表示你对当前决策能够成功推进任务的信心。]
 
 请确保你的输出严格遵循上述格式的每一部分。
 """
-        return prompt_template # This return must be at the same indentation level as the start of the method body.
+        return prompt_template
     
     def _build_summary_prompt(self, task_description: str, steps: List[Dict], 
                              final_outputs: List[str]) -> str:
