@@ -208,15 +208,16 @@ class LLMClient:
         api_url = os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta')
         
         # 验证并使用有效的Gemini模型名称
-        model_name = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')  # 使用稳定版本
+        model_name = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash-preview-05-20')  # 更新默认模型
         valid_models = [
-            'gemini-1.5-flash', 'gemini-1.5-pro', 
+            'gemini-2.5-flash-preview-05-20',  # 添加新的预览模型
+            'gemini-2.0-flash', 'gemini-2.0-pro', 
             'gemini-1.0-pro', 'gemini-pro'
         ]
         
         if model_name not in valid_models:
-            logger.warning(f"Invalid Gemini model '{model_name}', using default 'gemini-1.5-flash'")
-            model_name = 'gemini-1.5-flash'
+            logger.warning(f"Invalid Gemini model '{model_name}', using default 'gemini-2.5-flash-preview-05-20'")
+            model_name = 'gemini-2.5-flash-preview-05-20'
         
         payload = {
             "contents": [
@@ -244,8 +245,8 @@ class LLMClient:
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             # 如果使用了不稳定的模型，尝试回退到稳定版本
-            if model_name != 'gemini-1.5-flash':
-                logger.info("Retrying with stable model 'gemini-1.5-flash'")
+            if model_name != 'gemini-2.0-flash':
+                logger.info("Retrying with stable model 'gemini-2.0-flash'")
                 response = await self.client.post(
                     f"{api_url}/models/gemini-1.5-flash:generateContent?key={api_key}",
                     json=payload
