@@ -10,8 +10,8 @@ from typing import Dict, Any, Optional, List
 from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ExecutionStep, ErrorType, ActionType
 from core.llm_client import LLMClient
 from core.metrics import EnhancedMetrics
-from core.browser_state_manager import BrowserStateManager # Import the new state manager
-from .tools import get_browser_tool, get_python_executor_tool
+from core.browser_state_manager import BrowserStateManager
+from .tools import get_python_executor_tool, deep_research_tool # Import deep_research_tool
 
 logger = logging.getLogger(__name__)
 metrics = EnhancedMetrics(port=8003)
@@ -39,7 +39,7 @@ class ReasoningRuntime(RuntimeInterface):
 
     @property
     def capabilities(self) -> list:
-        return ['browser', 'python_executor']
+        return ['deep_research', 'python_executor'] # Updated capabilities
 
     async def health_check(self) -> bool:
         # 简单检查 LLM 服务可用性
@@ -61,11 +61,10 @@ class ReasoningRuntime(RuntimeInterface):
         final_trajectory_error_type: Optional[ErrorType] = None
         final_trajectory_error_message: Optional[str] = None
         
-        browser_state = BrowserStateManager() # Instantiate for each task execution
+        # browser_state = BrowserStateManager() # No longer needed directly here if browser tool is removed
 
         for step_id in range(1, task.max_steps + 1):
-            # Get browser context for LLM
-            current_browser_context_for_llm = browser_state.get_context_for_llm()
+            # current_browser_context_for_llm = browser_state.get_context_for_llm() # Not needed if browser tool removed
 
             # 生成推理决策
             # Assuming ExecutionStep has a to_dict() method or is a dataclass
@@ -76,8 +75,8 @@ class ReasoningRuntime(RuntimeInterface):
             decision = await self.client.generate_reasoning(
                 task_description=task.description,
                 available_tools=self.capabilities,
-                previous_steps=serializable_steps,
-                browser_context=current_browser_context_for_llm # Pass browser context
+                previous_steps=serializable_steps
+                # browser_context=current_browser_context_for_llm # Removed browser context
             )
             thinking = decision.get('thinking', f"Step {step_id}: Analyzing task and deciding next action")
             action = decision.get('action')
@@ -104,48 +103,19 @@ class ReasoningRuntime(RuntimeInterface):
                     'parameters': params
                 }, ensure_ascii=False)
 
-                if action == 'browser_navigate' and tool_name == 'browser':
-                    url = params.get('url', params.get('raw', ''))
-                    logger.debug(f"Attempt {attempt + 1}: Browser navigate - URL: {url}, params: {params}")
-                    browser_tool = get_browser_tool()
-                    res = await browser_tool.navigate(url)
-                    tool_success = res.get('success', False)
-                    observation = json.dumps(res)
-                    action_type = ActionType.BROWSER_ACTION
-                    browser_state.record_navigation_attempt(url, tool_success, title=res.get('title'), error_details=res if not tool_success else None)
-                elif action == 'browser_click' and tool_name == 'browser':
-                    selector = params.get('selector', params.get('raw', ''))
-                    logger.debug(f"Attempt {attempt + 1}: Browser click - selector: {selector}, params: {params}")
-                    browser_tool = get_browser_tool()
-                    res = await browser_tool.click(selector)
-                    tool_success = res.get('success', False)
-                    observation = json.dumps(res)
-                    action_type = ActionType.BROWSER_ACTION
-                    if not tool_success: # browser_tool.click now returns error_type
-                        browser_state.record_action_error("click", res.get("error_type", "UnknownClickError"), "browser")
-                elif action == 'browser_get_text' and tool_name == 'browser':
-                    selector = params.get('selector', params.get('raw'))
-                    logger.debug(f"Attempt {attempt + 1}: Browser get_text - selector: {selector}, params: {params}")
-                    browser_tool = get_browser_tool()
-                    res = await browser_tool.get_text(selector)
-                    tool_success = res.get('success', False)
-                    observation = json.dumps(res)
-                    action_type = ActionType.BROWSER_ACTION
-                    if tool_success:
-                        browser_state.record_text_extraction(res.get('text', ''))
-                    else: # browser_tool.get_text now returns error_type
-                        browser_state.record_action_error("get_text", res.get("error_type", "UnknownGetTextError"), "browser")
-                # Example for a potential browser_extract_links action
-                # elif action == 'browser_extract_links' and tool_name == 'browser':
-                #     logger.debug(f"Attempt {attempt+1}: Browser extract_links, params: {params}")
-                #     res = await browser_tool.extract_links() # Assuming it's implemented in browser_tool
-                #     tool_success = res.get('success', False)
-                #     observation = json.dumps(res)
-                #     action_type = ActionType.BROWSER_ACTION
-                #     if tool_success and res.get('links') is not None:
-                #         browser_state.record_links_extracted(res.get('links'))
-                #     elif not tool_success and res.get("error_type"):
-                #          browser_state.record_action_error("extract_links", res.get("error_type"), "browser")
+                if action == 'deep_research' and tool_name == 'deep_research':
+                    query = params.get('query', '')
+                    # Config for deep research can be passed via params or have defaults
+                    research_config = params.get('config', {})
+                    logger.debug(f"Attempt {attempt + 1}: Deep research execute - Query: {query}")
+                    # Assuming deep_research_tool is a singleton or obtained similarly to other tools
+                    res = await deep_research_tool.execute(query, research_config)
+                    # The 'res' from deep_research_tool is expected to be a dict.
+                    # We need to decide how to determine 'success' from this dict.
+                    # For now, let's assume if 'final_answer' is present, it's a success.
+                    tool_success = 'final_answer' in res
+                    observation = json.dumps(res) # res is already a dict
+                    action_type = ActionType.TOOL_CALL # Or a new ActionType like DEEP_RESEARCH_ACTION
                 elif action == 'python_execute' and tool_name == 'python_executor':
                     code = params.get('code', '')
                     logger.debug(f"Attempt {attempt + 1}: Python execute")
@@ -397,8 +367,8 @@ class ReasoningRuntime(RuntimeInterface):
 
     async def cleanup(self):
         """清理资源"""
-        browser_tool = get_browser_tool()
-        await browser_tool.cleanup()
+        # browser_tool = get_browser_tool() # Browser tool removed
+        # await browser_tool.cleanup()
         python_executor_tool = get_python_executor_tool()
         python_executor_tool.cleanup()
         if hasattr(self.client, 'close'):

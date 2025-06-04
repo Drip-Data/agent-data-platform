@@ -3322,5 +3322,817 @@
       "original_task_id": "test_reasoning_runtime_stocks"
     },
     "created_at": "2025-06-04T10:59:28Z"
+  },
+  {
+    "task_id": "73bb603a-dd19-485b-898a-3c4f68b4f87d",
+    "task_name": "factorial_5",
+    "task_description": "Calculate 5! (factorial of 5) using iteration",
+    "runtime_id": "sandbox-1",
+    "success": true,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "Calculate 5! (factorial of 5) using iteration"
+        },
+        "tool_output": "def factorial_iterative(n):\n    \"\"\"\n    Calculates the factorial of a non-negative integer using iteration.\n\n    Args:\n        n: The non-negative integer.\n\n    Returns:\n        The factorial of n.\n\n    Raises:\n        ValueError: If n is negative.\n    \"\"\"\n    if n < 0:\n        raise ValueError(\"Factorial is not defined for negative numbers.\")\n    elif n == 0:\n        return 1  # Factorial of 0 is 1\n    else:\n        result = 1\n        for i in range(1, n + 1):\n            result *= i\n        return result\n\nif __name__ == \"__main__\":\n    try:\n        number = 5\n        result = factorial_iterative(number)\n        print(f\"The factorial of {number} is {result}\")  # Output: The factorial of 5 is 120\n\n        #测试异常处理\n        result = factorial_iterative(-5)\n\n    except ValueError as e:\n        print(f\"Error: {e}\") # Output: Error: Factorial is not defined for negative numbers.",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: Calculate 5! (factorial of 5) using iteration\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def factorial_iterative(n):\n    \"\"\"\n    Calculates the factorial of a non-negative integer using iteration.\n\n    Args:\n        n: The non-negative integer.\n\n    Returns:\n        The factorial of n.\n\n    Raises:\n        ValueError: If n is negative.\n    \"\"\"\n    if n < 0:\n        raise ValueError(\"Factorial is not defined for negative numbers.\")\n    elif n == 0:\n        return 1  # Factorial of 0 is 1\n    else:\n        result = 1\n        for i in range(1, n + 1):\n            result *= i\n        return result\n\nif __name__ == \"__main__\":\n    try:\n        number = 5\n        result = factorial_iterative(number)\n        print(f\"The factorial of {number} is {result}\")  # Output: The factorial of 5 is 120\n\n        #测试异常处理\n        result = factorial_iterative(-5)\n\n    except ValueError as e:\n        print(f\"Error: {e}\") # Output: Error: Factorial is not defined for negative numbers.",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:34Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def factorial_iterative(n):\n    \"\"\"\n    Calculates the factorial of a non-negative integer using iteration.\n\n    Args:\n        n: The non-negative integer.\n\n    Returns:\n        The factorial of n.\n\n    Raises:\n        ValueError: If n is negative.\n    \"\"\"\n    if n < 0:\n        raise ValueError(\"Factorial is not defined for negative numbers.\")\n    elif n == 0:\n        return 1  # Factorial of 0 is 1\n    else:\n        result = 1\n        for i in range(1, n + 1):\n            result *= i\n        return result\n\nif __name__ == \"__main__\":\n    try:\n        number = 5\n        result = factorial_iterative(number)\n        print(f\"The factorial of {number} is {result}\")  # Output: The factorial of 5 is 120\n\n        #测试异常处理\n        result = factorial_iterative(-5)\n\n    except ValueError as e:\n        print(f\"Error: {e}\") # Output: Error: Factorial is not defined for negative numbers."
+        },
+        "tool_output": "The factorial of 5 is 120\nError: Factorial is not defined for negative numbers.\n",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 成功\n退出代码: 0\n执行时长: 0.01 秒\n执行成功完成，无错误\n",
+        "execution_code": "def factorial_iterative(n):\n    \"\"\"\n    Calculates the factorial of a non-negative integer using iteration.\n\n    Args:\n        n: The non-negative integer.\n\n    Returns:\n        The factorial of n.\n\n    Raises:\n        ValueError: If n is negative.\n    \"\"\"\n    if n < 0:\n        raise ValueError(\"Factorial is not defined for negative numbers.\")\n    elif n == 0:\n        return 1  # Factorial of 0 is 1\n    else:\n        result = 1\n        for i in range(1, n + 1):\n            result *= i\n        return result\n\nif __name__ == \"__main__\":\n    try:\n        number = 5\n        result = factorial_iterative(number)\n        print(f\"The factorial of {number} is {result}\")  # Output: The factorial of 5 is 120\n\n        #测试异常处理\n        result = factorial_iterative(-5)\n\n    except ValueError as e:\n        print(f\"Error: {e}\") # Output: Error: Factorial is not defined for negative numbers.",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:34Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "The factorial of 5 is 120\nError: Factorial is not defined for negative numbers.\n",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.013246536254882812,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 0,
+      "original_task_id": "factorial_5",
+      "llm_provider": "gemini",
+      "execution_time": 0.012617826461791992,
+      "code_stats": {
+        "lines": 34,
+        "chars": 885
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:34",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:34Z"
+  },
+  {
+    "task_id": "31a05e63-f8f9-4d25-beff-440eac2e0c1d",
+    "task_name": "prime_check_17",
+    "task_description": "Check if 17 is a prime number",
+    "runtime_id": "sandbox-1",
+    "success": true,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "Check if 17 is a prime number"
+        },
+        "tool_output": "import math\n\ndef is_prime(n):\n    \"\"\"\n    Checks if a number is a prime number.\n\n    Args:\n        n: An integer.\n\n    Returns:\n        True if n is a prime number, False otherwise.\n        Raises TypeError if input is not an integer.\n        Raises ValueError if input is not a positive integer.\n\n    \"\"\"\n    if not isinstance(n, int):\n        raise TypeError(\"Input must be an integer.\")\n    if n <= 1:\n        return False\n    if n <= 3:\n        return True\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n\n\nif __name__ == \"__main__\":\n    try:\n        number = 17\n        if is_prime(number):\n            print(f\"{number} is a prime number.\")\n        else:\n            print(f\"{number} is not a prime number.\")\n    except (TypeError, ValueError) as e:\n        print(f\"Error: {e}\")",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: Check if 17 is a prime number\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "import math\n\ndef is_prime(n):\n    \"\"\"\n    Checks if a number is a prime number.\n\n    Args:\n        n: An integer.\n\n    Returns:\n        True if n is a prime number, False otherwise.\n        Raises TypeError if input is not an integer.\n        Raises ValueError if input is not a positive integer.\n\n    \"\"\"\n    if not isinstance(n, int):\n        raise TypeError(\"Input must be an integer.\")\n    if n <= 1:\n        return False\n    if n <= 3:\n        return True\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n\n\nif __name__ == \"__main__\":\n    try:\n        number = 17\n        if is_prime(number):\n            print(f\"{number} is a prime number.\")\n        else:\n            print(f\"{number} is not a prime number.\")\n    except (TypeError, ValueError) as e:\n        print(f\"Error: {e}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:34Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "import math\n\ndef is_prime(n):\n    \"\"\"\n    Checks if a number is a prime number.\n\n    Args:\n        n: An integer.\n\n    Returns:\n        True if n is a prime number, False otherwise.\n        Raises TypeError if input is not an integer.\n        Raises ValueError if input is not a positive integer.\n\n    \"\"\"\n    if not isinstance(n, int):\n        raise TypeError(\"Input must be an integer.\")\n    if n <= 1:\n        return False\n    if n <= 3:\n        return True\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n\n\nif __name__ == \"__main__\":\n    try:\n        number = 17\n        if is_prime(number):\n            print(f\"{number} is a prime number.\")\n        else:\n            print(f\"{number} is not a prime number.\")\n    except (TypeError, ValueError) as e:\n        print(f\"Error: {e}\")"
+        },
+        "tool_output": "17 is a prime number.\n",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 成功\n退出代码: 0\n执行时长: 0.01 秒\n执行成功完成，无错误\n",
+        "execution_code": "import math\n\ndef is_prime(n):\n    \"\"\"\n    Checks if a number is a prime number.\n\n    Args:\n        n: An integer.\n\n    Returns:\n        True if n is a prime number, False otherwise.\n        Raises TypeError if input is not an integer.\n        Raises ValueError if input is not a positive integer.\n\n    \"\"\"\n    if not isinstance(n, int):\n        raise TypeError(\"Input must be an integer.\")\n    if n <= 1:\n        return False\n    if n <= 3:\n        return True\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n\n\nif __name__ == \"__main__\":\n    try:\n        number = 17\n        if is_prime(number):\n            print(f\"{number} is a prime number.\")\n        else:\n            print(f\"{number} is not a prime number.\")\n    except (TypeError, ValueError) as e:\n        print(f\"Error: {e}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:34Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "17 is a prime number.\n",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.013396501541137695,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 0,
+      "original_task_id": "prime_check_17",
+      "llm_provider": "gemini",
+      "execution_time": 0.012932300567626953,
+      "code_stats": {
+        "lines": 40,
+        "chars": 920
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:34",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:34Z"
+  },
+  {
+    "task_id": "0ea903ec-b9c6-4089-a72a-a8b2eb9f9ffe",
+    "task_name": "sum_array",
+    "task_description": "Calculate the sum of array [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
+    "runtime_id": "sandbox-1",
+    "success": true,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "Calculate the sum of array [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]"
+        },
+        "tool_output": "def calculate_sum(arr):\n    \"\"\"\n    Calculates the sum of elements in an array.\n\n    Args:\n        arr: A list of numbers.\n\n    Returns:\n        The sum of the elements in the array.\n        Returns an error message if the input is not a list or contains non-numeric elements.\n    \"\"\"\n    if not isinstance(arr, list):\n        return \"Error: Input must be a list.\"\n    \n    try:\n        total = sum(arr)\n        return total\n    except TypeError:\n        return \"Error: List elements must be numbers.\"\n\n\nif __name__ == \"__main__\":\n    my_array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n    result = calculate_sum(my_array)\n    print(f\"The sum of the array is: {result}\")\n\n    #test with invalid input\n    invalid_array = [1,2,'a',4]\n    result = calculate_sum(invalid_array)\n    print(f\"The result for invalid array is: {result}\")\n\n    invalid_input = \"not a list\"\n    result = calculate_sum(invalid_input)\n    print(f\"The result for invalid input is: {result}\")",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: Calculate the sum of array [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def calculate_sum(arr):\n    \"\"\"\n    Calculates the sum of elements in an array.\n\n    Args:\n        arr: A list of numbers.\n\n    Returns:\n        The sum of the elements in the array.\n        Returns an error message if the input is not a list or contains non-numeric elements.\n    \"\"\"\n    if not isinstance(arr, list):\n        return \"Error: Input must be a list.\"\n    \n    try:\n        total = sum(arr)\n        return total\n    except TypeError:\n        return \"Error: List elements must be numbers.\"\n\n\nif __name__ == \"__main__\":\n    my_array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n    result = calculate_sum(my_array)\n    print(f\"The sum of the array is: {result}\")\n\n    #test with invalid input\n    invalid_array = [1,2,'a',4]\n    result = calculate_sum(invalid_array)\n    print(f\"The result for invalid array is: {result}\")\n\n    invalid_input = \"not a list\"\n    result = calculate_sum(invalid_input)\n    print(f\"The result for invalid input is: {result}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def calculate_sum(arr):\n    \"\"\"\n    Calculates the sum of elements in an array.\n\n    Args:\n        arr: A list of numbers.\n\n    Returns:\n        The sum of the elements in the array.\n        Returns an error message if the input is not a list or contains non-numeric elements.\n    \"\"\"\n    if not isinstance(arr, list):\n        return \"Error: Input must be a list.\"\n    \n    try:\n        total = sum(arr)\n        return total\n    except TypeError:\n        return \"Error: List elements must be numbers.\"\n\n\nif __name__ == \"__main__\":\n    my_array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n    result = calculate_sum(my_array)\n    print(f\"The sum of the array is: {result}\")\n\n    #test with invalid input\n    invalid_array = [1,2,'a',4]\n    result = calculate_sum(invalid_array)\n    print(f\"The result for invalid array is: {result}\")\n\n    invalid_input = \"not a list\"\n    result = calculate_sum(invalid_input)\n    print(f\"The result for invalid input is: {result}\")"
+        },
+        "tool_output": "The sum of the array is: 55\nThe result for invalid array is: Error: List elements must be numbers.\nThe result for invalid input is: Error: Input must be a list.\n",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 成功\n退出代码: 0\n执行时长: 0.01 秒\n执行成功完成，无错误\n",
+        "execution_code": "def calculate_sum(arr):\n    \"\"\"\n    Calculates the sum of elements in an array.\n\n    Args:\n        arr: A list of numbers.\n\n    Returns:\n        The sum of the elements in the array.\n        Returns an error message if the input is not a list or contains non-numeric elements.\n    \"\"\"\n    if not isinstance(arr, list):\n        return \"Error: Input must be a list.\"\n    \n    try:\n        total = sum(arr)\n        return total\n    except TypeError:\n        return \"Error: List elements must be numbers.\"\n\n\nif __name__ == \"__main__\":\n    my_array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n    result = calculate_sum(my_array)\n    print(f\"The sum of the array is: {result}\")\n\n    #test with invalid input\n    invalid_array = [1,2,'a',4]\n    result = calculate_sum(invalid_array)\n    print(f\"The result for invalid array is: {result}\")\n\n    invalid_input = \"not a list\"\n    result = calculate_sum(invalid_input)\n    print(f\"The result for invalid input is: {result}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "The sum of the array is: 55\nThe result for invalid array is: Error: List elements must be numbers.\nThe result for invalid input is: Error: Input must be a list.\n",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.011819124221801758,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 0,
+      "original_task_id": "sum_array",
+      "llm_provider": "gemini",
+      "execution_time": 0.011406660079956055,
+      "code_stats": {
+        "lines": 34,
+        "chars": 954
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "041a1838-5c03-4176-ad2a-e1b775f80093",
+    "task_name": "bubble_sort",
+    "task_description": "Implement bubble sort algorithm to sort [64, 34, 25, 12, 22, 11, 90]",
+    "runtime_id": "sandbox-1",
+    "success": true,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "Implement bubble sort algorithm to sort [64, 34, 25, 12, 22, 11, 90]"
+        },
+        "tool_output": "def bubble_sort(arr):\n    \"\"\"\n    Sorts a list using the bubble sort algorithm.\n\n    Args:\n        arr: The list to be sorted.\n\n    Returns:\n        The sorted list.  Returns None if input is invalid.\n    \"\"\"\n    n = len(arr)\n    if not isinstance(arr, list):  #Handle invalid input\n        print(\"Error: Input must be a list.\")\n        return None\n    if n <=1: #Handle empty or single-element list\n        return arr\n\n    for i in range(n):\n        # Last i elements are already in place\n        swapped = False  #优化：如果一趟遍历没有交换，则说明已排序\n        for j in range(0, n - i - 1):\n            # traverse the array from 0 to n-i-1\n            # Swap if the element found is greater\n            # than the next element\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n                swapped = True\n\n        if not swapped:\n            break  #优化：如果一趟遍历没有交换，则说明已排序，提前结束\n\n    return arr\n\n\n# Example usage\ndata = [64, 34, 25, 12, 22, 11, 90]\nsorted_data = bubble_sort(data)\n\nif sorted_data:\n    print(\"Sorted array:\", sorted_data)\n\n#test with invalid input\ninvalid_data = \"not a list\"\nsorted_invalid_data = bubble_sort(invalid_data)\n\nempty_list = []\nsorted_empty = bubble_sort(empty_list)\nprint(\"Sorted empty list:\", sorted_empty)\n\nsingle_element_list = [5]\nsorted_single = bubble_sort(single_element_list)\nprint(\"Sorted single element list:\", sorted_single)",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: Implement bubble sort algorithm to sort [64, 34, 25, 12, 22, 11, 90]\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def bubble_sort(arr):\n    \"\"\"\n    Sorts a list using the bubble sort algorithm.\n\n    Args:\n        arr: The list to be sorted.\n\n    Returns:\n        The sorted list.  Returns None if input is invalid.\n    \"\"\"\n    n = len(arr)\n    if not isinstance(arr, list):  #Handle invalid input\n        print(\"Error: Input must be a list.\")\n        return None\n    if n <=1: #Handle empty or single-element list\n        return arr\n\n    for i in range(n):\n        # Last i elements are already in place\n        swapped = False  #优化：如果一趟遍历没有交换，则说明已排序\n        for j in range(0, n - i - 1):\n            # traverse the array from 0 to n-i-1\n            # Swap if the element found is greater\n            # than the next element\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n                swapped = True\n\n        if not swapped:\n            break  #优化：如果一趟遍历没有交换，则说明已排序，提前结束\n\n    return arr\n\n\n# Example usage\ndata = [64, 34, 25, 12, 22, 11, 90]\nsorted_data = bubble_sort(data)\n\nif sorted_data:\n    print(\"Sorted array:\", sorted_data)\n\n#test with invalid input\ninvalid_data = \"not a list\"\nsorted_invalid_data = bubble_sort(invalid_data)\n\nempty_list = []\nsorted_empty = bubble_sort(empty_list)\nprint(\"Sorted empty list:\", sorted_empty)\n\nsingle_element_list = [5]\nsorted_single = bubble_sort(single_element_list)\nprint(\"Sorted single element list:\", sorted_single)",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def bubble_sort(arr):\n    \"\"\"\n    Sorts a list using the bubble sort algorithm.\n\n    Args:\n        arr: The list to be sorted.\n\n    Returns:\n        The sorted list.  Returns None if input is invalid.\n    \"\"\"\n    n = len(arr)\n    if not isinstance(arr, list):  #Handle invalid input\n        print(\"Error: Input must be a list.\")\n        return None\n    if n <=1: #Handle empty or single-element list\n        return arr\n\n    for i in range(n):\n        # Last i elements are already in place\n        swapped = False  #优化：如果一趟遍历没有交换，则说明已排序\n        for j in range(0, n - i - 1):\n            # traverse the array from 0 to n-i-1\n            # Swap if the element found is greater\n            # than the next element\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n                swapped = True\n\n        if not swapped:\n            break  #优化：如果一趟遍历没有交换，则说明已排序，提前结束\n\n    return arr\n\n\n# Example usage\ndata = [64, 34, 25, 12, 22, 11, 90]\nsorted_data = bubble_sort(data)\n\nif sorted_data:\n    print(\"Sorted array:\", sorted_data)\n\n#test with invalid input\ninvalid_data = \"not a list\"\nsorted_invalid_data = bubble_sort(invalid_data)\n\nempty_list = []\nsorted_empty = bubble_sort(empty_list)\nprint(\"Sorted empty list:\", sorted_empty)\n\nsingle_element_list = [5]\nsorted_single = bubble_sort(single_element_list)\nprint(\"Sorted single element list:\", sorted_single)"
+        },
+        "tool_output": "Sorted array: [11, 12, 22, 25, 34, 64, 90]\nError: Input must be a list.\nSorted empty list: []\nSorted single element list: [5]\n",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 成功\n退出代码: 0\n执行时长: 0.01 秒\n执行成功完成，无错误\n",
+        "execution_code": "def bubble_sort(arr):\n    \"\"\"\n    Sorts a list using the bubble sort algorithm.\n\n    Args:\n        arr: The list to be sorted.\n\n    Returns:\n        The sorted list.  Returns None if input is invalid.\n    \"\"\"\n    n = len(arr)\n    if not isinstance(arr, list):  #Handle invalid input\n        print(\"Error: Input must be a list.\")\n        return None\n    if n <=1: #Handle empty or single-element list\n        return arr\n\n    for i in range(n):\n        # Last i elements are already in place\n        swapped = False  #优化：如果一趟遍历没有交换，则说明已排序\n        for j in range(0, n - i - 1):\n            # traverse the array from 0 to n-i-1\n            # Swap if the element found is greater\n            # than the next element\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n                swapped = True\n\n        if not swapped:\n            break  #优化：如果一趟遍历没有交换，则说明已排序，提前结束\n\n    return arr\n\n\n# Example usage\ndata = [64, 34, 25, 12, 22, 11, 90]\nsorted_data = bubble_sort(data)\n\nif sorted_data:\n    print(\"Sorted array:\", sorted_data)\n\n#test with invalid input\ninvalid_data = \"not a list\"\nsorted_invalid_data = bubble_sort(invalid_data)\n\nempty_list = []\nsorted_empty = bubble_sort(empty_list)\nprint(\"Sorted empty list:\", sorted_empty)\n\nsingle_element_list = [5]\nsorted_single = bubble_sort(single_element_list)\nprint(\"Sorted single element list:\", sorted_single)",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "Sorted array: [11, 12, 22, 25, 34, 64, 90]\nError: Input must be a list.\nSorted empty list: []\nSorted single element list: [5]\n",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.012943267822265625,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 0,
+      "original_task_id": "bubble_sort",
+      "llm_provider": "gemini",
+      "execution_time": 0.012269735336303711,
+      "code_stats": {
+        "lines": 52,
+        "chars": 1391
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "c817c651-d2f6-4880-8971-d7176ea9bbc9",
+    "task_name": "gcd_calculation",
+    "task_description": "Calculate the Greatest Common Divisor (GCD) of 48 and 18",
+    "runtime_id": "sandbox-1",
+    "success": true,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "Calculate the Greatest Common Divisor (GCD) of 48 and 18"
+        },
+        "tool_output": "def gcd_euclidean(a, b):\n    \"\"\"\n    Calculates the Greatest Common Divisor (GCD) of two integers using the Euclidean algorithm.\n\n    Args:\n        a: The first integer.\n        b: The second integer.\n\n    Returns:\n        The GCD of a and b.  Returns 0 if both a and b are 0.  Raises TypeError if inputs are not integers.\n\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"Inputs must be integers.\")\n\n    if a == 0 and b == 0:\n        return 0  # Handle the case where both inputs are 0\n\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = 48\n        num2 = 18\n        result = gcd_euclidean(num1, num2)\n        print(f\"The GCD of {num1} and {num2} is: {result}\")\n\n        #test with 0\n        result = gcd_euclidean(0,10)\n        print(f\"The GCD of 0 and 10 is: {result}\")\n\n        #test with error\n        result = gcd_euclidean(48, \"18\")\n        print(result)\n\n    except TypeError as e:\n        print(f\"Error: {e}\")",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: Calculate the Greatest Common Divisor (GCD) of 48 and 18\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def gcd_euclidean(a, b):\n    \"\"\"\n    Calculates the Greatest Common Divisor (GCD) of two integers using the Euclidean algorithm.\n\n    Args:\n        a: The first integer.\n        b: The second integer.\n\n    Returns:\n        The GCD of a and b.  Returns 0 if both a and b are 0.  Raises TypeError if inputs are not integers.\n\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"Inputs must be integers.\")\n\n    if a == 0 and b == 0:\n        return 0  # Handle the case where both inputs are 0\n\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = 48\n        num2 = 18\n        result = gcd_euclidean(num1, num2)\n        print(f\"The GCD of {num1} and {num2} is: {result}\")\n\n        #test with 0\n        result = gcd_euclidean(0,10)\n        print(f\"The GCD of 0 and 10 is: {result}\")\n\n        #test with error\n        result = gcd_euclidean(48, \"18\")\n        print(result)\n\n    except TypeError as e:\n        print(f\"Error: {e}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def gcd_euclidean(a, b):\n    \"\"\"\n    Calculates the Greatest Common Divisor (GCD) of two integers using the Euclidean algorithm.\n\n    Args:\n        a: The first integer.\n        b: The second integer.\n\n    Returns:\n        The GCD of a and b.  Returns 0 if both a and b are 0.  Raises TypeError if inputs are not integers.\n\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"Inputs must be integers.\")\n\n    if a == 0 and b == 0:\n        return 0  # Handle the case where both inputs are 0\n\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = 48\n        num2 = 18\n        result = gcd_euclidean(num1, num2)\n        print(f\"The GCD of {num1} and {num2} is: {result}\")\n\n        #test with 0\n        result = gcd_euclidean(0,10)\n        print(f\"The GCD of 0 and 10 is: {result}\")\n\n        #test with error\n        result = gcd_euclidean(48, \"18\")\n        print(result)\n\n    except TypeError as e:\n        print(f\"Error: {e}\")"
+        },
+        "tool_output": "The GCD of 48 and 18 is: 6\nThe GCD of 0 and 10 is: 10\nError: Inputs must be integers.\n",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 成功\n退出代码: 0\n执行时长: 0.01 秒\n执行成功完成，无错误\n",
+        "execution_code": "def gcd_euclidean(a, b):\n    \"\"\"\n    Calculates the Greatest Common Divisor (GCD) of two integers using the Euclidean algorithm.\n\n    Args:\n        a: The first integer.\n        b: The second integer.\n\n    Returns:\n        The GCD of a and b.  Returns 0 if both a and b are 0.  Raises TypeError if inputs are not integers.\n\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"Inputs must be integers.\")\n\n    if a == 0 and b == 0:\n        return 0  # Handle the case where both inputs are 0\n\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = 48\n        num2 = 18\n        result = gcd_euclidean(num1, num2)\n        print(f\"The GCD of {num1} and {num2} is: {result}\")\n\n        #test with 0\n        result = gcd_euclidean(0,10)\n        print(f\"The GCD of 0 and 10 is: {result}\")\n\n        #test with error\n        result = gcd_euclidean(48, \"18\")\n        print(result)\n\n    except TypeError as e:\n        print(f\"Error: {e}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "The GCD of 48 and 18 is: 6\nThe GCD of 0 and 10 is: 10\nError: Inputs must be integers.\n",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.01142430305480957,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 0,
+      "original_task_id": "gcd_calculation",
+      "llm_provider": "gemini",
+      "execution_time": 0.010935783386230469,
+      "code_stats": {
+        "lines": 40,
+        "chars": 1011
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "8da99ad4-a1e2-439b-87a5-0e0c0c925bff",
+    "task_name": "demo_task_1748970722",
+    "task_description": "创建一个函数计算两个数的最大公约数",
+    "runtime_id": "sandbox-1",
+    "success": false,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "创建一个函数计算两个数的最大公约数"
+        },
+        "tool_output": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: 创建一个函数计算两个数的最大公约数\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")"
+        },
+        "tool_output": "",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 失败\n退出代码: -2\n执行时长: 0.00 秒\n发生错误: Code execution blocked: Potentially dangerous code detected: input\\s*\\(\n",
+        "execution_code": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")",
+        "success": false,
+        "error_type": "runtime_error",
+        "error_message": "Code execution blocked: Potentially dangerous code detected: input\\s*\\(",
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "",
+    "error_type": "runtime_error",
+    "error_message": "Code execution blocked: Potentially dangerous code detected: input\\s*\\(",
+    "total_duration": 0.0005192756652832031,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": -2,
+      "original_task_id": "demo_task_1748970722",
+      "llm_provider": "gemini",
+      "execution_time": 7.82012939453125e-05,
+      "code_stats": {
+        "lines": 41,
+        "chars": 881
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "5a919d77-5b88-4b19-ba14-7521916bdbfd",
+    "task_name": "demo_gcd_task",
+    "task_description": "创建一个函数计算两个数的最大公约数",
+    "runtime_id": "sandbox-1",
+    "success": false,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "创建一个函数计算两个数的最大公约数"
+        },
+        "tool_output": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: 创建一个函数计算两个数的最大公约数\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")"
+        },
+        "tool_output": "",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 失败\n退出代码: -2\n执行时长: 0.00 秒\n发生错误: Code execution blocked: Potentially dangerous code detected: input\\s*\\(\n",
+        "execution_code": "def gcd(a, b):\n    \"\"\"\n    计算两个数的最大公约数，使用辗转相除法。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。如果输入不是整数，则抛出异常。\n        如果任意一个输入为0，且另一个输入不为0，则返回另一个输入的绝对值。\n        如果两个输入都为0，则抛出异常。\n\n    Raises:\n        TypeError: 如果输入不是整数。\n        ValueError: 如果两个输入都为0。\n    \"\"\"\n    if not isinstance(a, int) or not isinstance(b, int):\n        raise TypeError(\"输入必须是整数\")\n    if a == 0 and b == 0:\n        raise ValueError(\"两个输入不能同时为0\")\n    if a == 0:\n        return abs(b)\n    if b == 0:\n        return abs(a)\n\n    a = abs(a)  # 处理负数\n    b = abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n\n\nif __name__ == \"__main__\":\n    try:\n        num1 = int(input(\"请输入第一个整数: \"))\n        num2 = int(input(\"请输入第二个整数: \"))\n        result = gcd(num1, num2)\n        print(f\"{num1} 和 {num2} 的最大公约数是: {result}\")\n    except (TypeError, ValueError) as e:\n        print(f\"错误: {e}\")",
+        "success": false,
+        "error_type": "runtime_error",
+        "error_message": "Code execution blocked: Potentially dangerous code detected: input\\s*\\(",
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "",
+    "error_type": "runtime_error",
+    "error_message": "Code execution blocked: Potentially dangerous code detected: input\\s*\\(",
+    "total_duration": 0.0007843971252441406,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": -2,
+      "original_task_id": "demo_gcd_task",
+      "llm_provider": "gemini",
+      "execution_time": 0.00012040138244628906,
+      "code_stats": {
+        "lines": 41,
+        "chars": 881
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "c32eedca-25e4-4b30-9437-6374edd2e4e7",
+    "task_name": "test_code_runtime_matrix",
+    "task_description": "测试代码执行运行时。创建一个3x3的单位矩阵，然后计算它的行列式和迹，并打印结果。使用numpy库进行矩阵运算。",
+    "runtime_id": "sandbox-1",
+    "success": false,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "测试代码执行运行时。创建一个3x3的单位矩阵，然后计算它的行列式和迹，并打印结果。使用numpy库进行矩阵运算。"
+        },
+        "tool_output": "import numpy as np\n\ndef calculate_determinant_and_trace(matrix):\n    \"\"\"\n    Calculates the determinant and trace of a 3x3 matrix.\n\n    Args:\n        matrix: A 3x3 NumPy array.\n\n    Returns:\n        A tuple containing the determinant and trace.  Returns (None, None) if the input is invalid.\n    \"\"\"\n    try:\n        if matrix.shape != (3, 3):\n            print(\"Error: Input matrix must be 3x3.\")\n            return None, None\n        determinant = np.linalg.det(matrix)\n        trace = np.trace(matrix)\n        return determinant, trace\n    except np.linalg.LinAlgError:\n        print(\"Error: Could not calculate determinant.  Matrix may be singular.\")\n        return None, None\n    except Exception as e:\n        print(f\"An unexpected error occurred: {e}\")\n        return None, None\n\n\nif __name__ == \"__main__\":\n    # Create a 3x3 identity matrix\n    identity_matrix = np.identity(3)\n    print(\"3x3 Identity Matrix:\\n\", identity_matrix)\n\n    # Calculate determinant and trace\n    determinant, trace = calculate_determinant_and_trace(identity_matrix)\n\n    if determinant is not None and trace is not None:\n        print(\"\\nDeterminant:\", determinant)\n        print(\"Trace:\", trace)\n\n    #Example with an invalid matrix\n    invalid_matrix = np.array([[1,2],[3,4]])\n    determinant, trace = calculate_determinant_and_trace(invalid_matrix)",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: 测试代码执行运行时。创建一个3x3的单位矩阵，然后计算它的行列式和迹，并打印结果。使用numpy库进行矩阵运算。\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "import numpy as np\n\ndef calculate_determinant_and_trace(matrix):\n    \"\"\"\n    Calculates the determinant and trace of a 3x3 matrix.\n\n    Args:\n        matrix: A 3x3 NumPy array.\n\n    Returns:\n        A tuple containing the determinant and trace.  Returns (None, None) if the input is invalid.\n    \"\"\"\n    try:\n        if matrix.shape != (3, 3):\n            print(\"Error: Input matrix must be 3x3.\")\n            return None, None\n        determinant = np.linalg.det(matrix)\n        trace = np.trace(matrix)\n        return determinant, trace\n    except np.linalg.LinAlgError:\n        print(\"Error: Could not calculate determinant.  Matrix may be singular.\")\n        return None, None\n    except Exception as e:\n        print(f\"An unexpected error occurred: {e}\")\n        return None, None\n\n\nif __name__ == \"__main__\":\n    # Create a 3x3 identity matrix\n    identity_matrix = np.identity(3)\n    print(\"3x3 Identity Matrix:\\n\", identity_matrix)\n\n    # Calculate determinant and trace\n    determinant, trace = calculate_determinant_and_trace(identity_matrix)\n\n    if determinant is not None and trace is not None:\n        print(\"\\nDeterminant:\", determinant)\n        print(\"Trace:\", trace)\n\n    #Example with an invalid matrix\n    invalid_matrix = np.array([[1,2],[3,4]])\n    determinant, trace = calculate_determinant_and_trace(invalid_matrix)",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "import numpy as np\n\ndef calculate_determinant_and_trace(matrix):\n    \"\"\"\n    Calculates the determinant and trace of a 3x3 matrix.\n\n    Args:\n        matrix: A 3x3 NumPy array.\n\n    Returns:\n        A tuple containing the determinant and trace.  Returns (None, None) if the input is invalid.\n    \"\"\"\n    try:\n        if matrix.shape != (3, 3):\n            print(\"Error: Input matrix must be 3x3.\")\n            return None, None\n        determinant = np.linalg.det(matrix)\n        trace = np.trace(matrix)\n        return determinant, trace\n    except np.linalg.LinAlgError:\n        print(\"Error: Could not calculate determinant.  Matrix may be singular.\")\n        return None, None\n    except Exception as e:\n        print(f\"An unexpected error occurred: {e}\")\n        return None, None\n\n\nif __name__ == \"__main__\":\n    # Create a 3x3 identity matrix\n    identity_matrix = np.identity(3)\n    print(\"3x3 Identity Matrix:\\n\", identity_matrix)\n\n    # Calculate determinant and trace\n    determinant, trace = calculate_determinant_and_trace(identity_matrix)\n\n    if determinant is not None and trace is not None:\n        print(\"\\nDeterminant:\", determinant)\n        print(\"Trace:\", trace)\n\n    #Example with an invalid matrix\n    invalid_matrix = np.array([[1,2],[3,4]])\n    determinant, trace = calculate_determinant_and_trace(invalid_matrix)"
+        },
+        "tool_output": "",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 失败\n退出代码: 1\n执行时长: 0.01 秒\n发生错误: Traceback (most recent call last):\n  File \"/tmp/script_06279d5c72c741e9a2382e30d7b0f9e7.py\", line 1, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n\n",
+        "execution_code": "import numpy as np\n\ndef calculate_determinant_and_trace(matrix):\n    \"\"\"\n    Calculates the determinant and trace of a 3x3 matrix.\n\n    Args:\n        matrix: A 3x3 NumPy array.\n\n    Returns:\n        A tuple containing the determinant and trace.  Returns (None, None) if the input is invalid.\n    \"\"\"\n    try:\n        if matrix.shape != (3, 3):\n            print(\"Error: Input matrix must be 3x3.\")\n            return None, None\n        determinant = np.linalg.det(matrix)\n        trace = np.trace(matrix)\n        return determinant, trace\n    except np.linalg.LinAlgError:\n        print(\"Error: Could not calculate determinant.  Matrix may be singular.\")\n        return None, None\n    except Exception as e:\n        print(f\"An unexpected error occurred: {e}\")\n        return None, None\n\n\nif __name__ == \"__main__\":\n    # Create a 3x3 identity matrix\n    identity_matrix = np.identity(3)\n    print(\"3x3 Identity Matrix:\\n\", identity_matrix)\n\n    # Calculate determinant and trace\n    determinant, trace = calculate_determinant_and_trace(identity_matrix)\n\n    if determinant is not None and trace is not None:\n        print(\"\\nDeterminant:\", determinant)\n        print(\"Trace:\", trace)\n\n    #Example with an invalid matrix\n    invalid_matrix = np.array([[1,2],[3,4]])\n    determinant, trace = calculate_determinant_and_trace(invalid_matrix)",
+        "success": false,
+        "error_type": "runtime_error",
+        "error_message": "Traceback (most recent call last):\n  File \"/tmp/script_06279d5c72c741e9a2382e30d7b0f9e7.py\", line 1, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n",
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "",
+    "error_type": "runtime_error",
+    "error_message": "Traceback (most recent call last):\n  File \"/tmp/script_06279d5c72c741e9a2382e30d7b0f9e7.py\", line 1, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n",
+    "total_duration": 0.012026071548461914,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 1,
+      "original_task_id": "test_code_runtime_matrix",
+      "llm_provider": "gemini",
+      "execution_time": 0.011406898498535156,
+      "code_stats": {
+        "lines": 42,
+        "chars": 1338
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "f20814df-6005-4e5a-a8c5-a99045f72573",
+    "task_name": "synth_code_gcd_algorithm",
+    "task_description": "求解126和210的最大公约数，并使用欧几里得算法描述求解过程",
+    "runtime_id": "sandbox-1",
+    "success": true,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "求解126和210的最大公约数，并使用欧几里得算法描述求解过程"
+        },
+        "tool_output": "def gcd_euclidean(a, b):\n    \"\"\"\n    使用欧几里得算法计算两个数的最大公约数。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。  如果输入不是整数，则抛出异常。\n    \"\"\"\n    try:\n        a = int(a)\n        b = int(b)\n        if a == 0 and b == 0:\n            raise ValueError(\"两个数都不能为0\")\n        while b:\n            a, b = b, a % b\n        return a\n    except ValueError as e:\n        print(f\"错误：{e}\")\n        return None\n    except TypeError:\n        print(\"错误：输入必须是整数\")\n        return None\n\n\nif __name__ == \"__main__\":\n    num1 = 126\n    num2 = 210\n    result = gcd_euclidean(num1, num2)\n    if result is not None:\n        print(f\"{num1} 和 {num2} 的最大公约数是：{result}\")\n\n\n    #测试异常处理\n    print(\"\\n测试异常处理：\")\n    print(gcd_euclidean(126,\"abc\")) #测试非整数输入\n    print(gcd_euclidean(0,0)) #测试两个数都为0的情况",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: 求解126和210的最大公约数，并使用欧几里得算法描述求解过程\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def gcd_euclidean(a, b):\n    \"\"\"\n    使用欧几里得算法计算两个数的最大公约数。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。  如果输入不是整数，则抛出异常。\n    \"\"\"\n    try:\n        a = int(a)\n        b = int(b)\n        if a == 0 and b == 0:\n            raise ValueError(\"两个数都不能为0\")\n        while b:\n            a, b = b, a % b\n        return a\n    except ValueError as e:\n        print(f\"错误：{e}\")\n        return None\n    except TypeError:\n        print(\"错误：输入必须是整数\")\n        return None\n\n\nif __name__ == \"__main__\":\n    num1 = 126\n    num2 = 210\n    result = gcd_euclidean(num1, num2)\n    if result is not None:\n        print(f\"{num1} 和 {num2} 的最大公约数是：{result}\")\n\n\n    #测试异常处理\n    print(\"\\n测试异常处理：\")\n    print(gcd_euclidean(126,\"abc\")) #测试非整数输入\n    print(gcd_euclidean(0,0)) #测试两个数都为0的情况",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def gcd_euclidean(a, b):\n    \"\"\"\n    使用欧几里得算法计算两个数的最大公约数。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。  如果输入不是整数，则抛出异常。\n    \"\"\"\n    try:\n        a = int(a)\n        b = int(b)\n        if a == 0 and b == 0:\n            raise ValueError(\"两个数都不能为0\")\n        while b:\n            a, b = b, a % b\n        return a\n    except ValueError as e:\n        print(f\"错误：{e}\")\n        return None\n    except TypeError:\n        print(\"错误：输入必须是整数\")\n        return None\n\n\nif __name__ == \"__main__\":\n    num1 = 126\n    num2 = 210\n    result = gcd_euclidean(num1, num2)\n    if result is not None:\n        print(f\"{num1} 和 {num2} 的最大公约数是：{result}\")\n\n\n    #测试异常处理\n    print(\"\\n测试异常处理：\")\n    print(gcd_euclidean(126,\"abc\")) #测试非整数输入\n    print(gcd_euclidean(0,0)) #测试两个数都为0的情况"
+        },
+        "tool_output": "126 和 210 的最大公约数是：42\n\n测试异常处理：\n错误：invalid literal for int() with base 10: 'abc'\nNone\n错误：两个数都不能为0\nNone\n",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 成功\n退出代码: 0\n执行时长: 0.01 秒\n执行成功完成，无错误\n",
+        "execution_code": "def gcd_euclidean(a, b):\n    \"\"\"\n    使用欧几里得算法计算两个数的最大公约数。\n\n    Args:\n        a: 第一个整数。\n        b: 第二个整数。\n\n    Returns:\n        两个数的最大公约数。  如果输入不是整数，则抛出异常。\n    \"\"\"\n    try:\n        a = int(a)\n        b = int(b)\n        if a == 0 and b == 0:\n            raise ValueError(\"两个数都不能为0\")\n        while b:\n            a, b = b, a % b\n        return a\n    except ValueError as e:\n        print(f\"错误：{e}\")\n        return None\n    except TypeError:\n        print(\"错误：输入必须是整数\")\n        return None\n\n\nif __name__ == \"__main__\":\n    num1 = 126\n    num2 = 210\n    result = gcd_euclidean(num1, num2)\n    if result is not None:\n        print(f\"{num1} 和 {num2} 的最大公约数是：{result}\")\n\n\n    #测试异常处理\n    print(\"\\n测试异常处理：\")\n    print(gcd_euclidean(126,\"abc\")) #测试非整数输入\n    print(gcd_euclidean(0,0)) #测试两个数都为0的情况",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "126 和 210 的最大公约数是：42\n\n测试异常处理：\n错误：invalid literal for int() with base 10: 'abc'\nNone\n错误：两个数都不能为0\nNone\n",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.014915704727172852,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 0,
+      "original_task_id": "synth_code_gcd_algorithm",
+      "llm_provider": "gemini",
+      "execution_time": 0.014289617538452148,
+      "code_stats": {
+        "lines": 39,
+        "chars": 786
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "85723ef6-7920-41b5-a456-361b978943cb",
+    "task_name": "string_reverse",
+    "task_description": "Reverse the string 'Hello World' and print the result",
+    "runtime_id": "sandbox-1",
+    "success": true,
+    "steps": [
+      {
+        "step_id": 1,
+        "action_type": "code_generation",
+        "tool_input": {
+          "description": "Reverse the string 'Hello World' and print the result"
+        },
+        "tool_output": "def reverse_string(input_string):\n    \"\"\"\n    Reverses a given string.\n\n    Args:\n        input_string: The string to be reversed.\n\n    Returns:\n        The reversed string.  Returns an error message if the input is not a string.\n    \"\"\"\n    try:\n        if not isinstance(input_string, str):\n            raise TypeError(\"Input must be a string.\")\n        return input_string[::-1]  # Use slicing for efficient reversal\n    except TypeError as e:\n        return f\"Error: {e}\"\n\n\nif __name__ == \"__main__\":\n    input_str = \"Hello World\"\n    reversed_str = reverse_string(input_str)\n    print(f\"The reversed string of '{input_str}' is: {reversed_str}\")\n\n    #test with non-string input\n    invalid_input = 123\n    reversed_invalid = reverse_string(invalid_input)\n    print(f\"Result for invalid input {invalid_input}: {reversed_invalid}\")",
+        "thinking": "\n缓存状态: 使用了缓存的代码\n禁用缓存: 否\nLLM提供商: gemini\n任务描述: Reverse the string 'Hello World' and print the result\n\n思考过程:\n使用缓存的代码解决方案。如需禁用缓存，请设置环境变量 DISABLE_CACHE=true\n",
+        "execution_code": "def reverse_string(input_string):\n    \"\"\"\n    Reverses a given string.\n\n    Args:\n        input_string: The string to be reversed.\n\n    Returns:\n        The reversed string.  Returns an error message if the input is not a string.\n    \"\"\"\n    try:\n        if not isinstance(input_string, str):\n            raise TypeError(\"Input must be a string.\")\n        return input_string[::-1]  # Use slicing for efficient reversal\n    except TypeError as e:\n        return f\"Error: {e}\"\n\n\nif __name__ == \"__main__\":\n    input_str = \"Hello World\"\n    reversed_str = reverse_string(input_str)\n    print(f\"The reversed string of '{input_str}' is: {reversed_str}\")\n\n    #test with non-string input\n    invalid_input = 123\n    reversed_invalid = reverse_string(invalid_input)\n    print(f\"Result for invalid input {invalid_input}: {reversed_invalid}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      },
+      {
+        "step_id": 2,
+        "action_type": "code_execution",
+        "tool_input": {
+          "code": "def reverse_string(input_string):\n    \"\"\"\n    Reverses a given string.\n\n    Args:\n        input_string: The string to be reversed.\n\n    Returns:\n        The reversed string.  Returns an error message if the input is not a string.\n    \"\"\"\n    try:\n        if not isinstance(input_string, str):\n            raise TypeError(\"Input must be a string.\")\n        return input_string[::-1]  # Use slicing for efficient reversal\n    except TypeError as e:\n        return f\"Error: {e}\"\n\n\nif __name__ == \"__main__\":\n    input_str = \"Hello World\"\n    reversed_str = reverse_string(input_str)\n    print(f\"The reversed string of '{input_str}' is: {reversed_str}\")\n\n    #test with non-string input\n    invalid_input = 123\n    reversed_invalid = reverse_string(invalid_input)\n    print(f\"Result for invalid input {invalid_input}: {reversed_invalid}\")"
+        },
+        "tool_output": "The reversed string of 'Hello World' is: dlroW olleH\nResult for invalid input 123: Error: Input must be a string.\n",
+        "thinking": "\n执行代码中...\n超时设置: 30秒\n执行环境: Python安全沙箱\n执行结果: 成功\n退出代码: 0\n执行时长: 0.02 秒\n执行成功完成，无错误\n",
+        "execution_code": "def reverse_string(input_string):\n    \"\"\"\n    Reverses a given string.\n\n    Args:\n        input_string: The string to be reversed.\n\n    Returns:\n        The reversed string.  Returns an error message if the input is not a string.\n    \"\"\"\n    try:\n        if not isinstance(input_string, str):\n            raise TypeError(\"Input must be a string.\")\n        return input_string[::-1]  # Use slicing for efficient reversal\n    except TypeError as e:\n        return f\"Error: {e}\"\n\n\nif __name__ == \"__main__\":\n    input_str = \"Hello World\"\n    reversed_str = reverse_string(input_str)\n    print(f\"The reversed string of '{input_str}' is: {reversed_str}\")\n\n    #test with non-string input\n    invalid_input = 123\n    reversed_invalid = reverse_string(invalid_input)\n    print(f\"Result for invalid input {invalid_input}: {reversed_invalid}\")",
+        "success": true,
+        "error_type": null,
+        "error_message": null,
+        "timestamp": "2025-06-04T14:49:35Z",
+        "duration": 0.0
+      }
+    ],
+    "final_result": "The reversed string of 'Hello World' is: dlroW olleH\nResult for invalid input 123: Error: Input must be a string.\n",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.017201900482177734,
+    "metadata": {
+      "cached": true,
+      "cache_disabled": false,
+      "exit_code": 0,
+      "original_task_id": "string_reverse",
+      "llm_provider": "gemini",
+      "execution_time": 0.016693592071533203,
+      "code_stats": {
+        "lines": 27,
+        "chars": 834
+      },
+      "execution_details": {
+        "timestamp": "2025-06-04 14:49:35",
+        "timeout_setting": 30,
+        "runtime": "sandbox-1",
+        "execution_environment": "Python Sandbox"
+      }
+    },
+    "created_at": "2025-06-04T14:49:35Z"
+  },
+  {
+    "task_id": "d39886a1-19d3-40e5-917c-4798bb721011",
+    "task_name": "web_search_python",
+    "task_description": "Search for Python documentation on official website",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.03803420066833496,
+    "metadata": {
+      "original_task_id": "web_search_python"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "7a83cded-0a9c-43eb-b0d1-c3739e529b91",
+    "task_name": "web_github_trending",
+    "task_description": "Visit GitHub trending page and get top 3 Python repositories",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004655122756958008,
+    "metadata": {
+      "original_task_id": "web_github_trending"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "379ef09c-6e72-471f-888d-2a91694ee29c",
+    "task_name": "web_weather_check",
+    "task_description": "Check current weather information from a weather website",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004361867904663086,
+    "metadata": {
+      "original_task_id": "web_weather_check"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "36182fd8-078f-4b89-97d5-2c235445b757",
+    "task_name": "nus_iora_professors",
+    "task_description": "搜索新加坡国立大学(NUS) IORA研究所有哪些教授，获取教授姓名和研究领域信息",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004683494567871094,
+    "metadata": {
+      "original_task_id": "nus_iora_professors"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "1c8c7508-5f07-48f6-90ce-985717256021",
+    "task_name": "test_web_runtime_github",
+    "task_description": "测试Web导航运行时。访问GitHub主页，搜索'machine learning'相关的仓库，获取搜索结果页面中前3个仓库的名称和描述信息。",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004728794097900391,
+    "metadata": {
+      "original_task_id": "test_web_runtime_github"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "8e8d8087-8a97-4512-96d7-67d4d3fc8bd3",
+    "task_name": "synth_web_python_requests",
+    "task_description": "在Google上搜索Python requests库的文档，并提取该库中`get`方法的详细参数说明",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004499912261962891,
+    "metadata": {
+      "original_task_id": "synth_web_python_requests"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "1e7761cb-7a1d-4199-9060-61dfb82f0a36",
+    "task_name": "web_search_python",
+    "task_description": "Search for Python documentation on official website",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004492998123168945,
+    "metadata": {
+      "original_task_id": "web_search_python"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "9cfd5ce5-230c-4cd2-ad6b-373918cc692d",
+    "task_name": "web_github_trending",
+    "task_description": "Visit GitHub trending page and get top 3 Python repositories",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004460334777832031,
+    "metadata": {
+      "original_task_id": "web_github_trending"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "b8fecfa9-54d4-495a-b34b-1909a27c7007",
+    "task_name": "web_weather_check",
+    "task_description": "Check current weather information from a weather website",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004646778106689453,
+    "metadata": {
+      "original_task_id": "web_weather_check"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "f5173298-4be3-46f7-9589-2dc5fbf950a1",
+    "task_name": "nus_iora_professors",
+    "task_description": "搜索新加坡国立大学(NUS) IORA研究所有哪些教授，获取教授姓名和研究领域信息",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004447221755981445,
+    "metadata": {
+      "original_task_id": "nus_iora_professors"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "72268aa0-20b5-4025-84c0-e5116f9945fc",
+    "task_name": "test_web_runtime_github",
+    "task_description": "测试Web导航运行时。访问GitHub主页，搜索'machine learning'相关的仓库，获取搜索结果页面中前3个仓库的名称和描述信息。",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004739046096801758,
+    "metadata": {
+      "original_task_id": "test_web_runtime_github"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
+  },
+  {
+    "task_id": "0960689c-e47d-43ff-867c-3f61d3610d74",
+    "task_name": "synth_web_python_requests",
+    "task_description": "在Google上搜索Python requests库的文档，并提取该库中`get`方法的详细参数说明",
+    "runtime_id": "web-runtime",
+    "success": false,
+    "steps": [],
+    "final_result": "",
+    "error_type": "browser_error",
+    "error_message": "net::ERR_CONNECTION_REFUSED at https://www.google.com/",
+    "total_duration": 0.004635810852050781,
+    "metadata": {
+      "original_task_id": "synth_web_python_requests"
+    },
+    "created_at": "2025-06-04T14:49:37Z"
   }
 ]
