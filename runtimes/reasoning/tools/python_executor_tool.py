@@ -53,6 +53,28 @@ class PythonExecutorTool:
         os.makedirs(self.output_dir, exist_ok=True)
         self.temp_dir = tempfile.mkdtemp()
         self._setup_matplotlib()
+
+        # 与 Sandbox Runtime 保持一致的自动安装包白名单
+        default_allowed = {
+            "numpy",
+            "pandas",
+            "matplotlib",
+            "scipy",
+            "sympy",
+            "scikit-learn",
+            "requests",
+            "beautifulsoup4",
+            "lxml",
+        }
+        env_pkgs = os.getenv("SANDBOX_ALLOWED_PACKAGES")
+        if env_pkgs:
+            self.allowed_packages = {
+                p.strip() for p in env_pkgs.split(";") if p.strip()
+            } | {
+                p.strip() for p in env_pkgs.split(",") if p.strip()
+            }
+        else:
+            self.allowed_packages = default_allowed
     
     def _setup_matplotlib(self):
         """设置matplotlib"""
@@ -99,37 +121,60 @@ class PythonExecutorTool:
             # 写入代码
             with open(script_path, 'w', encoding='utf-8') as f:
                 f.write(code)
-            
-            # 执行代码
-            process = await asyncio.create_subprocess_exec(
-                sys.executable, script_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self.temp_dir
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=timeout
+
+            async def _run_code() -> Dict[str, Any]:
+                process = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    script_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=self.temp_dir,
                 )
-                
-                return {
-                    "success": process.returncode == 0,
-                    "stdout": stdout.decode('utf-8', errors='replace'),
-                    "stderr": stderr.decode('utf-8', errors='replace'),
-                    "return_code": process.returncode,
-                    "execution_time": timeout if process.returncode != 0 else None
-                }
-            
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                return {
-                    "success": False,
-                    "error": "Code execution timeout",
-                    "timeout": timeout
-                }
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(), timeout=timeout
+                    )
+                    return {
+                        "success": process.returncode == 0,
+                        "stdout": stdout.decode("utf-8", errors="replace"),
+                        "stderr": stderr.decode("utf-8", errors="replace"),
+                        "return_code": process.returncode,
+                    }
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+                    return {
+                        "success": False,
+                        "error": "Code execution timeout",
+                        "timeout": timeout,
+                    }
+
+            # 首次执行
+            result = await _run_code()
+
+            # 若缺少依赖尝试自动安装一次
+            if (
+                not result.get("success")
+                and result.get("stderr")
+                and "No module named" in result["stderr"]
+            ):
+                missing_match = re.search(
+                    r"No module named ['\"]([\w\.]+)['\"]",
+                    result["stderr"],
+                )
+                if missing_match:
+                    pkg = missing_match.group(1).split(".")[0]
+                    if pkg in self.allowed_packages:
+                        install_res = await self.install_package(pkg)
+                        if install_res.get("success"):
+                            result = await _run_code()
+                            result["auto_installed"] = pkg
+                        else:
+                            result["install_error"] = install_res.get(
+                                "error", "install failed"
+                            )
+
+            return result
         
         except Exception as e:
             return {
