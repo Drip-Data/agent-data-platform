@@ -1116,6 +1116,9 @@ class SimpleSynthesizer:
 === 完整执行轨迹 ===
 {chr(10).join(steps_detail)}
 
+提示：请忽略工具输出中的冗长网页源代码，只关注搜索记录、思考内容以及最终结论等关键信息。
+同时，若 deep_research_trace 提供了 loops、total_queries 与 sources_count 等统计，请利用这些信息增强分析。
+
 === 分析要求 ===
 请基于以上完整轨迹信息，进行深度分析并提取：
 

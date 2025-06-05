@@ -130,6 +130,17 @@ class LightweightSandboxRuntime(RuntimeInterface):
         # 添加文件锁用于跨平台兼容
         self._file_locks = {}
         self._lock_mutex = threading.Lock()
+
+        # 允许自动安装的依赖包白名单
+        default_allowed = {
+            "numpy", "pandas", "matplotlib", "scipy", "sympy",
+            "scikit-learn", "requests", "beautifulsoup4", "lxml"
+        }
+        env_pkgs = os.getenv("SANDBOX_ALLOWED_PACKAGES")
+        if env_pkgs:
+            self.allowed_packages = set(p.strip() for p in env_pkgs.split(',') if p.strip())
+        else:
+            self.allowed_packages = default_allowed
     
     @property
     def runtime_id(self) -> str:
@@ -377,16 +388,48 @@ LLM思考过程:
             raise RuntimeError(f"代码生成失败: {str(e)}") from e
       # 备注: 我们不再需要备用代码生成方法，所有的代码生成都将由LLM完成
     # 如果LLM调用失败，应当抛出异常，而不是使用备用代码模板
+
+    async def _install_package(self, package: str) -> bool:
+        """尝试安装缺失的依赖包"""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pip", "install", "--no-cache-dir", package,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                logger.info(f"Package installed: {package}")
+                return True
+            logger.error(f"Failed to install {package}: {stderr.decode().strip()}")
+            return False
+        except Exception as e:
+            logger.error(f"Error installing package {package}: {e}")
+            return False
     
     async def _execute_code_safely(self, code: str) -> Dict:
         """使用nsjail安全执行代码，并捕获详细的执行信息"""
         start_time = time.time()
         timeout = 30  # 设置超时时间为30秒
-        
-        try:
-            # 使用NSJail执行器
+
+        async def _run_once() -> Dict:
+            start = time.time()
             result = await self.executor.execute(code, timeout=timeout)
-            exec_duration = time.time() - start_time
+            duration = time.time() - start
+            return result, duration
+
+        try:
+            result, exec_duration = await _run_once()
+
+            # 若缺少依赖尝试自动安装一次
+            if result["exit_code"] != 0 and "No module named" in result["stderr"]:
+                missing_match = re.search(r"No module named ['\"]([\w\.]+)['\"]", result["stderr"])
+                if missing_match:
+                    pkg = missing_match.group(1).split('.')[0]
+                    if pkg in self.allowed_packages:
+                        installed = await self._install_package(pkg)
+                        if installed:
+                            result, exec_duration = await _run_once()
             
             # 计算代码的统计信息
             code_lines = code.count('\n') + 1

@@ -7,9 +7,11 @@ WORKDIR /app
 RUN echo 'NSJail installation skipped for now'
 
 # 安装Python依赖
-COPY runtimes/sandbox/requirements.txt .
+COPY requirements.txt /tmp/base_requirements.txt
+COPY runtimes/sandbox/requirements.txt /tmp/sandbox_requirements.txt
 RUN pip install --upgrade pip --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org && \
-    pip install --no-cache-dir -r requirements.txt --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org
+    pip install --no-cache-dir -r /tmp/base_requirements.txt --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org && \
+    pip install --no-cache-dir -r /tmp/sandbox_requirements.txt --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org
 
 # 复制运行时代码
 COPY runtimes/sandbox/runtime.py .

@@ -270,6 +270,14 @@ curl http://localhost:8001/health
 CODE_TASKS=100 WEB_TASKS=50 ./load_test.sh
 ```
 
+### 本地组件测试（无Docker）
+
+```bash
+# 运行单元测试验证各运行时
+./scripts/local_test.sh
+```
+上述脚本现在还会检查研究轨迹记录器和推理运行时的最终结果，确保深度研究信息得到完整保存。
+
 ### 性能基准
 
 | 配置 | 吞吐量 | 内存使用 | CPU使用 |
@@ -324,6 +332,14 @@ docker exec $(docker-compose ps -q redis) redis-cli ping
 # 重启Redis
 docker-compose restart redis
 ```
+#### 5. 缺少依赖包
+执行代码任务时如遇到 `ModuleNotFoundError`，Sandbox Runtime 会尝试自动安装常用依赖（例如 `numpy`、`pandas` 等）。Reasoning Runtime 中的 `python_executor` 也共享同一机制，可通过环境变量 `SANDBOX_ALLOWED_PACKAGES` 指定额外允许安装的包：
+
+```bash
+export SANDBOX_ALLOWED_PACKAGES="numpy,pandas,matplotlib,requests"
+```
+若依赖仍无法安装，请在 `runtimes/sandbox/requirements.txt` 中补充并重新构建镜像。
+
 
 ### 自动修复
 
