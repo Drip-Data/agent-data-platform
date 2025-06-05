@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import websockets # 添加这一行
 from typing import Dict, Any, List
 from uuid import uuid4
 from fastapi import FastAPI, Request, HTTPException

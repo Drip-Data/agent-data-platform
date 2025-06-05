@@ -33,7 +33,7 @@ class TaskSpec:
     task_id: str
     task_type: TaskType
     description: str
-    expected_tools: List[str]
+    expected_tools: List[str] = field(default_factory=list)
     constraints: Dict[str, Any] = field(default_factory=dict)
     max_steps: int = 10
     timeout: int = 300
@@ -172,7 +172,9 @@ class TrajectoryResult:
             steps.append(step)
         
         return cls(
+            task_name=data['task_name'],
             task_id=data['task_id'],
+            task_description=data['task_description'],
             runtime_id=data['runtime_id'],
             success=data['success'],
             steps=steps,

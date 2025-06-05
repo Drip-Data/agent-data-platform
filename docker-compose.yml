@@ -91,11 +91,11 @@ services:
     dns: 8.8.8.8 # Add this line
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import websockets, asyncio; try: asyncio.run(websockets.connect(\"ws://localhost:8080/websocket\", open_timeout=5)); print(\"healthy\") ; exit(0) ; except: exit(1)'"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 90s
+      test: ["CMD-SHELL", "python -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(1); s.connect((\"localhost\", 8080)); s.close(); print(\"healthy\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # Python Executor MCP Server
   python-executor-server:

@@ -176,7 +176,14 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 else:
                     tool_success = False
                     current_attempt_err_type = ErrorType.SYSTEM_ERROR
-                    current_attempt_err_msg = f"Unsupported action/tool_id: {action}/{tool_id}"
+                    if not tool_id:
+                        current_attempt_err_msg = f"LLM did not specify a tool_id. Action attempted: '{action}'."
+                    elif not action:
+                        current_attempt_err_msg = f"LLM did not specify an action for tool '{tool_id}'."
+                    elif action == "error":
+                        current_attempt_err_msg = f"LLM explicitly returned an 'error' action for tool '{tool_id}'."
+                    else:
+                        current_attempt_err_msg = f"LLM attempted to call tool '{tool_id}' with action '{action}', but it is currently unsupported or invalid."
                     observation = current_attempt_err_msg
                     action_type = ActionType.TOOL_CALL
 
