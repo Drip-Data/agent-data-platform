@@ -270,6 +270,13 @@ curl http://localhost:8001/health
 CODE_TASKS=100 WEB_TASKS=50 ./load_test.sh
 ```
 
+### 本地组件测试（无Docker）
+
+```bash
+# 运行单元测试验证各运行时
+./scripts/local_test.sh
+```
+
 ### 性能基准
 
 | 配置 | 吞吐量 | 内存使用 | CPU使用 |
