@@ -320,14 +320,14 @@ class ReasoningRuntime(RuntimeInterface):
         # 生成更好的final_result
         if success and steps:
             last_step = steps[-1]
-            if last_step.action_type == ActionType.TOOL_CALL and "complete_task" in (last_step.execution_code or ""):
-                final_result = last_step.observation
-            elif last_final_answer:
+            if last_final_answer:
                 final_result = last_final_answer
+            elif last_step.action_type == ActionType.TOOL_CALL and "complete_task" in (last_step.execution_code or ""):
+                final_result = last_step.observation
             elif last_step.action_type == ActionType.TOOL_CALL:
                 try:
                     obs_json = json.loads(last_full_tool_output or last_step.observation)
-                    final_result = obs_json.get("final_answer", last_step.observation)
+                    final_result = obs_json.get("final_answer") or obs_json.get("summary", last_step.observation)
                 except Exception:
                     final_result = f"Task completed successfully after {len(steps)} steps."
             else:

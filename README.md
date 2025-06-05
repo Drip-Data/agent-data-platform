@@ -276,6 +276,7 @@ CODE_TASKS=100 WEB_TASKS=50 ./load_test.sh
 # 运行单元测试验证各运行时
 ./scripts/local_test.sh
 ```
+上述脚本现在还会检查研究轨迹记录器和推理运行时的最终结果，确保深度研究信息得到完整保存。
 
 ### 性能基准
 

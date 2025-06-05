@@ -133,6 +133,7 @@ class DeepResearchTool:
             processed_result = {
                 "success": True,
                 "final_answer": str(final_answer),
+                "summary": truncate_text(str(final_answer), 300),
                 "messages": processed_messages,
                 "sources_gathered": processed_sources,
                 "web_research_result": [

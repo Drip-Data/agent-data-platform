@@ -13,7 +13,12 @@ class DummyRedis:
 
 class ComponentHealthCheckTests(unittest.IsolatedAsyncioTestCase):
     async def test_sandbox_runtime_health(self):
-        from runtimes.sandbox.runtime import LightweightSandboxRuntime
+        try:
+            from runtimes.sandbox.runtime import LightweightSandboxRuntime
+        except ImportError:
+            self.skipTest("SandboxRuntime dependencies not installed")
+            return
+
         dummy = DummyRedis()
         with mock.patch('redis.asyncio.from_url', return_value=dummy), \
              mock.patch('subprocess.run') as mock_run:
@@ -22,6 +27,30 @@ class ComponentHealthCheckTests(unittest.IsolatedAsyncioTestCase):
             runtime.redis = dummy
             healthy = await runtime.health_check()
         self.assertTrue(healthy)
+
+class ResearchTrackerTests(unittest.TestCase):
+    def test_tracker_records_loops(self):
+        import importlib.util
+        import pathlib
+
+        tracker_path = pathlib.Path('runtimes/reasoning/deep_research/tracker.py')
+        spec = importlib.util.spec_from_file_location('tracker', tracker_path)
+        tracker_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tracker_module)
+        ResearchTracker = tracker_module.ResearchTracker
+
+        tracker = ResearchTracker("demo")
+        tracker.set_config({})
+        start = tracker.record_loop_start(1)
+        tracker.record_search_executed(1, "query", 2)
+        tracker.record_loop_end(1, start, True, ["next"], "")
+
+        data = tracker.get_trace_data()
+
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(len(data["loops"]), 1)
+        self.assertEqual(data["total_queries"], 1)
+        self.assertEqual(data["sources_count"], 2)
 
     async def test_reasoning_runtime_health(self):
         try:

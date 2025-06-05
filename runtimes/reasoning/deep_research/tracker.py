@@ -158,9 +158,10 @@ class ResearchTracker:
         self.trace["end_time"] = datetime.now().isoformat()
         self.trace["total_duration"] = time.time() - self.start_time
 
-        # 如果仍处于running状态，默认认为研究已正常完成
+        # 如果仍处于 running 状态，根据已有记录判断研究是否完成
         if self.trace.get("status") == "running":
-            self.trace["status"] = "completed"
+            if self.trace.get("loops"):
+                self.trace["status"] = "completed"
 
         # 返回轨迹数据副本，让 runtime.py 处理保存
         return self.trace.copy()
