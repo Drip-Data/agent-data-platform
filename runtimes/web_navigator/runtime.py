@@ -106,8 +106,12 @@ class MemoryControlledWebRuntime(RuntimeInterface):
             # 获取起始URL
             start_url = task.constraints.get("start_url", "https://www.google.com")
             
-            # 导航到起始页面
-            await page.goto(start_url, wait_until='networkidle', timeout=30000)
+            # 导航到起始页面 - 使用更宽松的策略
+            try:
+                await page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
+                await asyncio.sleep(2)  # 让页面内容完全加载
+            except Exception as e:
+                logger.warning(f"Initial navigation timeout to {start_url}, continuing anyway: {e}")
             initial_content = await self._extract_page_content(page)
               # 第一步：页面导航
             nav_step = ExecutionStep(
@@ -387,8 +391,13 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 await page.fill(selector, text)
                 await page.press(selector, "Enter")
                 
-                # 等待页面加载
-                await page.wait_for_load_state('networkidle', timeout=10000)
+                # 等待页面加载 - 使用更宽松的策略
+                try:
+                    await page.wait_for_load_state('domcontentloaded', timeout=20000)
+                    # 额外等待一点时间让内容加载
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    logger.warning(f"Page load timeout, continuing anyway: {e}")
                 
                 observation = await self._extract_page_content(page)
                 return True, observation, None
@@ -399,8 +408,13 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 # 点击元素
                 await page.click(selector)
                 
-                # 等待页面变化
-                await page.wait_for_load_state('networkidle', timeout=10000)
+                # 等待页面变化 - 使用更宽松的策略
+                try:
+                    await page.wait_for_load_state('domcontentloaded', timeout=20000)
+                    # 额外等待一点时间让内容加载
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    logger.warning(f"Page load timeout after click, continuing anyway: {e}")
                 
                 observation = await self._extract_page_content(page)
                 return True, observation, None
@@ -409,8 +423,14 @@ class MemoryControlledWebRuntime(RuntimeInterface):
                 url = action.get("url")
                 reason = action.get("reason", "Navigating to new URL")
                 
-                # 导航到新URL
-                await page.goto(url, wait_until='networkidle', timeout=15000)
+                # 导航到新URL - 使用更宽松的策略
+                try:
+                    await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                    # 额外等待一点时间让内容加载
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    logger.warning(f"Navigation timeout to {url}, continuing anyway: {e}")
+                    # 如果导航超时，尝试继续执行
                 
                 observation = await self._extract_page_content(page)
                 return True, f"Navigation successful: {reason}\n\n{observation}", None
@@ -565,8 +585,15 @@ async def main():
         await runtime.cleanup()
 
 if __name__ == "__main__":
+    # 配置日志
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
+    
+    # 添加模块导入警告的处理
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*found in sys.modules.*")
+    
+    # 运行主程序
     asyncio.run(main())

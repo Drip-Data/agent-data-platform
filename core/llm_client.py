@@ -241,19 +241,56 @@ class LLMClient:
             response.raise_for_status()
             
             result = response.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"]
+            
+            # 安全地提取响应内容，处理各种可能的响应格式
+            if "candidates" in result and len(result["candidates"]) > 0:
+                candidate = result["candidates"][0]
+                if "content" in candidate:
+                    content = candidate["content"]
+                    if "parts" in content and len(content["parts"]) > 0:
+                        return content["parts"][0]["text"]
+                    elif "text" in content:
+                        # 有些情况下直接在content下有text字段
+                        return content["text"]
+                # 如果没有content字段，尝试直接从candidate获取text
+                elif "text" in candidate:
+                    return candidate["text"]
+            
+            # 如果上述都失败，记录完整响应并抛出错误
+            logger.error(f"Unexpected Gemini API response structure: {result}")
+            raise ValueError(f"Cannot extract text from Gemini response: {result}")
+            
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             # 如果使用了不稳定的模型，尝试回退到稳定版本
-            if model_name != 'gemini-2.0-flash':
-                logger.info("Retrying with stable model 'gemini-2.0-flash'")
-                response = await self.client.post(
-                    f"{api_url}/models/gemini-1.5-flash:generateContent?key={api_key}",
-                    json=payload
-                )
-                response.raise_for_status()
-                result = response.json()
-                return result["candidates"][0]["content"]["parts"][0]["text"]
+            if model_name != 'gemini-1.5-flash':
+                logger.info("Retrying with stable model 'gemini-1.5-flash'")
+                try:
+                    response = await self.client.post(
+                        f"{api_url}/models/gemini-1.5-flash:generateContent?key={api_key}",
+                        json=payload
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    
+                    # 同样的安全提取逻辑
+                    if "candidates" in result and len(result["candidates"]) > 0:
+                        candidate = result["candidates"][0]
+                        if "content" in candidate:
+                            content = candidate["content"]
+                            if "parts" in content and len(content["parts"]) > 0:
+                                return content["parts"][0]["text"]
+                            elif "text" in content:
+                                return content["text"]
+                        elif "text" in candidate:
+                            return candidate["text"]
+                    
+                    logger.error(f"Unexpected response from fallback model: {result}")
+                    raise ValueError(f"Cannot extract text from fallback Gemini response: {result}")
+                    
+                except Exception as retry_error:
+                    logger.error(f"Fallback model also failed: {retry_error}")
+                    raise RuntimeError(f"Both primary ({model_name}) and fallback (gemini-1.5-flash) models failed. Last error: {retry_error}") from e
             else:
                 raise
     

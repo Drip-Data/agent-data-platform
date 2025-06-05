@@ -138,6 +138,9 @@ class DeepResearchTool:
                 "search_query": raw_result.get("search_query", []),
                 "research_loop_count": raw_result.get("research_loop_count", 0),
                 
+                # 添加 deep research 轨迹数据
+                "deep_research_trace": raw_result.get("deep_research_trace"),
+                
                 # 保留原始数据以确保完整性
                 "raw_data": raw_data,
                 
@@ -148,7 +151,8 @@ class DeepResearchTool:
                     "messages_processed": len(processed_messages),
                     "final_answer_length": len(final_answer),
                     "total_content_length": sum(len(str(s.get("content", ""))) for s in processed_sources),
-                    "has_complete_data": bool(final_answer and processed_sources)
+                    "has_complete_data": bool(final_answer and processed_sources),
+                    "has_trace_data": bool(raw_result.get("deep_research_trace"))
                 }
             }
             

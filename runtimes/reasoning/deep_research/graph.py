@@ -5,12 +5,15 @@ LangGraph implementation for Deep Research
 
 import os
 import logging
+import time
 from typing import Dict, Any, Optional
 
 from langgraph.graph import StateGraph, START, END
 from langchain_core.runnables import RunnableConfig
 
 from .state import OverallState, ResearchConfiguration
+from .tracker import ResearchTracker, create_tracker
+from .utils import get_research_topic
 from .nodes import (
     generate_query,
     continue_to_web_research,
@@ -116,6 +119,11 @@ class DeepResearchGraph:
             if config:
                 run_config.update(config)
             
+            # 创建研究轨迹记录器
+            research_topic = get_research_topic(input_data["messages"])
+            tracker = create_tracker(research_topic)
+            tracker.set_config(run_config)
+            
             # 准备初始状态
             initial_state = {
                 "messages": input_data["messages"],
@@ -123,9 +131,13 @@ class DeepResearchGraph:
                 "web_research_result": [],
                 "sources_gathered": [],
                 "initial_search_query_count": run_config.get("initial_search_query_count", 3),
-                "max_research_loops": run_config.get("max_research_loops", 3),
+                "max_research_loops": run_config.get("max_research_loops", 2),
+                "max_total_queries": run_config.get("max_total_queries", 9),
                 "research_loop_count": 0,
-                "reasoning_model": run_config.get("reasoning_model", "gemini-2.0-flash-exp")
+                "reasoning_model": run_config.get("reasoning_model", "gemini-2.0-flash-exp"),
+                "research_tracker": tracker,
+                "start_time": time.time(),
+                "loop_start_time": time.time()  # 记录循环开始时间
             }
             
             # 添加额外的输入数据
@@ -138,11 +150,24 @@ class DeepResearchGraph:
             # 执行图
             result = await self.graph.ainvoke(initial_state, config=run_config)
             
+            # 获取轨迹数据（不写入文件，交由 runtime.py 统一处理）
+            if run_config.get("enable_research_tracking", True):
+                tracker.log_progress()
+                trace_data = tracker.get_trace_data()  # 获取轨迹数据而不写入文件
+                result["deep_research_trace"] = trace_data  # 添加到返回结果中
+                result["trace_summary"] = tracker.get_trace_summary()
+            
             logger.info("深度研究完成")
             return result
             
         except Exception as e:
             logger.error(f"深度研究执行失败: {str(e)}")
+            
+            # 记录错误轨迹（但不保存文件，交由上层处理）
+            if run_config.get("enable_research_tracking", True):
+                tracker.record_error(str(e))
+                # 不在这里保存文件，由 runtime.py 统一处理
+            
             raise
     
     def invoke(self, input_data: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

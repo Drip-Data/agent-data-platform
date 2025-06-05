@@ -23,9 +23,11 @@ class DeepResearchConfig:
     
     # 研究参数
     initial_search_query_count: int = 3
-    max_research_loops: int = 3
+    max_research_loops: int = 3  # 最大研究循环次数
+    max_total_queries: int = 9   # 限制总查询数（3轮 x 3查询）
     max_query_length: int = 500
     max_result_length: int = 5000
+    force_exit_threshold: float = 0.8  # 强制退出阈值
     
     # 性能配置
     request_timeout: int = 30
@@ -36,6 +38,7 @@ class DeepResearchConfig:
     enable_citation_tracking: bool = True
     enable_query_optimization: bool = True
     enable_result_validation: bool = True
+    enable_research_tracking: bool = True  # 启用轨迹记录
     
     # 调试配置
     debug_mode: bool = field(default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true")
@@ -82,14 +85,17 @@ class DeepResearchConfig:
             'query_generator_model': self.query_generator_model,
             'initial_search_query_count': self.initial_search_query_count,
             'max_research_loops': self.max_research_loops,
+            'max_total_queries': self.max_total_queries,
             'max_query_length': self.max_query_length,
             'max_result_length': self.max_result_length,
+            'force_exit_threshold': self.force_exit_threshold,
             'request_timeout': self.request_timeout,
             'max_retries': self.max_retries,
             'temperature': self.temperature,
             'enable_citation_tracking': self.enable_citation_tracking,
             'enable_query_optimization': self.enable_query_optimization,
             'enable_result_validation': self.enable_result_validation,
+            'enable_research_tracking': self.enable_research_tracking,
             'debug_mode': self.debug_mode,
             'log_level': self.log_level
         }

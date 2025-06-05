@@ -6,6 +6,7 @@ Node implementations for Deep Research LangGraph
 import os
 import json
 import logging
+import time
 from typing import Dict, Any, List, Union
 from pydantic import BaseModel, Field
 
@@ -156,24 +157,69 @@ async def web_research(state: WebSearchState, config: Dict[str, Any] = None) -> 
         
         # 获取 Gemini 客户端
         genai_client = get_gemini_client()
+
+        # 记录循环开始 (如果 tracker 存在)
+        # research_loop_count 在 reflection 中递增，所以这里是新循环的正确编号
+        current_loop_num = state.get("research_loop_count", 0) + 1
+        loop_start_time = time.time() # 默认值
+        if "research_tracker" in state and state["research_tracker"]:
+            tracker = state["research_tracker"]
+            loop_start_time = tracker.record_loop_start(loop_num=current_loop_num)
+        
+        # 将 loop_start_time 存入状态，供 reflection 节点使用
+        state["loop_start_time"] = loop_start_time
         
         # 生成搜索提示词
         prompt = get_web_search_prompt(state["search_query"])
         
-        logger.info(f"执行网络搜索 - 查询: {state['search_query']}")
+        logger.info(f"执行网络搜索 (循环 {current_loop_num}) - 查询: {state['search_query']}")
         
         # 使用 Gemini 2.0 新的 Google Search API 格式
         google_search_tool = Tool(google_search=GoogleSearch())
         
-        response = genai_client.models.generate_content(
-            model=research_config.query_generator_model,
-            contents=prompt,
-            config=GenerateContentConfig(
-                tools=[google_search_tool],
-                response_modalities=["TEXT"],
-                temperature=0,
-            ),
-        )
+        logger.info(f"开始调用 Gemini 2.0 搜索API - 模型: {research_config.query_generator_model}")
+        
+        # 添加超时保护的搜索执行
+        import asyncio
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def _sync_search():
+            start_time = time.time()
+            try:
+                response = genai_client.models.generate_content(
+                    model=research_config.query_generator_model,
+                    contents=prompt,
+                    config=GenerateContentConfig(
+                        tools=[google_search_tool],
+                        response_modalities=["TEXT"],
+                        temperature=0,
+                    ),
+                )
+                duration = time.time() - start_time
+                logger.info(f"搜索API调用完成 - 耗时: {duration:.2f}秒")
+                return response
+            except Exception as e:
+                duration = time.time() - start_time
+                logger.error(f"搜索API调用失败 - 耗时: {duration:.2f}秒, 错误: {e}")
+                raise
+        
+        # 使用线程池执行同步搜索，添加超时控制
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_sync_search)
+                response = await asyncio.get_event_loop().run_in_executor(None, lambda: future.result(timeout=60))
+        except Exception as e:
+            logger.error(f"搜索执行超时或失败: {e}")
+            # 返回空结果但不中断流程
+            return {
+                "web_research_result": [{
+                    "content": f"搜索查询 '{state['search_query']}' 执行失败: {str(e)}",
+                    "source": "error",
+                    "search_query": state["search_query"]
+                }],
+                "sources_gathered": []
+            }
         
         # 处理搜索结果
         if hasattr(response, 'candidates') and response.candidates:
@@ -237,7 +283,26 @@ async def web_research(state: WebSearchState, config: Dict[str, Any] = None) -> 
             # 插入引用标记
             modified_text = insert_citation_markers(response.text, citations)
             
-            logger.info(f"搜索完成 - 找到 {len(sources_gathered)} 个源")
+            logger.info(f"搜索完成 - 查询: '{state['search_query']}', 找到 {len(sources_gathered)} 个源")
+            
+            # 记录进度到轨迹
+            if "research_tracker" in state and state["research_tracker"]:
+                tracker = state["research_tracker"]
+                # web_research 节点在 reflection 节点之前执行，
+                # reflection 会增加 research_loop_count。
+                # 因此，这里的 loop_num 应该是 research_loop_count + 1
+                current_loop_num = state.get("research_loop_count", 0) + 1
+                # state["search_query"] 在 WebSearchState 中是一个字符串，不是列表
+                # 我们需要确保传递的是单个查询字符串
+                query_executed = state["search_query"]
+                if isinstance(query_executed, list): # 防御性检查，以防万一
+                    query_executed = query_executed[0] if query_executed else ""
+
+                tracker.record_search_executed(
+                    loop_num=current_loop_num,
+                    query_str=query_executed,
+                    num_sources=len(sources_gathered)
+                )
             
             return {
                 "sources_gathered": sources_gathered,
@@ -273,12 +338,17 @@ async def reflection(state: OverallState, config: Dict[str, Any] = None) -> Refl
         反思结果状态
     """
     try:
+        logger.info(f"开始反思评估 - 当前循环: {state.get('research_loop_count', 0) + 1}, 已收集源: {len(state.get('sources_gathered', []))}")
+        
         # 解析配置
         research_config = ResearchConfiguration.from_dict(config or {})
         
         # 增加研究循环计数
         state["research_loop_count"] = state.get("research_loop_count", 0) + 1
         reasoning_model = state.get("reasoning_model") or research_config.reasoning_model
+        
+        # 获取循环开始时间（应该在web_research之前记录）
+        loop_start_time = state.get("loop_start_time", time.time())
         
         # 初始化 LLM
         llm = get_gemini_llm(model=reasoning_model, temperature=1.0)
@@ -287,7 +357,8 @@ async def reflection(state: OverallState, config: Dict[str, Any] = None) -> Refl
         # 生成反思提示词
         research_topic = get_research_topic(state["messages"])
         summaries = "\n\n---\n\n".join(state.get("web_research_result", []))
-        prompt = get_reflection_prompt(research_topic, summaries)
+        max_loops = state.get("max_research_loops", research_config.max_research_loops)
+        prompt = get_reflection_prompt(research_topic, summaries, state["research_loop_count"], max_loops)
         
         logger.info(f"执行反思评估 - 循环 {state['research_loop_count']}")
         
@@ -301,6 +372,19 @@ async def reflection(state: OverallState, config: Dict[str, Any] = None) -> Refl
         ]
         
         logger.info(f"反思完成 - 充分性: {result.is_sufficient}, 后续查询: {len(follow_up_queries)}")
+        
+        # 记录循环轨迹 - 修复时间计算问题
+        if "research_tracker" in state and state["research_tracker"]:
+            # current_queries 和 current_sources 不再需要从这里传递
+            # follow_up_queries 是为下一个循环生成的，所以在这里传递
+            
+            state["research_tracker"].record_loop_end(
+                loop_num=state["research_loop_count"], # research_loop_count 此时已被正确递增
+                loop_start_time=loop_start_time,
+                is_sufficient=result.is_sufficient,
+                follow_up_queries=follow_up_queries, # 传递清理后的后续查询
+                knowledge_gap=result.knowledge_gap
+            )
         
         return {
             "is_sufficient": result.is_sufficient,
@@ -324,7 +408,7 @@ async def reflection(state: OverallState, config: Dict[str, Any] = None) -> Refl
 
 def evaluate_research(state: ReflectionState, config: Dict[str, Any] = None) -> Union[str, List[Send]]:
     """
-    评估研究进度的路由节点
+    评估研究进度的路由节点 - 强化循环控制
     
     决定是继续研究还是生成最终答案
     
@@ -345,33 +429,69 @@ def evaluate_research(state: ReflectionState, config: Dict[str, Any] = None) -> 
             else research_config.max_research_loops
         )
         
-        logger.info(f"评估研究进度 - 循环: {state['research_loop_count']}/{max_research_loops}, 充分性: {state['is_sufficient']}")
+        max_total_queries = config.get("max_total_queries", max_research_loops * 3)
+        current_loop = state["research_loop_count"]
+        total_queries = state.get("number_of_ran_queries", 0)
         
-        # 检查是否应该结束研究
-        if state["is_sufficient"] or state["research_loop_count"] >= max_research_loops:
-            logger.info("研究完成，生成最终答案")
+        logger.info(f"评估研究进度 - 循环: {current_loop}/{max_research_loops}, 查询: {total_queries}/{max_total_queries}, 充分性: {state['is_sufficient']}")
+        
+        # 强制退出条件（优先级最高）
+        if current_loop >= max_research_loops:
+            logger.info(f"达到最大循环次数{max_research_loops}，强制结束研究")
+            # 记录轨迹
+            if "research_tracker" in state:
+                state["research_tracker"].record_forced_exit(f"达到最大循环次数{max_research_loops}")
             return "finalize_answer"
-        else:
-            # 继续研究，创建后续查询任务
-            follow_up_queries = state.get("follow_up_queries", [])
-            if not follow_up_queries:
-                logger.warning("没有后续查询，强制结束研究")
-                return "finalize_answer"
-            
-            logger.info(f"继续研究 - 生成 {len(follow_up_queries)} 个后续查询")
-            return [
-                Send(
-                    "web_research",
-                    {
-                        "search_query": follow_up_query,
-                        "id": str(state["number_of_ran_queries"] + idx),
-                    },
-                )
-                for idx, follow_up_query in enumerate(follow_up_queries)
-            ]
+        
+        # 查询数量限制（防护机制）
+        if total_queries >= max_total_queries:
+            logger.info(f"达到最大查询数{max_total_queries}，强制结束研究")
+            # 记录轨迹
+            if "research_tracker" in state:
+                state["research_tracker"].record_forced_exit(f"达到最大查询数{max_total_queries}")
+            return "finalize_answer"
+        
+        # 信息充分性判断（次优先级）
+        if state["is_sufficient"]:
+            logger.info("LLM判断信息充分，结束研究")
+            # 记录轨迹
+            if "research_tracker" in state:
+                state["research_tracker"].record_normal_exit("信息充分性判断")
+            return "finalize_answer"
+        
+        # 后续查询检查
+        follow_up_queries = state.get("follow_up_queries", [])
+        if not follow_up_queries:
+            logger.info("无后续查询，结束研究")
+            # 记录轨迹
+            if "research_tracker" in state:
+                state["research_tracker"].record_normal_exit("无后续查询")
+            return "finalize_answer"
+        
+        # 限制后续查询数量
+        remaining_query_budget = max_total_queries - total_queries
+        if len(follow_up_queries) > remaining_query_budget:
+            follow_up_queries = follow_up_queries[:remaining_query_budget]
+            logger.info(f"限制后续查询数量为 {remaining_query_budget}")
+        
+        # 继续研究
+        logger.info(f"继续研究 - 生成 {len(follow_up_queries)} 个后续查询")
+        return [
+            Send(
+                "web_research",
+                {
+                    "search_query": follow_up_query,
+                    "id": str(total_queries + idx),
+                },
+            )
+            for idx, follow_up_query in enumerate(follow_up_queries)
+        ]
             
     except Exception as e:
         logger.error(f"研究评估失败: {str(e)}")
+        # 记录轨迹
+        if "research_tracker" in state:
+            state["research_tracker"].record_error(str(e))
         return "finalize_answer"
 
 

@@ -117,6 +117,14 @@ class ReasoningRuntime(RuntimeInterface):
                     # 确保结果是JSON可序列化的，deep_research_tool._process_result已处理
                     observation = json.dumps(res)
                     action_type = ActionType.TOOL_CALL
+                    
+                    # 提取 deep research 轨迹数据
+                    deep_research_trace = res.get('deep_research_trace')
+                    if deep_research_trace:
+                        # 将轨迹数据存储在步骤的元数据中，供后续集成使用
+                        if not hasattr(params, '__dict__'):
+                            params = dict(params) if params else {}
+                        params['deep_research_trace'] = deep_research_trace
                 elif action == 'python_execute' and tool_name == 'python_executor':
                     code = params.get('code', '')
                     logger.debug(f"Attempt {attempt + 1}: Python execute")
@@ -309,6 +317,14 @@ class ReasoningRuntime(RuntimeInterface):
         else:
             final_result = "Task did not execute any steps."
 
+        # 提取 deep research 轨迹数据
+        deep_research_traces = []
+        for step in steps:
+            if hasattr(step, 'action_params') and step.action_params:
+                deep_trace = step.action_params.get('deep_research_trace')
+                if deep_trace:
+                    deep_research_traces.append(deep_trace)
+        
         trajectory = TrajectoryResult(
             task_name=task.task_id,  # 保持原始task_id作为task_name
             task_id=trajectory_id,   # 使用新的UUID作为轨迹ID
@@ -322,7 +338,9 @@ class ReasoningRuntime(RuntimeInterface):
             total_duration=total_duration,
             metadata={
                 'confidence': confidence,
-                'original_task_id': task.task_id
+                'original_task_id': task.task_id,
+                'deep_research_traces': deep_research_traces,  # 包含深度研究轨迹
+                'has_deep_research': len(deep_research_traces) > 0
             }
         )
           # 保存轨迹到集合文件
