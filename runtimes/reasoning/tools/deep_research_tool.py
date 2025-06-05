@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any, Optional, Union
 from ..deep_research.graph import create_research_graph, DeepResearchGraph
 from ..deep_research.state import ResearchConfiguration
+from ..deep_research.utils import truncate_text
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,10 @@ class DeepResearchTool:
                 "final_answer": str(final_answer),
                 "messages": processed_messages,
                 "sources_gathered": processed_sources,
-                "web_research_result": raw_result.get("web_research_result", []),
+                "web_research_result": [
+                    truncate_text(str(item), 500)
+                    for item in raw_result.get("web_research_result", [])
+                ],
                 "search_query": raw_result.get("search_query", []),
                 "research_loop_count": raw_result.get("research_loop_count", 0),
                 
@@ -248,10 +252,11 @@ class DeepResearchTool:
                     "title": source.get("title", "未知来源"),
                     "url": source.get("value", source.get("url", source.get("short_url", ""))),
                     "short_url": source.get("short_url", ""),
-                    "content": source.get("content", ""),  # 完整内容，无长度限制
+                    # Truncate long content to keep trajectory concise
+                    "content": truncate_text(source.get("content", ""), 1000),
                     "snippet": source.get("snippet", ""),
                     "metadata": {
-                        key: value for key, value in source.items() 
+                        key: value for key, value in source.items()
                         if key not in ["title", "url", "value", "short_url", "content", "snippet"]
                         and isinstance(value, (str, int, float, bool))
                     }

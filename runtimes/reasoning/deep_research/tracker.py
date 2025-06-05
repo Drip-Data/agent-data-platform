@@ -35,9 +35,10 @@ class ResearchTracker:
             "start_time": datetime.now().isoformat(),
             "research_topic": research_topic,
             "config": {},
-            "loops": [], # List of loop detail dictionaries
-            "total_executed_queries": 0, # Overall count of queries executed
-            "total_sources_found_all_loops": 0, # Overall count of sources found
+            "loops": [],  # List of loop detail dictionaries
+            # Keep counters consistent with summary field names
+            "total_queries": 0,  # Overall count of queries executed
+            "sources_count": 0,   # Overall count of sources found
             "forced_exit": False,
             "exit_reason": "",
             "status": "running"
@@ -86,9 +87,9 @@ class ResearchTracker:
             })
             loop_data["total_sources_this_loop"] += num_sources
             
-            # 更新全局计数器
-            self.trace["total_executed_queries"] += 1
-            self.trace["total_sources_found_all_loops"] += num_sources
+            # Update global counters
+            self.trace["total_queries"] += 1
+            self.trace["sources_count"] += num_sources
         else:
             # 这通常不应该发生，如果发生了，说明循环编号管理有问题
             print(f"警告: 尝试为无效的循环编号 {loop_num} 记录搜索结果。轨迹可能不准确。")
@@ -156,7 +157,11 @@ class ResearchTracker:
         # 完成轨迹记录
         self.trace["end_time"] = datetime.now().isoformat()
         self.trace["total_duration"] = time.time() - self.start_time
-        
+
+        # 如果仍处于running状态，默认认为研究已正常完成
+        if self.trace.get("status") == "running":
+            self.trace["status"] = "completed"
+
         # 返回轨迹数据副本，让 runtime.py 处理保存
         return self.trace.copy()
     

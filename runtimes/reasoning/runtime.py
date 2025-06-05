@@ -12,6 +12,7 @@ from core.llm_client import LLMClient
 from core.metrics import EnhancedMetrics
 from core.browser_state_manager import BrowserStateManager
 from .tools import get_python_executor_tool, deep_research_tool # Import deep_research_tool
+from .deep_research.utils import truncate_text
 
 logger = logging.getLogger(__name__)
 metrics = EnhancedMetrics(port=8003)
@@ -63,6 +64,9 @@ class ReasoningRuntime(RuntimeInterface):
         
         # browser_state = BrowserStateManager() # No longer needed directly here if browser tool is removed
 
+        last_final_answer: str = ""
+        last_full_tool_output: Optional[str] = None
+
         for step_id in range(1, task.max_steps + 1):
             # current_browser_context_for_llm = browser_state.get_context_for_llm() # Not needed if browser tool removed
 
@@ -111,11 +115,12 @@ class ReasoningRuntime(RuntimeInterface):
                     # Assuming deep_research_tool is a singleton or obtained similarly to other tools
                     res = await deep_research_tool.execute(query, research_config)
                     # The 'res' from deep_research_tool is expected to be a dict.
-                    # We need to decide how to determine 'success' from this dict.
-                    # For now, let's assume if 'final_answer' is present, it's a success.
-                    tool_success = res.get('success', False) # 使用deep_research_tool返回的success状态
-                    # 确保结果是JSON可序列化的，deep_research_tool._process_result已处理
-                    observation = json.dumps(res)
+                    tool_success = res.get('success', False)  # 使用deep_research_tool返回的success状态
+                    observation_json = json.dumps(res, ensure_ascii=False)
+                    observation = truncate_text(observation_json, 2000)
+                    last_full_tool_output = observation_json
+                    if res.get('final_answer'):
+                        last_final_answer = res['final_answer']
                     action_type = ActionType.TOOL_CALL
                     
                     # 提取 deep research 轨迹数据
@@ -131,7 +136,9 @@ class ReasoningRuntime(RuntimeInterface):
                     python_executor_tool = get_python_executor_tool()
                     res = await python_executor_tool.execute_code(code, task.timeout)
                     tool_success = res.get('success', False)
-                    observation = json.dumps(res)
+                    observation_json = json.dumps(res, ensure_ascii=False)
+                    observation = truncate_text(observation_json, 2000)
+                    last_full_tool_output = observation_json
                     action_type = ActionType.CODE_EXECUTION
                     if tool_success and 'stdout' in res: # only append if successful
                         current_outputs.append(res['stdout'])
@@ -142,7 +149,9 @@ class ReasoningRuntime(RuntimeInterface):
                     python_executor_tool = get_python_executor_tool()
                     res = await python_executor_tool.analyze_data(data, op)
                     tool_success = res.get('success', False)
-                    observation = json.dumps(res)
+                    observation_json = json.dumps(res, ensure_ascii=False)
+                    observation = truncate_text(observation_json, 2000)
+                    last_full_tool_output = observation_json
                     action_type = ActionType.TOOL_CALL
                 elif action == 'python_visualize' and tool_name == 'python_executor':
                     data = params.get('data')
@@ -151,7 +160,9 @@ class ReasoningRuntime(RuntimeInterface):
                     python_executor_tool = get_python_executor_tool()
                     res = await python_executor_tool.create_visualization(data, pt, title)
                     tool_success = res.get('success', False)
-                    observation = json.dumps(res)
+                    observation_json = json.dumps(res, ensure_ascii=False)
+                    observation = truncate_text(observation_json, 2000)
+                    last_full_tool_output = observation_json
                     action_type = ActionType.TOOL_CALL
                 elif action == 'complete_task':
                     summary = await self.client.generate_task_summary(
@@ -308,8 +319,17 @@ class ReasoningRuntime(RuntimeInterface):
         
         # 生成更好的final_result
         if success and steps:
-            if steps[-1].action_type == ActionType.TOOL_CALL and "complete_task" in steps[-1].execution_code:
-                final_result = steps[-1].observation
+            last_step = steps[-1]
+            if last_step.action_type == ActionType.TOOL_CALL and "complete_task" in (last_step.execution_code or ""):
+                final_result = last_step.observation
+            elif last_final_answer:
+                final_result = last_final_answer
+            elif last_step.action_type == ActionType.TOOL_CALL:
+                try:
+                    obs_json = json.loads(last_full_tool_output or last_step.observation)
+                    final_result = obs_json.get("final_answer", last_step.observation)
+                except Exception:
+                    final_result = f"Task completed successfully after {len(steps)} steps."
             else:
                 final_result = f"Task completed successfully after {len(steps)} steps."
         elif steps:

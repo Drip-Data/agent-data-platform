@@ -324,6 +324,14 @@ docker exec $(docker-compose ps -q redis) redis-cli ping
 # 重启Redis
 docker-compose restart redis
 ```
+#### 5. 缺少依赖包
+执行代码任务时如遇到 `ModuleNotFoundError`，Sandbox Runtime 会尝试自动安装常用依赖（例如 `numpy`、`pandas` 等）。可通过环境变量 `SANDBOX_ALLOWED_PACKAGES` 指定额外允许安装的包：
+
+```bash
+export SANDBOX_ALLOWED_PACKAGES="numpy,pandas,matplotlib,requests"
+```
+若依赖仍无法安装，请在 `runtimes/sandbox/requirements.txt` 中补充并重新构建镜像。
+
 
 ### 自动修复
 
