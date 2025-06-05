@@ -51,7 +51,8 @@ COPY runtimes/reasoning/requirements.txt /app/reasoning_requirements.txt
 COPY requirements.txt /app/base_requirements.txt
 
 # 安装Python依赖
-RUN pip install --no-cache-dir -r base_requirements.txt && \
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r base_requirements.txt && \
     pip install --no-cache-dir -r reasoning_requirements.txt
 
 # 验证关键依赖安装成功

@@ -35,6 +35,8 @@ import redis.asyncio as async_redis
 
 from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType
 from ..llm_client import LLMClient
+from ..toolscore.unified_tool_library import UnifiedToolLibrary
+from ..toolscore.interfaces import ToolType, FunctionToolSpec, ToolCapability
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,7 @@ class SimpleSynthesizer:
         self.redis = async_redis.from_url(config["redis_url"])  # 使用异步redis客户端
         self.llm_client = LLMClient(config)
         self.enabled = config.get("synthesis_enabled", False)
+        self.tool_library = UnifiedToolLibrary() # 初始化UnifiedToolLibrary
         
         # 使用容器内路径
         self.task_essences_path = "/app/output/task_essences.json"
@@ -210,6 +213,8 @@ class SimpleSynthesizer:
             
         logger.info("🚀 启动基于JSON的任务合成器...")
         
+        await self.tool_library.initialize() # 初始化UnifiedToolLibrary
+        
         # 启动自动轨迹监控（如果启用）
         if self.auto_monitor_enabled:
             await self._start_trajectory_monitoring()
@@ -294,7 +299,7 @@ class SimpleSynthesizer:
                             new_essences.append(asdict(essence))
                             
                             # 直接转换为种子任务
-                            seed_task = self._convert_essence_to_seed(essence)
+                            seed_task = await self._convert_essence_to_seed(essence)
                             if seed_task:
                                 new_seed_tasks.append(seed_task)
                                 processed_count += 1
@@ -364,7 +369,7 @@ class SimpleSynthesizer:
         else:
             logger.debug(f"⏩ 忽略非目标文件: {trajectory_path}")
     
-    def _convert_essence_to_seed(self, essence: TaskEssence) -> Optional[Dict]:
+    async def _convert_essence_to_seed(self, essence: TaskEssence) -> Optional[Dict]:
         """将任务本质直接转换为种子任务"""
         try:
             # 生成种子任务ID
@@ -374,7 +379,7 @@ class SimpleSynthesizer:
             success_pattern = essence.success_pattern
             expected_tools = success_pattern.get('tools_used', [])
             if not expected_tools:
-                expected_tools = self._infer_expected_tools(essence.task_type, essence.domain)
+                expected_tools = await self._infer_expected_tools(essence.task_type, essence.domain)
             
             # 推断最大步数
             max_steps = self._infer_max_steps(essence.complexity_level, essence.task_type)
@@ -474,25 +479,66 @@ class SimpleSynthesizer:
         hash_obj = hashlib.md5(description.encode('utf-8'))
         return hash_obj.hexdigest()[:8]
     
-    def _infer_expected_tools(self, task_type: str, domain: str) -> List[str]:
-        """根据任务类型和领域推断预期工具"""
-        tools_map = {
-            'code': ['python_executor'],
-            'web': ['browser', 'selenium'],
-            'reasoning': ['browser', 'python_executor']
+    async def _infer_expected_tools(self, task_type: str, domain: str) -> List[str]:
+        """根据任务类型和领域推断预期工具 - 动态从UnifiedToolLibrary获取"""
+        
+        all_tools = await self.tool_library.get_all_tools()
+        available_tool_ids = {tool.tool_id for tool in all_tools}
+        
+        inferred_tools = set()
+
+        # 优先匹配明确的工具ID
+        if task_type == 'code':
+            if "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+        elif task_type == 'web':
+            if "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            # 假设有其他web工具，例如"web_scraper"
+            # if "web_scraper" in available_tool_ids:
+            #     inferred_tools.add("web_scraper")
+        elif task_type == 'reasoning':
+            if "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            if "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+
+        # 根据领域进一步细化，匹配工具的tags或description
+        # 这是一个示例，实际可能需要更复杂的匹配逻辑
+        domain_keywords_map = {
+            'data_analysis': ['data', 'analysis', 'pandas', 'numpy', 'matplotlib'],
+            'web_automation': ['web', 'browser', 'scrape', 'requests', 'BeautifulSoup'],
+            'algorithm': ['algorithm', 'math', 'calculate'],
+            'research': ['search', 'research', 'query'],
+            'stock_analysis': ['stock', 'finance', 'market']
         }
+
+        domain_keywords = domain_keywords_map.get(domain, [])
         
-        base_tools = tools_map.get(task_type, [])
+        for tool in all_tools:
+            tool_description_lower = tool.description.lower()
+            tool_name_lower = tool.name.lower()
+            tool_tags_lower = [tag.lower() for tag in tool.tags] if tool.tags else []
+
+            # 检查工具描述、名称或标签是否包含领域关键词
+            if any(keyword in tool_description_lower or
+                   keyword in tool_name_lower or
+                   any(keyword in tag for tag in tool_tags_lower)
+                   for keyword in domain_keywords):
+                inferred_tools.add(tool.tool_id)
         
-        # 根据领域进一步细化
-        if domain == 'data_analysis':
-            base_tools.extend(['matplotlib', 'pandas', 'numpy'])
-        elif domain == 'web_automation':
-            base_tools.extend(['BeautifulSoup', 'requests'])
-        elif domain == 'algorithm':
-            base_tools.extend(['math'])
-        
-        return list(set(base_tools))  # 去重
+        # 如果没有推断出任何工具，则根据任务类型提供一个默认工具
+        if not inferred_tools:
+            if task_type == 'code' and "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+            elif task_type == 'web' and "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            elif task_type == 'reasoning' and "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            elif task_type == 'reasoning' and "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+
+        return list(inferred_tools)
     
     def _infer_max_steps(self, complexity_level: str, task_type: str) -> int:
         """根据复杂度和任务类型推断最大步数"""
@@ -720,7 +766,7 @@ class SimpleSynthesizer:
                                         self._store_essence(essence)
                                         
                                         # 立即生成种子任务
-                                        seed_task = self._convert_essence_to_seed(essence)
+                                        seed_task = await self._convert_essence_to_seed(essence)
                                         if seed_task:
                                             new_seed_tasks.append(seed_task)
                                             logger.info(f"🌱 Generated seed task from essence: {essence.essence_id}")
@@ -761,7 +807,7 @@ class SimpleSynthesizer:
                             self._store_essence(essence)
                             
                             # 立即生成种子任务
-                            seed_task = self._convert_essence_to_seed(essence)
+                            seed_task = await self._convert_essence_to_seed(essence)
                             if seed_task:
                                 await self._append_seed_tasks([seed_task])
                                 logger.info(f"🌱 Generated and saved seed task from essence: {essence.essence_id}")
@@ -995,13 +1041,13 @@ class SimpleSynthesizer:
                 # 映射字段名称
                 converted_step = ExecutionStep(
                     step_id=step_data.get('step_id', 0),
-                    action_type=ActionType(step_data.get('action_type', 'code_generation')),
+                    action_type=ActionType(step_data.get('action_type', 'code_generation')), # 确保是ActionType枚举
                     action_params=step_data.get('tool_input', {}),
                     observation=step_data.get('tool_output', ''),
                     success=step_data.get('success', True),
                     thinking=step_data.get('thinking'),
                     execution_code=step_data.get('execution_code'),
-                    error_type=ErrorType(step_data['error_type']) if step_data.get('error_type') else None,
+                    error_type=ErrorType(step_data['error_type']) if step_data.get('error_type') else None, # 确保是ErrorType枚举
                     error_message=step_data.get('error_message'),
                     timestamp=step_data.get('timestamp', time.time()),
                     duration=step_data.get('duration', 0.0)
@@ -1232,32 +1278,36 @@ class SimpleSynthesizer:
         tools = set()
         
         for step in trajectory.steps:
-            # 基于action_type识别工具
-            action_type_str = str(step.action_type).lower()
-            if 'browser' in action_type_str or 'navigate' in action_type_str:
-                tools.add("browser")
-            elif 'code' in action_type_str or 'python' in action_type_str:
-                tools.add("python")
-            elif 'search' in action_type_str:
-                tools.add("search")
+            # 优先从 action_params 中提取 tool_id
+            if step.action_type == ActionType.TOOL_CALL and 'tool_id' in step.action_params:
+                tools.add(step.action_params['tool_id'])
             
-            # 基于action_params识别工具
+            # 如果没有明确的 tool_id，则基于 action_type 和 action_params 进行推断
+            action_type_str = str(step.action_type).lower()
+            
+            if 'browser_action' in action_type_str:
+                tools.add("browser_navigator") # 使用文档中定义的tool_id
+            elif 'code_execution' in action_type_str:
+                tools.add("python_executor") # 使用文档中定义的tool_id
+            
+            # 进一步基于 action_params 中的关键词推断
             if step.action_params:
                 params_str = str(step.action_params).lower()
                 if 'url' in params_str or 'navigate' in params_str:
-                    tools.add("browser")
+                    tools.add("browser_navigator")
                 if 'code' in params_str or 'python' in params_str:
-                    tools.add("python")
-                if 'search' in params_str or 'query' in params_str:
-                    tools.add("search")
+                    tools.add("python_executor")
+                # 假设有其他工具，例如文件处理工具
+                if 'file' in params_str or 'path' in params_str:
+                    tools.add("file_processor")
             
-            # 基于observation识别工具输出
+            # 基于 observation 识别工具输出 (作为补充)
             if step.observation:
                 obs_str = str(step.observation).lower()
                 if 'browser' in obs_str or 'page' in obs_str or 'website' in obs_str:
-                    tools.add("browser")
+                    tools.add("browser_navigator")
                 if 'python' in obs_str or 'execution' in obs_str:
-                    tools.add("python")
+                    tools.add("python_executor")
         
         return list(tools)
     
@@ -1408,7 +1458,7 @@ class SimpleSynthesizer:
                     )
                     
                     # 生成种子任务
-                    seed_task = self._convert_essence_to_seed(essence)
+                    seed_task = await self._convert_essence_to_seed(essence)
                     if seed_task:
                         seed_tasks.append(seed_task)
                         logger.debug(f"✅ 从本质 {essence.essence_id} 生成种子任务")
@@ -1659,6 +1709,11 @@ async def main():
                 synthesizer.observer.join()
                 logger.info("📁 文件监控已停止")
             
+            # 清理UnifiedToolLibrary管理的资源
+            if hasattr(synthesizer, 'tool_library'):
+                await synthesizer.tool_library.cleanup()
+                logger.info("🧹 UnifiedToolLibrary资源已清理")
+
             await synthesizer.redis.aclose()  # 使用aclose()替代close()
             logger.info("🔌 Redis连接已关闭")
         except Exception as e:

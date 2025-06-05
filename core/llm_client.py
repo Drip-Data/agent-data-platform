@@ -114,6 +114,28 @@ class LLMClient:
                 "confidence": 0.0
             }
     
+    async def generate_enhanced_reasoning(self, task_description: str, available_tools: List[str],
+                                         tool_descriptions: str,
+                                         previous_steps: List[Dict] = None,
+                                         browser_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """生成增强推理步骤和工具调用 - 使用丰富的工具描述"""
+        prompt = self._build_enhanced_reasoning_prompt(
+            task_description, available_tools, tool_descriptions, previous_steps, browser_context
+        )
+        
+        try:
+            response = await self._call_api(prompt)
+            return self._parse_reasoning_response(response)
+        except Exception as e:
+            logger.error(f"Failed to generate enhanced reasoning: {e}")
+            return {
+                "thinking": f"Error occurred while processing: {e}",
+                "action": "error",
+                "tool": None,
+                "parameters": {},
+                "confidence": 0.0
+            }
+    
     async def generate_task_summary(self, task_description: str, steps: List[Dict], 
                                    final_outputs: List[str]) -> str:
         """生成任务执行总结"""
@@ -426,6 +448,85 @@ CONFIDENCE: [提供一个0.0到1.0之间的小数，表示你对当前决策能�
 请确保你的输出严格遵循上述格式的每一部分。
 """
         return prompt_template # This return must be at the same indentation level as the start of the method body.
+    
+    def _build_enhanced_reasoning_prompt(self, task_description: str, available_tools: List[str],
+                                        tool_descriptions: str, previous_steps: List[Dict] = None,
+                                        browser_context: Optional[Dict[str, Any]] = None) -> str:
+        """构建增强推理提示 - 使用丰富的工具描述"""
+        
+        browser_context_str = ""
+        if browser_context:
+            bc = browser_context
+            browser_context_str = (
+                f"\n\n当前浏览器状态:\n"
+                f"- 当前URL: {bc.get('current_url', 'N/A')}\n"
+                f"- 页面标题: {bc.get('current_page_title', 'N/A')}\n"
+                f"- 最近导航历史:\n  {bc.get('recent_navigation_summary', '无导航历史').replace(chr(10), chr(10) + '  ')}\n"
+                f"- 上次提取文本片段: {bc.get('last_text_snippet', '无')}\n"
+                f"- 当前页面链接摘要: {bc.get('links_on_page_summary', '无')}"
+            )
+
+        previous_steps_str = ""
+        if previous_steps:
+            previous_steps_str = "\n\n之前的执行步骤:\n"
+            for i, step in enumerate(previous_steps[-3:], 1):
+                action_str = step.get('action', step.get('action_type', 'unknown_action'))
+                observation_str = str(step.get('observation', ''))[:200]
+                previous_steps_str += f"  {i}. Action: {action_str}, Observation: {observation_str}...\n"
+
+        prompt_template = f"""你是一个智能推理助手，拥有丰富的工具库来解决复杂任务。
+你的目标是通过自主选择和组合工具，高效准确地完成用户任务。
+
+任务描述: {task_description}
+
+🔧 **你的工具库** (按类型组织，选择最适合的工具):
+{tool_descriptions}
+
+**工具使用策略建议**:
+1. **分析任务本质**: 理解任务的核心需求和最终目标
+2. **工具能力映射**: 将任务需求映射到具体的工具能力
+3. **执行路径规划**: 设计最优的工具使用顺序
+4. **动态调整策略**: 根据执行结果调整后续行动
+
+**LLM自主决策原则**:
+- 你完全自主决定使用哪些工具以及如何使用
+- 可以创新性地组合多个工具来解决复杂问题
+- 如果某个工具不满足需求，主动寻找替代方案
+- 基于工具执行结果，动态调整策略
+{browser_context_str}
+{previous_steps_str}
+
+请深入分析当前情况，展示你的推理过程，并自主选择最适合的工具和行动。
+
+输出格式:
+
+THINKING:
+[详细分析任务需求，评估可用工具，制定执行策略。展示你的推理过程：
+- 任务分析：核心目标是什么？
+- 工具评估：哪些工具最适合？为什么？
+- 策略制定：计划如何使用工具？
+- 如果有之前的步骤，分析执行结果并调整策略]
+
+ACTION: [选择的具体行动，如：browser_navigate, python_execute, browser_get_text等]
+
+TOOL: [执行该ACTION需要的工具名称，如：browser, python_executor等]
+
+PARAMETERS:
+[JSON格式的参数，必须符合所选工具的参数要求。例如：
+- browser_navigate: {{"url": "完整的HTTP/HTTPS URL"}}
+- python_execute: {{"code": "Python代码字符串"}}
+- browser_get_text: {{"selector": "CSS选择器"}} 或 {{}}
+严格按照工具描述中的参数格式要求]
+
+CONFIDENCE: [0.0-1.0的数值，表示对当前决策的信心]
+
+注意：
+- 你拥有完全的工具选择自主权，无需外部推荐
+- 基于工具的详细描述和示例，做出最佳决策
+- 如果遇到问题，展示你的适应性和问题解决能力
+- 让工具为你的智能决策服务，而不是被工具限制
+"""
+        return prompt_template
     
     def _build_summary_prompt(self, task_description: str, steps: List[Dict], 
                              final_outputs: List[str]) -> str:
