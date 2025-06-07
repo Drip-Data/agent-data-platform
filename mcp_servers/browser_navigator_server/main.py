@@ -162,15 +162,17 @@ class BrowserNavigatorMCPServer:
             else:
                 return {
                     "success": False,
-                    "error": f"Unsupported action: {action}",
-                    "error_type": "UnsupportedAction"
+                    "data": {
+                        "error": f"Unsupported action: {action}",
+                        "error_type": "UnsupportedAction"
+                    }
                 }
             
             return {
                 "success": result.get("success", False),
-                "output": result.get("output", ""),
-                "error": result.get("error", ""),
-                "error_type": result.get("error_type", "")
+                "data": result.get("output", {}),
+                "error": result.get("output", {}).get("error"),
+                "error_type": result.get("output", {}).get("error_type")
             }
                 
         except Exception as e:

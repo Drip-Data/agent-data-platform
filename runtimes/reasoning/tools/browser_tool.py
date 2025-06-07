@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 from playwright.async_api import async_playwright, Browser, Page
 import json
 from core.browser_state_manager import state_manager
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,28 @@ class BrowserTool:
         except Exception as cleanup_error:
             logger.error(f"Error during initialization cleanup: {cleanup_error}")
     
+    async def _get_current_page_state(self, include_content=True) -> Dict[str, Any]:
+        """获取当前页面的状态快照"""
+        if not self._initialized or not self.page:
+            return {"error": "Browser not initialized"}
+
+        state = {
+            "url": self.page.url,
+            "title": await self.page.title(),
+        }
+
+        if include_content:
+            try:
+                # 只获取body内的可见文本，并进行截断，避免返回内容过长
+                body_text = await self.page.inner_text('body')
+                max_len = 500
+                state["content_summary"] = (body_text[:max_len] + '...') if len(body_text) > max_len else body_text
+            except Exception as e:
+                logger.warning(f"Could not get page content summary: {e}")
+                state["content_summary"] = "Could not retrieve content."
+
+        return state
+
     async def navigate(self, url: str) -> Dict[str, Any]:
         """导航到指定URL"""
         await self.initialize()
@@ -66,51 +89,38 @@ class BrowserTool:
             logger.error(f"Invalid URL parameter for navigate: {url}")
             return {
                 "success": False,
-                "error_type": "InvalidArgument",
-                "error": "URL parameter is missing or invalid. It must be a valid HTTP/HTTPS URL.",
-                "message": f"Failed to navigate due to invalid URL parameter: {url}"
+                "output": {
+                    "error_type": "InvalidArgument",
+                    "error": "URL parameter is missing or invalid. It must be a valid HTTP/HTTPS URL.",
+                    "message": f"Failed to navigate due to invalid URL parameter: {url}"
+                }
             }
         
         try:
-            # 使用更合理的超时和等待策略，参考 AGENT_IMPROVEMENT_PLAN.md
-            # 默认超时可以设置在 playwright.chromium.launch 或 new_page 中，这里用默认的
-            # wait_until='networkidle' 可能会很慢，先尝试 'domcontentloaded'
-            await self.page.goto(url, wait_until='domcontentloaded', timeout=30000) # 30秒超时
-            title = await self.page.title()
-            content = await self.page.content() # 获取内容可能较慢，如果只是导航确认，可以考虑移除或仅获取头部
+            await self.page.goto(url, wait_until='domcontentloaded', timeout=30000)
             
-            result = {
+            page_state = await self._get_current_page_state()
+            
+            return {
                 "success": True,
-                "url": url,
-                "title": title,
-                "content_length": len(content),
-                "message": f"Successfully navigated to {url}"
+                "output": page_state
             }
-            # 更新浏览器状态
-            state_manager.record_navigation_attempt(url, True, title)
-            urls_and_texts = await self.page.eval_on_selector_all('a[href]', 'els => els.map(e => [e.href, e.textContent.trim()])')
-            links_data = [{"href": href, "text": text} for href, text in urls_and_texts]
-            state_manager.record_links_extracted(links_data)
-            state_manager.record_text_extraction(content)
-            return result
         except Exception as e:
             logger.error(f"Failed to navigate to {url}: {e}")
-            error_info = {
+            return {
                 "success": False,
-                "error_type": "NavigationError",
-                "error": str(e),
-                "message": f"Failed to navigate to {url}"
+                "output": {
+                    "error_type": "NavigationError",
+                    "error": str(e),
+                    "message": f"Failed to navigate to {url}"
+                }
             }
-            # 记录错误状态
-            error_details = {"error": str(e), "error_type": "NavigationError"}
-            state_manager.record_navigation_attempt(url, False, error_details=error_details)
-            return error_info
     
     async def get_text(self, selector: Optional[str] = None) -> Dict[str, Any]:
         """获取页面文本内容"""
         if not self._initialized or not self.page:
             logger.warning("get_text called before browser initialization.")
-            return {"success": False, "error_type": "BrowserError", "error": "Browser not initialized"}
+            return {"success": False, "output": {"error": "Browser not initialized"}}
 
         # 如果提供了selector，但它是空字符串或非字符串，则视为无效
         if selector is not None: # Only validate if selector is provided
@@ -118,21 +128,23 @@ class BrowserTool:
                 logger.error(f"Invalid selector type for get_text: {selector} (type: {type(selector)})")
                 return {
                     "success": False,
-                    "error_type": "InvalidArgument",
-                    "error": f"Selector parameter must be a string or None, but got {type(selector)}.",
-                    "message": "Failed to get text due to invalid selector type."
+                    "output": {
+                        "error_type": "InvalidArgument",
+                        "error": f"Selector parameter must be a string or None, but got {type(selector)}."
+                    }
                 }
             if not selector.strip(): # Check if it's an empty or whitespace-only string
                 logger.error(f"Empty or whitespace-only selector provided for get_text.")
                 return {
                     "success": False,
-                    "error_type": "InvalidArgument",
-                    "error": "Selector parameter cannot be an empty or whitespace-only string if provided. Omit for body text.",
-                    "message": "Failed to get text due to empty or whitespace-only selector."
+                    "output": {
+                        "error_type": "InvalidArgument",
+                        "error": "Selector parameter cannot be an empty or whitespace-only string if provided. Omit for body text."
+                    }
                 }
             
         try:
-            if selector: # selector is not None and a non-empty string here
+            if selector:
                 element = await self.page.query_selector(selector)
                 if element:
                     text = await element.inner_text()
@@ -140,50 +152,56 @@ class BrowserTool:
                     logger.warning(f"Selector '{selector}' not found in page for get_text.")
                     return {
                         "success": False,
-                        "error_type": "ElementNotFound",
-                        "error": f"Element with selector '{selector}' not found.",
-                        "text": "", # Explicitly return empty text and length 0
-                        "length": 0
+                        "output": {
+                            "error_type": "ElementNotFound",
+                            "error": f"Element with selector '{selector}' not found."
+                        }
                     }
-            else: # selector is None, get body text
-                text = await self.page.inner_text('body') # Default to body if selector is None
+            else:
+                text = await self.page.inner_text('body')
             
             return {
                 "success": True,
-                "text": text,
-                "length": len(text)
+                "output": {
+                    "text": text,
+                    "length": len(text)
+                }
             }
         except Exception as e:
             logger.error(f"Error in get_text (selector: {selector}): {e}")
             return {
                 "success": False,
-                "error_type": "ExecutionError",
-                "error": str(e)
+                "output": {
+                    "error_type": "ExecutionError",
+                    "error": str(e)
+                }
             }
     
     async def click(self, selector: str) -> Dict[str, Any]:
         """点击元素"""
         if not self._initialized or not self.page:
             logger.warning("click called before browser initialization.")
-            return {"success": False, "error_type": "BrowserError", "error": "Browser not initialized"}
+            return {"success": False, "output": {"error": "Browser not initialized"}}
 
         if not selector or not isinstance(selector, str) or not selector.strip():
             logger.error(f"Invalid selector for click: '{selector}'")
             return {
                 "success": False,
-                "error_type": "InvalidArgument",
-                "error": "Selector parameter is missing, invalid, or empty. It must be a non-empty string.",
-                "message": f"Failed to click due to invalid selector: '{selector}'"
+                "output": {
+                    "error_type": "InvalidArgument",
+                    "error": "Selector parameter is missing, invalid, or empty."
+                }
             }
         
         try:
-            # Added a timeout for click, e.g., 15 seconds
             await self.page.click(selector, timeout=15000)
-            # Reduced wait or make it conditional, e.g., only if expecting navigation
-            await self.page.wait_for_timeout(500)
+            # 等待潜在的导航或内容变化
+            await self.page.wait_for_timeout(1000)
+            
+            page_state = await self._get_current_page_state()
             return {
                 "success": True,
-                "message": f"Successfully clicked '{selector}'"
+                "output": page_state
             }
         except Exception as e:
             logger.error(f"Failed to click '{selector}': {e}")
@@ -196,76 +214,94 @@ class BrowserTool:
 
             return {
                 "success": False,
-                "error_type": error_type_to_report,
-                "error": str(e),
-                "message": f"Failed to click '{selector}'"
+                "output": {
+                    "error_type": error_type_to_report,
+                    "error": str(e),
+                    "message": f"Failed to click '{selector}'"
+                }
             }
     
-    async def fill_form(self, selector: str, value: str) -> Dict[str, Any]:
-        """填写表单"""
+    async def type_text(self, selector: str, text: str) -> Dict[str, Any]:
+        """在指定元素中输入文本"""
         if not self._initialized or not self.page:
-            return {"success": False, "error": "Browser not initialized"}
-        
-        try:
-            await self.page.fill(selector, value)
-            return {
-                "success": True,
-                "message": f"Successfully filled {selector} with value"
-            }
-        except Exception as e:
+            return {"success": False, "output": {"error": "Browser not initialized"}}
+
+        if not all([selector, isinstance(selector, str), selector.strip(), text is not None, isinstance(text, str)]):
             return {
                 "success": False,
-                "error": str(e),
-                "message": f"Failed to fill {selector}"
+                "output": {"error_type": "InvalidArgument", "error": "Invalid selector or text provided."}
             }
-    
+            
+        try:
+            await self.page.type(selector, text, timeout=15000)
+            await self.page.wait_for_timeout(500)
+            
+            page_state = await self._get_current_page_state()
+            return {
+                "success": True,
+                "output": page_state
+            }
+        except Exception as e:
+            logger.error(f"Failed to type into '{selector}': {e}")
+            return {
+                "success": False,
+                "output": {
+                    "error_type": "ExecutionError",
+                    "error": str(e)
+                }
+            }
+
+    async def scroll(self, direction: str = 'down', pixels: int = 500) -> Dict[str, Any]:
+        """滚动页面"""
+        if not self._initialized or not self.page:
+            return {"success": False, "output": {"error": "Browser not initialized"}}
+
+        try:
+            if direction == 'down':
+                await self.page.evaluate(f"window.scrollBy(0, {pixels})")
+            elif direction == 'up':
+                await self.page.evaluate(f"window.scrollBy(0, -{pixels})")
+            
+            await self.page.wait_for_timeout(500)
+            
+            page_state = await self._get_current_page_state(include_content=False) # 滚动后通常不需要内容
+            return {
+                "success": True,
+                "output": page_state
+            }
+        except Exception as e:
+            logger.error(f"Failed to scroll: {e}")
+            return {
+                "success": False,
+                "output": {
+                    "error_type": "ExecutionError",
+                    "error": str(e)
+                }
+            }
+
     async def screenshot(self, path: Optional[str] = None) -> Dict[str, Any]:
         """截屏"""
         if not self._initialized or not self.page:
-            return {"success": False, "error": "Browser not initialized"}
+            return {"success": False, "output": {"error": "Browser not initialized"}}
         
         try:
             if not path:
-                path = f"/tmp/screenshot_{int(asyncio.get_event_loop().time())}.png"
+                path = f"/app/output/screenshots/screenshot_{uuid.uuid4()}.png"
             
             await self.page.screenshot(path=path)
             return {
                 "success": True,
-                "path": path,
-                "message": f"Screenshot saved to {path}"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def extract_links(self) -> Dict[str, Any]:
-        """提取页面链接"""
-        if not self._initialized or not self.page:
-            return {"success": False, "error": "Browser not initialized"}
-        
-        try:
-            links = await self.page.evaluate("""
-                () => {
-                    const links = Array.from(document.querySelectorAll('a[href]'));
-                    return links.map(link => ({
-                        text: link.textContent.trim(),
-                        href: link.href,
-                        title: link.title || ''
-                    }));
+                "output": {
+                   "path": path,
+                   "message": f"Screenshot saved to {path}"
                 }
-            """)
-            
-            return {
-                "success": True,
-                "links": links,
-                "count": len(links)
             }
         except Exception as e:
             return {
                 "success": False,
-                "error": str(e)
+                "output": {
+                    "error": str(e)
+                }
             }
     
     async def cleanup(self):

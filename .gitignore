@@ -52,3 +52,7 @@ exported_tasks.jsonl
 # Temporary files
 *.tmp
 *.temp
+
+# 忽略任务文件和环境变量
+tasks.jsonl
+.env
