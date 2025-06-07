@@ -97,6 +97,49 @@ class MCPServer:
                     }
                 await websocket.send(json.dumps(response))
 
+            elif request_type == "list_tools" and self.server_name == "toolscore":
+                # 只有toolscore才处理工具列表请求
+                if self.unified_tool_library:
+                    try:
+                        all_tools = await self.unified_tool_library.get_all_tools()
+                        tools_data = []
+                        for tool in all_tools:
+                            tools_data.append({
+                                "tool_id": tool.tool_id,
+                                "name": tool.name,
+                                "description": tool.description,
+                                "tool_type": tool.tool_type.value,
+                                "capabilities": [cap.to_dict() for cap in tool.capabilities]
+                            })
+                        
+                        response = {
+                            "type": "list_tools_response",
+                            "request_id": request_id,
+                            "success": True,
+                            "tools": tools_data,
+                            "total_count": len(tools_data)
+                        }
+                    except Exception as e:
+                        logger.error(f"Error listing tools: {e}", exc_info=True)
+                        response = {
+                            "type": "list_tools_response",
+                            "request_id": request_id,
+                            "success": False,
+                            "error": str(e),
+                            "tools": [],
+                            "total_count": 0
+                        }
+                else:
+                    response = {
+                        "type": "list_tools_response",
+                        "request_id": request_id,
+                        "success": False,
+                        "error": "UnifiedToolLibrary not initialized for this server.",
+                        "tools": [],
+                        "total_count": 0
+                    }
+                await websocket.send(json.dumps(response))
+
             elif request_type == "execute_tool" and self.server_name == "toolscore":
                 # 只有toolscore才处理工具执行请求并路由
                 tool_id = request.get("tool_id")
@@ -105,19 +148,53 @@ class MCPServer:
 
                 if self.unified_tool_library:
                     try:
-                        execution_result: ExecutionResult = await self.unified_tool_library.execute_tool(tool_id, action, parameters)
-                        response = {
-                            "type": "execute_tool_response",
-                            "request_id": request_id,
-                            "tool_id": tool_id,
-                            "action": action,
-                            "success": execution_result.success,
-                            "result": execution_result.data,
-                            "error": execution_result.error_message,
-                            "error_type": execution_result.error_type if execution_result.error_type else None
-                        }
+                        # 获取工具规范
+                        tool_spec = await self.unified_tool_library.get_tool_by_id(tool_id)
+                        
+                        if tool_spec and tool_spec.tool_type == ToolType.MCP_SERVER:
+                            # 对于MCP_SERVER类型的工具，直接通过WebSocket转发到实际的MCP服务器
+                            logger.info(f"Forwarding tool execution to MCP server for tool {tool_id}")
+                            
+                            # 生成转发请求ID
+                            forward_request_id = str(uuid4())
+                            forward_request = {
+                                "type": "execute_tool_action",
+                                "request_id": forward_request_id,
+                                "tool_id": tool_id,
+                                "action": action,
+                                "parameters": parameters
+                            }
+                            
+                            # 注意：这里需要维护到各个MCP服务器的连接
+                            # 目前简化处理，通过UnifiedToolLibrary但绕过适配器
+                            
+                            # 实现真正的MCP服务器转发
+                            forward_result = await self._forward_to_mcp_server(tool_id, action, parameters)
+                            response = {
+                                "type": "execute_tool_response",
+                                "request_id": request_id,
+                                "tool_id": tool_id,
+                                "action": action,
+                                "success": forward_result.get("success", False),
+                                "result": forward_result.get("result"),
+                                "error": forward_result.get("error"),
+                                "error_type": forward_result.get("error_type", ErrorType.SYSTEM_ERROR.value)
+                            }
+                        else:
+                            # 对于非MCP_SERVER工具（Function tools），使用UnifiedToolLibrary
+                            execution_result: ExecutionResult = await self.unified_tool_library.execute_tool(tool_id, action, parameters)
+                            response = {
+                                "type": "execute_tool_response",
+                                "request_id": request_id,
+                                "tool_id": tool_id,
+                                "action": action,
+                                "success": execution_result.success,
+                                "result": execution_result.data,
+                                "error": execution_result.error_message,
+                                "error_type": execution_result.error_type if execution_result.error_type else None
+                            }
                     except Exception as e:
-                        logger.error(f"Error executing tool {tool_id} via UnifiedToolLibrary: {e}", exc_info=True)
+                        logger.error(f"Error executing tool {tool_id} via ToolScore: {e}", exc_info=True)
                         response = {
                             "type": "execute_tool_response",
                             "request_id": request_id,
@@ -191,8 +268,81 @@ class MCPServer:
             logger.error(f"Error handling message: {e}", exc_info=True)
             await websocket.send(json.dumps({"type": "error", "message": str(e)}))
 
-    async def websocket_handler(self, websocket: websockets.WebSocketServerProtocol, path: str):
+    async def _forward_to_mcp_server(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """转发请求到实际的MCP服务器"""
+        try:
+            # 映射工具ID到服务器WebSocket端点
+            server_endpoint_map = {
+                "python-executor-mcp-server": "ws://python-executor-server:8081/mcp",
+                "browser-navigator-mcp-server": "ws://browser-navigator-server:8082/mcp"
+            }
+            
+            endpoint = server_endpoint_map.get(tool_id)
+            if not endpoint:
+                return {
+                    "success": False,
+                    "error": f"Unknown MCP server: {tool_id}",
+                    "error_type": ErrorType.TOOL_ERROR.value
+                }
+            
+            # 构建WebSocket请求到MCP服务器
+            request_id = str(uuid4())
+            payload = {
+                "type": "execute_tool_action",
+                "request_id": request_id,
+                "tool_id": tool_id,
+                "action": action,
+                "parameters": parameters
+            }
+            
+            import websockets
+            try:
+                # 使用ping_interval和ping_timeout来处理连接超时
+                async with websockets.connect(endpoint, ping_interval=10, ping_timeout=30) as ws:
+                    # 发送请求
+                    await ws.send(json.dumps(payload))
+                    
+                    # 等待响应
+                    response_str = await ws.recv()
+                    response_data = json.loads(response_str)
+                    
+                    if response_data.get("request_id") == request_id:
+                        result = response_data.get("result", {})
+                        return {
+                            "success": result.get("success", False),
+                            "result": result.get("data") or result.get("result"),
+                            "error": result.get("error"),
+                            "error_type": result.get("error_type")
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "result": None,
+                            "error": f"Mismatched request ID in response",
+                            "error_type": ErrorType.SYSTEM_ERROR.value
+                        }
+                        
+            except websockets.exceptions.ConnectionClosedError as e:
+                return {
+                    "success": False,
+                    "result": None,
+                    "error": f"Connection to {tool_id} closed: {str(e)}",
+                    "error_type": ErrorType.CONNECTION_ERROR.value
+                }
+                        
+        except Exception as e:
+            logger.error(f"Error forwarding to MCP server {tool_id}: {e}")
+            return {
+                "success": False,
+                "result": None,
+                "error": f"Failed to forward to MCP server: {str(e)}",
+                "error_type": ErrorType.SYSTEM_ERROR.value
+            }
+
+    async def websocket_handler(self, websocket: websockets.WebSocketServerProtocol):
         """WebSocket连接处理函数"""
+        # 注意：在新版websockets中，ServerConnection对象没有path属性
+        # 如果需要路径信息，可以通过其他方式获取
         logger.info(f"Client connected to {self.server_name} MCP Server: {websocket.remote_address}")
         try:
             async for message in websocket:
@@ -228,7 +378,15 @@ class MCPServer:
                     register_request = {
                         "type": "register_tool",
                         "request_id": request_id,
-                        "tool_spec": tool_spec.to_dict() # 假设ToolSpec有to_dict方法
+                        "tool_spec": {
+                            "tool_id": tool_spec.tool_id,
+                            "name": tool_spec.name,
+                            "description": tool_spec.description,
+                            "tool_type": tool_spec.tool_type.value,
+                            "capabilities": [cap.to_dict() for cap in tool_spec.capabilities],
+                            "endpoint": tool_spec.endpoint,
+                            "connection_params": tool_spec.connection_params
+                        }
                     }
                     await ws.send(json.dumps(register_request))
                     
@@ -292,31 +450,84 @@ class MCPServer:
             logger.info("UnifiedToolLibrary cleaned up for toolscore server.")
 
 async def main():
-    print("Entering main function...") # Added for debugging
-    # 初始化 toolscore MCP Server
-    toolscore_server = MCPServer(
-        server_name="toolscore",
-        server_id="toolscore-server-id", # 固定的ID
-        description="Unified Tool Library MCP Server for agent platform",
-        capabilities=[
-            ToolCapability(name="tool_registration", description="Registers new tools from other MCP Servers", parameters={}),
-            ToolCapability(name="tool_execution", description="Dispatches tool execution requests to registered MCP Servers", parameters={})
-        ],
-        tool_type=ToolType.MCP_SERVER,
-        endpoint="ws://0.0.0.0:8080/websocket" # 监听所有接口
-    )
-    print("MCPServer instance created.") # Added for debugging
+    """启动ToolScore MCP服务器和监控API"""
+    import logging
+    logging.basicConfig(level=logging.INFO)
     
-    # 启动服务器
-    await toolscore_server.start()
-    print("MCPServer start method awaited.") # Added for debugging
+    # 导入工具能力定义
+    from .interfaces import ToolCapability, ToolType
+    from .unified_tool_library import UnifiedToolLibrary
+    from .monitoring_api import start_monitoring_api
+    
+    # 创建ToolScore MCP服务器
+    capabilities = [
+        ToolCapability(
+            name="register_tool",
+            description="注册新工具到工具库",
+            parameters={
+                "tool_spec": {
+                    "type": "object",
+                    "description": "工具规范",
+                    "required": True
+                }
+            },
+            examples=[{"tool_spec": {"tool_id": "example_tool", "name": "示例工具"}}]
+        ),
+        ToolCapability(
+            name="list_tools",
+            description="列出所有可用工具",
+            parameters={},
+            examples=[{}]
+        ),
+        ToolCapability(
+            name="execute_tool",
+            description="执行指定工具",
+            parameters={
+                "tool_id": {
+                    "type": "string",
+                    "description": "工具ID",
+                    "required": True
+                },
+                "action": {
+                    "type": "string", 
+                    "description": "工具动作",
+                    "required": True
+                },
+                "parameters": {
+                    "type": "object",
+                    "description": "动作参数",
+                    "required": False
+                }
+            },
+            examples=[{"tool_id": "python_executor_server", "action": "python_execute", "parameters": {"code": "print('hello')"}}]
+        )
+    ]
+    
+    # 创建工具库实例
+    tool_library = UnifiedToolLibrary()
+    
+    # 创建MCP服务器
+    server = MCPServer(
+        server_name="toolscore",
+        server_id="toolscore-main-server", 
+        description="统一工具注册与调用中心",
+        capabilities=capabilities,
+        tool_type=ToolType.MCP_SERVER,
+        endpoint="ws://0.0.0.0:8080/websocket",
+        toolscore_endpoint=None  # 自己就是toolscore
+    )
+    
+    # 设置工具库
+    server.unified_tool_library = tool_library
+    
+    # 启动HTTP监控API (在8090端口)
+    logger.info("Starting ToolScore monitoring API on port 8090...")
+    http_runner = await start_monitoring_api(tool_library, port=8090)
+    
+    # 启动WebSocket MCP服务器 (在8080端口)
+    logger.info("Starting ToolScore MCP WebSocket server on port 8080...")
+    await server.start()
 
 if __name__ == "__main__":
-    print("Script is being run directly.") # Added for debugging
-    # 配置日志
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        force=True)
-    print("Logging configured.") # Added for debugging
+    import asyncio
     asyncio.run(main())
-    print("Asyncio event loop finished.") # Added for debugging

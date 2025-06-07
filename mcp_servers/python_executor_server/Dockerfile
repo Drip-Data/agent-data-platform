@@ -1,25 +1,36 @@
-# 使用官方Python运行时作为父镜像
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# 设置工作目录
 WORKDIR /app
 
-# 复制当前目录下的所有文件到容器的/app目录
-COPY . /app
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# 安装所需的Python包
-# 注意：这里需要根据实际的依赖来安装，例如 websockets, uvicorn, pandas, matplotlib 等
-# 假设所有依赖都在 requirements.txt 中
+# 复制依赖文件
 COPY requirements.txt .
-RUN pip install --default-timeout=100 --upgrade pip && pip install --no-cache-dir -r requirements.txt
+COPY runtimes/reasoning/requirements.txt ./runtimes/reasoning/
 
-# 暴露MCP Server运行的端口
-EXPOSE 8001
+# 安装Python依赖
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r runtimes/reasoning/requirements.txt
 
-# 定义环境变量
-ENV TOOLSCORE_URL="ws://toolscore:8000/websocket"
+# 复制源代码
+COPY core/ ./core/
+COPY runtimes/ ./runtimes/
+COPY mcp_servers/python_executor_server/ ./mcp_servers/python_executor_server/
+
+# 设置环境变量
+ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV TOOLSCORE_ENDPOINT=ws://toolscore:8080/websocket
 
-# 启动MCP Server
-# 使用 uvicorn 启动 FastAPI 应用
-CMD ["uvicorn", "mcp_servers.python_executor_server.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# 暴露端口
+EXPOSE 8081
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import asyncio; print('healthy')"
+
+# 启动命令
+CMD ["python", "/app/mcp_servers/python_executor_server/main.py"]

@@ -146,8 +146,17 @@ class TaskManager:
 def get_runtime(task_type: str):
     """获取指定类型的运行时实例"""
     if task_type == 'reasoning':
-        from runtimes.reasoning.runtime import ReasoningRuntime
-        return ReasoningRuntime()
+        # 优先使用增强版本的推理运行时
+        try:
+            from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
+            return EnhancedReasoningRuntime()
+        except ImportError:
+            # # 如果增强版本不可用，回退到基础版本
+            # from runtimes.reasoning.runtime import ReasoningRuntime
+            # return ReasoningRuntime()
+
+            # 如果增强版本不可用，则抛出异常
+            raise ImportError("EnhancedReasoningRuntime not found")
     elif task_type == 'code':
         from runtimes.sandbox.runtime import LightweightSandboxRuntime
         return LightweightSandboxRuntime()
@@ -157,7 +166,7 @@ def get_runtime(task_type: str):
     else:
         raise ValueError(f"Unsupported task type: {task_type}. Supported types: reasoning, code, web")
 
-def start_runtime_service(runtime):
+async def start_runtime_service(runtime):
     """启动给定运行时的任务消费服务"""
     import os
     import asyncio
@@ -171,16 +180,29 @@ def start_runtime_service(runtime):
         
         # 根据runtime的能力确定队列名
         queue_name = None
-        if hasattr(runtime, 'capabilities') and runtime.capabilities:
-            # 推理runtime处理reasoning队列
-            if 'browser' in runtime.capabilities and 'python_executor' in runtime.capabilities:
-                queue_name = "tasks:reasoning"
-            # 代码执行runtime处理code队列
-            elif 'python_code_execution' in runtime.capabilities:
-                queue_name = "tasks:code"
-            # Web导航runtime处理web队列
-            elif 'browser_navigation' in runtime.capabilities:
-                queue_name = "tasks:web"
+        # if hasattr(runtime, 'capabilities'):
+        #     try:
+        #         # 如果capabilities是协程，需要await
+        #         if asyncio.iscoroutine(runtime.capabilities):
+        #             capabilities = await runtime.capabilities
+        #         elif callable(runtime.capabilities):
+        #             capabilities = await runtime.capabilities()
+        #         else:
+        #             capabilities = runtime.capabilities
+                
+        #         if capabilities:
+        #             # 推理runtime处理reasoning队列
+        #             if 'browser' in capabilities and 'python_executor' in capabilities:
+        #                 queue_name = "tasks:reasoning"
+        #             # 代码执行runtime处理code队列
+        #             elif 'python_code_execution' in capabilities:
+        #                 queue_name = "tasks:code"
+        #             # Web导航runtime处理web队列
+        #             elif 'browser_navigation' in capabilities:
+        #                 queue_name = "tasks:web"
+        #     except Exception as e:
+        #         logger.warning(f"Error getting runtime capabilities: {e}")
+        #         capabilities = None
         
         # 如果无法从capabilities确定，尝试从runtime类名推断
         if not queue_name:
@@ -255,4 +277,4 @@ def start_runtime_service(runtime):
                         await r.xack(queue_name, group, msg_id)
 
     # 运行异步服务
-    asyncio.run(_run_service())
+    await _run_service()

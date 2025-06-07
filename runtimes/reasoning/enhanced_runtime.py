@@ -118,6 +118,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 tool_success = False
                 current_attempt_err_type: Optional[ErrorType] = None # 明确类型
                 current_attempt_err_msg: Optional[str] = None # 明确类型
+                result = None  # 初始化result变量
 
                 execution_code = json.dumps({
                     'action': action,
@@ -155,18 +156,52 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if tool_id and action: # 确保tool_id和action存在
                     logger.debug(f"Attempt {attempt + 1}: Executing action '{action}' with tool_id '{tool_id}'")
                     
+                    # 映射能力名称到MCP服务器ID
+                    capability_to_server_map = {
+                        # 旧的能力名称映射
+                        'python_execute': 'python-executor-mcp-server',
+                        'python_analyze': 'python-executor-mcp-server', 
+                        'python_visualize': 'python-executor-mcp-server',
+                        'python_install_package': 'python-executor-mcp-server',
+                        'browser_navigate': 'browser-navigator-mcp-server',
+                        'browser_click': 'browser-navigator-mcp-server',
+                        'browser_type': 'browser-navigator-mcp-server',
+                        'browser_scroll': 'browser-navigator-mcp-server',
+                        'browser_screenshot': 'browser-navigator-mcp-server',
+                        'browser_get_text': 'browser-navigator-mcp-server',
+                        # 添加可能的工具名称变体
+                        'python_executor': 'python-executor-mcp-server',
+                        'python_executor_server': 'python-executor-mcp-server',
+                        'python_interpreter': 'python-executor-mcp-server',
+                        'browser_navigator': 'browser-navigator-mcp-server',
+                        'browser_navigator_server': 'browser-navigator-mcp-server'
+                    }
+                    
+                    # 如果tool_id是能力名称，映射到正确的MCP服务器ID
+                    actual_server_id = capability_to_server_map.get(tool_id, tool_id)
+                    if actual_server_id != tool_id:
+                        logger.info(f"Mapping capability '{tool_id}' to MCP server '{actual_server_id}'")
+                    
                     # 检查并清理browser_navigate工具的URL参数
                     cleaned_params = params.copy()
-                    if tool_id == "browser_navigator_server" and action == "browser_navigate":
+                    if actual_server_id == "browser-navigator-mcp-server" and action == "browser_navigate":
                         url = cleaned_params.get("url", "")
                         if url.startswith("url: "):
                             cleaned_params["url"] = url[len("url: "):].strip()
                             logger.info(f"Cleaned URL for browser_navigate: {url} -> {cleaned_params['url']}")
                     
                     # 调用UnifiedToolLibrary的execute_tool方法
-                    result = await self.tool_library.execute_tool(tool_id, action, cleaned_params)
+                    result = await self.tool_library.execute_tool(actual_server_id, action, cleaned_params)
                     tool_success = result.success # UnifiedToolLibrary返回的是ExecutionResult对象
                     observation = json.dumps(result.to_dict()) # 将ExecutionResult转换为字典再序列化
+                    
+                    # 如果是Python执行成功，并且有标准输出，添加到current_outputs
+                    if tool_success and actual_server_id == 'python-executor-mcp-server' and result.data:
+                        # 尝试从result.data中提取stdout信息
+                        if isinstance(result.data, dict) and 'stdout' in result.data:
+                            current_outputs.append(result.data['stdout'])
+                        elif isinstance(result.data, str):
+                            current_outputs.append(result.data)
                     
                     # 现在所有工具都是MCP Server，统一设置为TOOL_CALL
                     action_type = ActionType.TOOL_CALL
@@ -189,17 +224,19 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
                 # 错误处理
                 if not tool_success:
-                    # 直接从ExecutionResult获取错误信息
-                    # 确保current_attempt_err_type是ErrorType枚举或None
-                    if isinstance(result.error_type, str):
-                        try:
-                            current_attempt_err_type = ErrorType(result.error_type)
-                        except ValueError:
-                            current_attempt_err_type = ErrorType.TOOL_ERROR
-                    else:
-                        current_attempt_err_type = result.error_type if result.error_type else ErrorType.TOOL_ERROR
-                    
-                    current_attempt_err_msg = result.error_message if result.error_message else "Unknown tool error"
+                    # 直接从ExecutionResult获取错误信息（如果result不为None）
+                    if result is not None:
+                        # 确保current_attempt_err_type是ErrorType枚举或None
+                        if isinstance(result.error_type, str):
+                            try:
+                                current_attempt_err_type = ErrorType(result.error_type)
+                            except ValueError:
+                                current_attempt_err_type = ErrorType.TOOL_ERROR
+                        else:
+                            current_attempt_err_type = result.error_type if result.error_type else ErrorType.TOOL_ERROR
+                        
+                        current_attempt_err_msg = result.error_message if result.error_message else "Unknown tool error"
+                    # 如果result为None，使用已设置的错误信息（current_attempt_err_type和current_attempt_err_msg）
                 
                 if tool_success:
                     break
@@ -353,3 +390,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 清理UnifiedToolLibrary管理的资源
         await self.tool_library.cleanup()
+
+# 运行服务
+if __name__ == '__main__':
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    
+    async def main():
+        runtime = EnhancedReasoningRuntime()
+        await runtime.initialize()
+        
+        from core.task_manager import start_runtime_service
+        # 启动服务
+        await start_runtime_service(runtime)
+    
+    asyncio.run(main())

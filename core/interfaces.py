@@ -10,6 +10,7 @@ class TaskType(Enum):
     CODE = "code"
     WEB = "web"
     REASONING = "reasoning"
+    # GENERAL = "general"  # 添加通用任务类型
 
 class ActionType(Enum):
     CODE_GENERATION = "code_generation"

@@ -152,7 +152,13 @@ class DescriptionEngine:
                 desc = await self.generate_tool_description_for_agent(tool.tool_id)
                 descriptions.append(desc)
             
-            return "\n" + "="*80 + "\n".join(descriptions)
+            if not descriptions:
+                return "暂无可用工具"
+            
+            header = "\n" + "="*80 + "\n可用工具列表:\n" + "="*80
+            footer = "\n" + "="*80
+            
+            return header + "\n" + "\n".join(descriptions) + footer
         except Exception as e:
             logger.error(f"Failed to generate all tools description: {e}")
             return "生成工具描述失败"

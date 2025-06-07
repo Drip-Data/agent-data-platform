@@ -32,6 +32,23 @@ class UnifiedDispatcher:
         start_time = time.time()
         
         try:
+            # 如果有MCP客户端，直接通过MCP客户端执行工具
+            if self.mcp_client:
+                logger.info(f"Executing tool {tool_id} action: {action} via MCP client")
+                try:
+                    result = await self.mcp_client.execute_tool(tool_id, action, parameters)
+                    return result
+                except Exception as e:
+                    logger.error(f"MCP client execution failed: {e}")
+                    return ExecutionResult(
+                        success=False,
+                        error_type="MCPClientError",
+                        error_message=f"MCP client execution failed: {str(e)}",
+                        execution_time=time.time() - start_time,
+                        metadata={"tool_id": tool_id, "action": action}
+                    )
+            
+            # 降级到本地工具执行
             # 获取工具规范
             tool_spec = await self.tool_registry.get_tool_spec(tool_id)
             if not tool_spec:

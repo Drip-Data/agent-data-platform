@@ -15,26 +15,17 @@ COPY runtimes/reasoning/requirements.txt ./runtimes/reasoning/
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir -r runtimes/reasoning/requirements.txt
 
-# 安装Playwright浏览器
-RUN playwright install chromium
-RUN playwright install-deps chromium
-
 # 复制源代码
 COPY core/ ./core/
 COPY runtimes/ ./runtimes/
-COPY mcp_servers/browser_navigator_server/ ./mcp_servers/browser_navigator_server/
 
 # 设置环境变量
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-ENV TOOLSCORE_ENDPOINT=ws://toolscore:8080/websocket
-
-# 暴露端口
-EXPOSE 8082
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import asyncio; print('healthy')"
+    CMD python -c "import asyncio; from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime; print('healthy')"
 
 # 启动命令
-CMD ["python", "/app/mcp_servers/browser_navigator_server/main.py"]
+CMD ["python", "-m", "runtimes.reasoning.enhanced_runtime"] 

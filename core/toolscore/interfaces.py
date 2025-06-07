@@ -34,16 +34,24 @@ class ExecutionResult:
     """工具执行结果"""
     success: bool
     data: Any = None
-    error_type: Optional[str] = None
+    error_type: Optional[Union[str, 'ErrorType']] = None
     error_message: Optional[str] = None
     execution_time: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
+        # 安全处理error_type，支持字符串或ErrorType枚举
+        error_type_value = None
+        if self.error_type:
+            if hasattr(self.error_type, 'value'):
+                error_type_value = self.error_type.value
+            else:
+                error_type_value = str(self.error_type)
+        
         return {
             "success": self.success,
             "data": self.data,
-            "error_type": self.error_type,
+            "error_type": error_type_value,
             "error_message": self.error_message,
             "execution_time": self.execution_time,
             "metadata": self.metadata

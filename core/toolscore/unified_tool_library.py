@@ -33,6 +33,7 @@ class UnifiedToolLibrary:
         self.tool_registry = ToolRegistry()
         self.description_engine = DescriptionEngine(self.tool_registry)
         self.dispatcher = UnifiedDispatcher(self.tool_registry, mcp_client) # 将mcp_client传递给UnifiedDispatcher
+        self.mcp_client = mcp_client  # 保存MCP客户端引用
         
         self._initialized = False
         logger.info("Unified Tool Library initialized - Pure service mode")
@@ -72,7 +73,18 @@ class UnifiedToolLibrary:
     
     async def get_all_tools(self) -> List[ToolSpec]:
         """获取所有可用工具"""
-        return await self.tool_registry.get_all_tools()
+        # 如果有MCP客户端，从ToolScore获取工具
+        if self.mcp_client:
+            try:
+                # 直接调用MCP客户端的get_all_tools方法
+                return await self.mcp_client.get_all_tools()
+            except Exception as e:
+                logger.error(f"Failed to get tools from MCP client: {e}")
+                # 降级到本地注册表
+                return await self.tool_registry.get_all_tools()
+        else:
+            # 没有MCP客户端，使用本地注册表
+            return await self.tool_registry.get_all_tools()
     
     async def get_tools_by_type(self, tool_type: ToolType) -> List[ToolSpec]:
         """按类型获取工具"""
@@ -94,7 +106,59 @@ class UnifiedToolLibrary:
     
     async def get_all_tools_description_for_agent(self) -> str:
         """获取所有工具的Agent可理解描述"""
-        return await self.description_engine.generate_all_tools_description_for_agent()
+        # 如果有MCP客户端，直接从工具列表生成描述
+        if self.mcp_client:
+            try:
+                tools = await self.get_all_tools()
+                if not tools:
+                    return "暂无可用工具"
+                
+                descriptions = []
+                for tool in tools:
+                    capabilities_desc = "\n".join([
+                        f"  - {cap.name}: {cap.description}"
+                        f"\n    参数: {self._format_parameters(cap.parameters)}"
+                        f"\n    示例: {cap.examples[0] if cap.examples else 'N/A'}"
+                        for cap in tool.capabilities
+                    ])
+                    
+                    desc = f"""
+工具: {tool.name} (ID: {tool.tool_id})
+类型: {tool.tool_type.value}
+描述: {tool.description}
+
+可用功能:
+{capabilities_desc}
+
+使用场景: 当需要{tool.description.lower()}时使用此工具
+"""
+                    descriptions.append(desc)
+                
+                header = "\n" + "="*80 + "\n可用工具列表:\n" + "="*80
+                footer = "\n" + "="*80
+                return header + "\n" + "\n".join(descriptions) + footer
+            except Exception as e:
+                logger.error(f"Failed to generate tools description from MCP: {e}")
+                return "生成工具描述失败"
+        else:
+            # 没有MCP客户端，使用description_engine
+            return await self.description_engine.generate_all_tools_description_for_agent()
+    
+    def _format_parameters(self, parameters: Dict[str, Any]) -> str:
+        """格式化参数信息"""
+        if not parameters:
+            return "无"
+        
+        param_strs = []
+        for param_name, param_info in parameters.items():
+            if isinstance(param_info, dict):
+                param_type = param_info.get("type", "any")
+                required = "必填" if param_info.get("required", False) else "可选"
+                param_strs.append(f"{param_name}({param_type}, {required})")
+            else:
+                param_strs.append(param_name)
+        
+        return ", ".join(param_strs)
     
     async def get_tool_usage_examples(self, tool_id: str) -> List[Dict[str, Any]]:
         """获取工具使用示例"""

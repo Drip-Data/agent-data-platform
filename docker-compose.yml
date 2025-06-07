@@ -50,13 +50,16 @@ services:
     profiles:
       - optional  # 标记为可选服务，需要时手动启动
 
-  # 任务分发器
+  # 任务分发器 (现在包含Task API)
   dispatcher:
     build: .
     environment:
       - REDIS_URL=redis://redis:6379
       - TASK_FILE=/app/tasks.jsonl
       - LOG_LEVEL=INFO
+      - API_PORT=8000
+    ports:
+      - "8000:8000" # Task API HTTP端口
     depends_on:
       redis:
         condition: service_healthy
@@ -64,7 +67,7 @@ services:
       - ./tasks.jsonl:/app/tasks.jsonl:ro
       - ./output:/app/output
     restart: unless-stopped
-    command: python -m core.dispatcher
+    command: python -m uvicorn core.task_api:app --host 0.0.0.0 --port 8000
     logging:
       driver: "json-file"
       options:
@@ -72,6 +75,12 @@ services:
         max-file: "3"
     networks:
       - agent_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # Toolscore MCP Server
   toolscore:
@@ -82,7 +91,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=INFO
     ports:
-      - "8080:8080" # MCP server port
+      - "8080:8080" # MCP WebSocket server port
+      - "8090:8090" # HTTP monitoring API port
     depends_on:
       redis:
         condition: service_healthy
@@ -106,7 +116,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=INFO
       - MCP_SERVER_ENDPOINT=ws://python-executor-server:8081/mcp
-      - TOOLSCORE_ENDPOINT=ws://toolscore:8080/mcp
+      - TOOLSCORE_ENDPOINT=ws://toolscore:8080/websocket
     ports:
       - "8081:8081" # Python Executor MCP server port
     depends_on:
@@ -168,7 +178,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=INFO
       - MCP_SERVER_ENDPOINT=ws://browser-navigator-server:8082/mcp
-      - TOOLSCORE_ENDPOINT=ws://toolscore:8080/mcp
+      - TOOLSCORE_ENDPOINT=ws://toolscore:8080/websocket
     ports:
       - "8082:8082" # Browser Navigator MCP server port
     depends_on:
@@ -218,7 +228,91 @@ services:
     profiles:
       - optional # 标记为可选服务，需要时手动启动
 
-  # 推理运行时服务
+  # 增强推理运行时服务 (使用新的MCP架构)
+  enhanced-reasoning-runtime:
+    build:
+      context: .
+      dockerfile: ./docker/enhanced_reasoning.Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - TOOLSCORE_URL=ws://toolscore:8080/websocket
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      # 外部API配置 - 主要使用Google Gemini
+      # Google Gemini API配置
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      # DeepSeek API配置（备用）
+      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      # 通用OpenAI兼容API配置（备用）
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - OPENAI_API_BASE=${OPENAI_API_BASE}
+    depends_on:
+      redis:
+        condition: service_healthy
+      toolscore:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+    networks:
+      - agent_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio; from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime; print('healthy')"]
+
+  # 任务合成学习服务 (Synthesis)
+  synthesis:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # 合成器配置 - 基于JSON文件存储
+      - SYNTHESIS_ENABLED=true
+      # 自动化功能配置
+      - AUTO_MONITOR_TRAJECTORIES=${AUTO_MONITOR_TRAJECTORIES:-true}
+      - AUTO_EXPORT_SEEDS=${AUTO_EXPORT_SEEDS:-true}
+      # LLM API配置 (统一接口)
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      - API_PORT=9000
+    ports:
+      - "9000:9000" # Synthesis HTTP API
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+    restart: unless-stopped
+    command: bash -c "python -m core.synthesiscore.synthesis & python -m uvicorn core.synthesiscore.synthesis_api:app --host 0.0.0.0 --port 9000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    networks:
+      - agent_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+  # 传统推理运行时服务 (保留作为备用)
   reasoning-runtime:
     build:
       context: .
@@ -241,9 +335,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      # 移除vllm依赖 - reasoning-runtime可以独立启动，使用外部API
-      # vllm:
-      #   condition: service_healthy
     volumes:
       - ./output:/app/output
     networks:
@@ -264,6 +355,8 @@ services:
         reservations:
           memory: 2G
           cpus: '1.0'
+    profiles:
+      - backup  # 标记为备用服务
 
   # Prometheus监控
   prometheus:
