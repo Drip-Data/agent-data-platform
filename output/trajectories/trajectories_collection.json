@@ -2141,5 +2141,67 @@
       }
     },
     "created_at": 1749568853.979292
+  },
+  {
+    "task_name": "428a4c66-184c-42cc-9db4-d1501956a7ee",
+    "task_id": "4a631493-67db-4b0b-a7f1-9a8a70416a4a",
+    "task_description": "现在我已经有了图像生成工具，请直接使用已安装的AI Image Forge工具生成一张小猫在花园里玩耍的图片，小猫是橙色的，眼睛是蓝色的，背景是绿色花园",
+    "runtime_id": "enhanced-reasoning-2729c7e9-deb4-45df-b728-d408ec59a714",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'prompt': '一只橙色的小猫，蓝色的眼睛，在绿色的花园里玩耍。'}, observation=\"Tool 'mcp-simple-image-mcp-latest-1749568836/Generate images from text descriptions' failed. Error: Toolscore error: Tool with ID mcp-simple-image-mcp-latest-1749568836 not found in local registry or MCP client\", success=False, thinking=\"STEP 1-TASK ANALYSIS: The user wants to generate an image of an orange cat with blue eyes playing in a green garden. The task specifically instructs to use the 'AI Image Forge' tool.\\nSTEP 2-CAPABILITY CHECK: The 'AI Image Forge' tool is available and its description confirms it can generate images from text descriptions, control object color, background color, and specify object features like eye color. This tool is perfectly suited for the task.\\nSTEP 3-DECISION: I will use the 'AI Image Forge' tool to generate the image. The 'Generate images from text descriptions' action is the most appropriate.\\nSTEP 4-EXECUTION PLAN: Call 'AI Image Forge' with a detailed prompt describing an orange cat with blue eyes playing in a green garden.\", execution_code='{\"action\": \"Generate images from text descriptions\", \"tool_id\": \"mcp-simple-image-mcp-latest-1749568836\", \"parameters\": {\"prompt\": \"一只橙色的小猫，蓝色的眼睛，在绿色的花园里玩耍。\"}}', error_type=<ErrorType.TOOL_ERROR: 'ToolError'>, error_message='Toolscore error: Tool with ID mcp-simple-image-mcp-latest-1749568836 not found in local registry or MCP client', timestamp=1749569108.1452034, duration=0.033266544342041016)"
+    ],
+    "final_result": "任务执行总结：\n\n任务目标：使用AI Image Forge工具生成一张橙色蓝眼小猫在绿色花园玩耍的图片。\n\n执行过程：尝试使用工具'mcp-simple-image-mcp-latest-1749568836'生成图像。\n\n结果：失败。  错误信息显示工具'mcp-simple-image-mcp-latest-1749568836'未在本地注册表或MCP客户端中找到。  因此，图片未生成。\n\n结论：任务未能完成，原因是指定的图像生成工具未找到。  需要检查AI Image Forge的安装和配置，确保该工具已正确安装并注册。",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 11.501502513885498,
+    "metadata": {
+      "confidence": 0.95,
+      "original_task_id": "428a4c66-184c-42cc-9db4-d1501956a7ee",
+      "available_tools": [
+        "mcp-search-tool",
+        "mcp-simple-image-mcp-latest-1749568836"
+      ],
+      "tool_library_stats": {
+        "registry": {
+          "total_tools": 2,
+          "function_tools": 1,
+          "mcp_servers": 1,
+          "available_tags": [
+            "essential",
+            "tool-installer",
+            "dynamic",
+            "AI",
+            "Image Generation",
+            "Text-to-Image",
+            "Customization",
+            "Color Control",
+            "auto-installed"
+          ],
+          "tools_by_type": {
+            "function": 1,
+            "mcp_server": 1
+          }
+        },
+        "dispatcher": {
+          "active_adapters": 0,
+          "adapter_types": {},
+          "cache_ttl": 0
+        },
+        "initialized": true,
+        "dynamic_mcp": {
+          "installed_servers_count": 0,
+          "installed_servers": {},
+          "health_status": {},
+          "storage_stats": {
+            "server_count": 1,
+            "install_count": 1,
+            "last_update": "1749568839",
+            "redis_connected": true
+          }
+        }
+      }
+    },
+    "created_at": 1749569123.041775
   }
 ]

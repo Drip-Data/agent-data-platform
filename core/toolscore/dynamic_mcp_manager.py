@@ -1758,7 +1758,8 @@ if __name__ == "__main__":
                 )
             
             # 构建端点URL（对于stdio MCP，这是容器访问点）
-            endpoint = f"docker://localhost:{port}"
+            # 修复：使用stdio协议而不是docker协议，因为MCP通过容器的stdio通信
+            endpoint = f"stdio://container:{container.id}"
             
             logger.info(f"Successfully installed Docker Hub MCP server: {image_name}")
             
@@ -1861,7 +1862,8 @@ if __name__ == "__main__":
                 logger.warning(f"Health check failed for {image_name}: {e}")
             
             # 构建端点URL（对于stdio MCP，这是容器访问点）
-            endpoint = f"docker://localhost:{port}"
+            # 修复：使用stdio协议而不是docker协议，因为MCP通过容器的stdio通信
+            endpoint = f"stdio://container:{container.id}"
             
             logger.info(f"Successfully installed local Docker MCP server: {image_name}")
             
