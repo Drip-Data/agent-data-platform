@@ -564,7 +564,9 @@ class DynamicMCPManager:
                 return await self._mock_install_server(candidate)
             
             # 根据安装方法选择安装策略
-            if candidate.install_method == "docker_hub":
+            if candidate.install_method == "docker_local":
+                return await self._install_docker_local_server(candidate)
+            elif candidate.install_method == "docker_hub":
                 return await self._install_docker_hub_server(candidate)
             elif candidate.install_method == "docker":
                 return await self._install_docker_server(candidate)
@@ -1626,7 +1628,7 @@ if __name__ == "__main__":
     "author": "作者或组织",
     "tags": ["相关标签列表"],
     "capabilities": ["具体能力列表"],
-    "install_method": "docker" 或 "python",
+    "install_method": "mock",
     "verified": true 或 false,
     "security_score": 0.0-1.0之间的分数,
     "popularity_score": 0.0-1.0之间的分数
@@ -1636,8 +1638,10 @@ if __name__ == "__main__":
 1. 生成3个不同的候选者
 2. 基于查询内容生成合理的名称和描述
 3. 不要使用具体的产品名称，而是基于功能生成通用名称
-4. 返回JSON数组格式: [候选者1, 候选者2, 候选者3]
-5. 不要包含任何其他文字，只返回纯JSON
+4. install_method 应该从以下选项中选择: "mock", "docker_local", "python", "npm"
+5. 如果是图像生成相关任务，优先使用 "docker_local" 方法并设置 github_url 为 "local://simple-image-mcp:latest"
+6. 返回JSON数组格式: [候选者1, 候选者2, 候选者3]
+7. 不要包含任何其他文字，只返回纯JSON
 """
             
             llm_client = LLMClient({})
@@ -1662,7 +1666,7 @@ if __name__ == "__main__":
                             github_url=data.get("github_url", "https://github.com/example/repo"),
                             author=data.get("author", "community"),
                             tags=data.get("tags", []),
-                            install_method=data.get("install_method", "docker"),
+                            install_method=data.get("install_method", "mock"),
                             capabilities=data["capabilities"],
                             verified=data.get("verified", True),
                             security_score=data.get("security_score", 0.8),
@@ -1689,88 +1693,10 @@ if __name__ == "__main__":
             # 根据查询生成相关的Docker Hub MCP服务器
             query_lower = query.lower()
             
-            # 图像生成相关
-            if any(term in query_lower for term in ['image', '图像', '图片', 'generate', 'ai', 'art']):
-                docker_hub_candidates.extend([
-                    MCPServerCandidate(
-                        name="Puppeteer Browser Automation",
-                        description="Browser automation and screenshot capabilities using Puppeteer",
-                        github_url="https://hub.docker.com/r/mcp/puppeteer",
-                        author="Docker MCP Community",
-                        tags=["browser", "automation", "screenshot", "docker"],
-                        install_method="docker_hub",
-                        capabilities=["browser_screenshot", "browser_navigation", "page_manipulation"],
-                        verified=True,
-                        security_score=0.9,
-                        popularity_score=0.8
-                    ),
-                    MCPServerCandidate(
-                        name="SQLite Database Server",
-                        description="SQLite database operations and data visualization",
-                        github_url="https://hub.docker.com/r/mcp/sqlite",
-                        author="Docker MCP Community", 
-                        tags=["database", "sqlite", "data", "docker"],
-                        install_method="docker_hub",
-                        capabilities=["database_query", "data_visualization", "chart_generation"],
-                        verified=True,
-                        security_score=0.95,
-                        popularity_score=0.7
-                    )
-                ])
-            
-            # 文档处理相关
-            elif any(term in query_lower for term in ['document', 'file', 'pdf', 'text']):
-                docker_hub_candidates.extend([
-                    MCPServerCandidate(
-                        name="Filesystem Operations",
-                        description="File and directory operations with Docker isolation",
-                        github_url="https://hub.docker.com/r/mcp/filesystem", 
-                        author="Docker MCP Community",
-                        tags=["filesystem", "files", "operations", "docker"],
-                        install_method="docker_hub",
-                        capabilities=["file_read", "file_write", "directory_operations"],
-                        verified=True,
-                        security_score=0.85,
-                        popularity_score=0.6
-                    )
-                ])
-            
-            # 数据分析相关
-            elif any(term in query_lower for term in ['data', 'analysis', 'database', 'query']):
-                docker_hub_candidates.extend([
-                    MCPServerCandidate(
-                        name="SQLite Database Server",
-                        description="Database operations and data analysis with SQLite",
-                        github_url="https://hub.docker.com/r/mcp/sqlite",
-                        author="Docker MCP Community",
-                        tags=["database", "sqlite", "analysis", "docker"],
-                        install_method="docker_hub", 
-                        capabilities=["database_query", "data_analysis", "sql_operations"],
-                        verified=True,
-                        security_score=0.95,
-                        popularity_score=0.8
-                    )
-                ])
-            
-            # 如果没有特定匹配，提供通用的有用服务器
-            if not docker_hub_candidates:
-                docker_hub_candidates = [
-                    MCPServerCandidate(
-                        name="Puppeteer Browser Automation",
-                        description="Universal browser automation and web interaction capabilities",
-                        github_url="https://hub.docker.com/r/mcp/puppeteer", 
-                        author="Docker MCP Community",
-                        tags=["browser", "automation", "web", "docker"],
-                        install_method="docker_hub",
-                        capabilities=["web_automation", "screenshot", "browser_control"],
-                        verified=True,
-                        security_score=0.9,
-                        popularity_score=0.8
-                    )
-                ]
-            
-            logger.info(f"Generated {len(docker_hub_candidates)} Docker Hub MCP candidates")
-            return docker_hub_candidates
+            # 移除所有硬编码预设 - 让LLM自主决定需要什么工具
+            # 这里不再预设任何候选者，完全依靠LLM动态生成
+            logger.info("不再提供预设候选者，完全依靠LLM动态生成")
+            return []
             
         except Exception as e:
             logger.error(f"Failed to generate Docker Hub candidates: {e}")
@@ -1860,6 +1786,117 @@ if __name__ == "__main__":
                 success=False,
                 error_message=f"Installation failed: {str(e)}"
             )
+
+    async def _install_docker_local_server(self, candidate: MCPServerCandidate) -> InstallationResult:
+        """
+        安装本地Docker镜像MCP服务器
+        """
+        try:
+            # 从local://格式中提取镜像名称
+            image_name = self._extract_local_image_name(candidate)
+            server_id = f"mcp-{image_name.replace(':', '-')}-{int(time.time())}"
+            
+            # 分配端口
+            port = self._allocate_port()
+            if not port:
+                return InstallationResult(
+                    success=False,
+                    error_message="No available ports for MCP server"
+                )
+            
+            logger.info(f"Installing local Docker MCP server: {image_name}")
+            
+            # 检查本地镜像是否存在
+            try:
+                self.docker_client.images.get(image_name)
+                logger.info(f"Found local Docker image: {image_name}")
+            except docker.errors.ImageNotFound:
+                return InstallationResult(
+                    success=False,
+                    error_message=f"Local Docker image not found: {image_name}. Please build the image first."
+                )
+            
+            # 启动容器 - 使用MCP标准格式
+            container_config = {
+                'image': image_name,
+                'environment': {
+                    'DOCKER_CONTAINER': 'true',
+                    'MCP_SERVER_PORT': str(port)
+                },
+                'ports': {f'{port}/tcp': port},
+                'detach': True,
+                'remove': False,  # 保持容器用于调试
+                'name': server_id,
+                'stdin_open': True,  # 支持MCP stdio通信
+                'tty': False,
+                'init': True  # 使用init进程管理
+            }
+            
+            container = self.docker_client.containers.run(**container_config)
+            logger.info(f"Started local Docker container: {container.id}")
+            
+            # 等待容器启动
+            await asyncio.sleep(3)
+            
+            # 检查容器状态
+            container.reload()
+            if container.status != 'running':
+                logs = container.logs().decode('utf-8')
+                logger.error(f"Container failed to start. Logs: {logs}")
+                return InstallationResult(
+                    success=False,
+                    error_message=f"Container failed to start: {logs[:200]}"
+                )
+            
+            # 检查健康状态
+            try:
+                import requests
+                health_url = f"http://localhost:{port}/health"
+                response = requests.get(health_url, timeout=5)
+                if response.status_code == 200:
+                    logger.info(f"Health check passed for {image_name}")
+                else:
+                    logger.warning(f"Health check failed for {image_name}: {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Health check failed for {image_name}: {e}")
+            
+            # 构建端点URL（对于stdio MCP，这是容器访问点）
+            endpoint = f"docker://localhost:{port}"
+            
+            logger.info(f"Successfully installed local Docker MCP server: {image_name}")
+            
+            return InstallationResult(
+                success=True,
+                server_id=server_id,
+                endpoint=endpoint,
+                container_id=container.id,
+                port=port
+            )
+            
+        except docker.errors.APIError as e:
+            return InstallationResult(
+                success=False,
+                error_message=f"Docker API error: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to install local Docker MCP server: {e}")
+            return InstallationResult(
+                success=False,
+                error_message=f"Installation failed: {str(e)}"
+            )
+
+    def _extract_local_image_name(self, candidate: MCPServerCandidate) -> str:
+        """
+        从候选者信息中提取本地Docker镜像名称
+        """
+        url = candidate.github_url
+        
+        if url.startswith("local://"):
+            # 格式: local://simple-image-mcp:latest
+            return url[8:]  # 移除 "local://" 前缀
+        
+        # 回退到候选者名称
+        return candidate.name.lower().replace(" ", "-") + ":latest"
 
     def _extract_docker_hub_image_name(self, candidate: MCPServerCandidate) -> str:
         """
