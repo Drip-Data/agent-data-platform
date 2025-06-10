@@ -110,6 +110,7 @@ class FunctionToolSpec(ToolSpec):
     module_path: str = ""               # Python模块路径
     class_name: str = ""                # 类名
     init_params: Dict[str, Any] = field(default_factory=dict)  # 初始化参数
+    function_handler: Optional[Any] = None  # 直接的函数处理器（可选）
     
     def __post_init__(self):
         if self.tool_type != ToolType.FUNCTION:

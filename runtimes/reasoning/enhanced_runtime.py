@@ -16,6 +16,9 @@ from core.metrics import EnhancedMetrics
 from core.toolscore.unified_tool_library import UnifiedToolLibrary
 from core.toolscore.interfaces import ToolType, FunctionToolSpec, ToolCapability
 from core.toolscore.mcp_client import MCPToolClient # 导入MCPClient
+from core.toolscore.dynamic_mcp_manager import DynamicMCPManager
+from core.toolscore.tool_gap_detector import ToolGapDetector
+from core.toolscore.mcp_search_tool import MCPSearchTool
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +42,26 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         self.mcp_client = MCPToolClient(toolscore_url) # 实例化MCPClient
         self.tool_library = UnifiedToolLibrary(mcp_client=self.mcp_client) # 将MCPClient传递给UnifiedToolLibrary
         
+        # 初始化动态MCP管理器和工具缺口检测器
+        self.dynamic_mcp_manager = None  # 延迟初始化，需要在tool_library初始化后
+        self.tool_gap_detector = ToolGapDetector(self.client)  # 传递LLM客户端
+        self.mcp_search_tool = None  # MCP搜索工具，延迟初始化
+        
     async def initialize(self):
         """初始化运行时和工具库"""
         await self.tool_library.initialize()
+        
+        # 初始化动态MCP管理器
+        self.dynamic_mcp_manager = DynamicMCPManager(self.tool_library)
+        await self.dynamic_mcp_manager.initialize()  # 确保正确初始化
+        
+        # 初始化MCP搜索工具 - 修正参数顺序
+        self.mcp_search_tool = MCPSearchTool(self.tool_gap_detector, self.dynamic_mcp_manager)
+        
+        # 注册MCP搜索工具到工具库
+        await self._register_mcp_search_tool()
+        
+        logger.info("Enhanced Reasoning Runtime initialized with dynamic MCP capabilities")
         
     @property
     def runtime_id(self) -> str:
@@ -73,6 +93,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         final_trajectory_error_type: Optional[ErrorType] = None
         final_trajectory_error_message: Optional[str] = None
         
+        # 统一的上下文，用于存储跨步骤的状态
+        current_context: Dict[str, Any] = {
+            "browser_state": None  # 存储浏览器的当前状态 (URL, Title, etc.)
+        }
+        
         # 获取所有可用工具的ToolSpec列表
         all_available_tool_specs = await self.tool_library.get_all_tools()
         
@@ -88,7 +113,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
         for step_id in range(1, task.max_steps + 1):
             # 浏览器上下文现在由浏览器工具本身管理，这里不再需要
-            current_browser_context_for_llm = None
+            # current_browser_context_for_llm = None # 注释掉此行
 
             # 生成推理决策 - 使用丰富的工具描述
             serializable_steps = [s.to_dict() if hasattr(s, 'to_dict') else s.__dict__ for s in steps]
@@ -98,12 +123,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 available_tools=available_tools_for_llm_client, # 传递工具ID列表
                 tool_descriptions=all_tools_description_for_llm, # 传递详细描述
                 previous_steps=serializable_steps,
-                browser_context=current_browser_context_for_llm
+                # browser_context=current_browser_context_for_llm # 旧参数
+                execution_context=current_context # 传递统一的上下文
             )
             
             thinking = decision.get('thinking', f"Step {step_id}: Analyzing task and deciding next action")
             action = decision.get('action')
-            tool_id = decision.get('tool') # 从tool_name改为tool_id
+            tool_id = decision.get('tool_id') or decision.get('tool')  # 优先使用tool_id，回退到tool
             params = decision.get('parameters', {})
             confidence = decision.get('confidence', 0.0)
 
@@ -132,7 +158,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         task.description, [s.__dict__ for s in steps], current_outputs
                     )
                     success = True
-                    observation = summary
+                    observation = summary # 这里的observation已经是简洁的
                     tool_success = True
                     action_type = ActionType.TOOL_CALL
                     
@@ -141,7 +167,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         step_id=step_id,
                         action_type=action_type,
                         action_params=params,
-                        observation=observation,
+                        observation=observation, # 使用简洁的observation
                         success=True,
                         thinking=thinking,
                         execution_code=execution_code,
@@ -193,7 +219,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     # 调用UnifiedToolLibrary的execute_tool方法
                     result = await self.tool_library.execute_tool(actual_server_id, action, cleaned_params)
                     tool_success = result.success # UnifiedToolLibrary返回的是ExecutionResult对象
-                    observation = json.dumps(result.to_dict()) # 将ExecutionResult转换为字典再序列化
+                    
+                    # 更新浏览器上下文状态
+                    if tool_success and actual_server_id == 'browser-navigator-mcp-server' and result.data and isinstance(result.data, dict):
+                        # 只在导航相关操作时更新浏览器上下文
+                        if action in ['browser_navigate', 'browser_click', 'browser_scroll', 'browser_screenshot']:
+                            current_context['browser_state'] = {
+                                "url": result.data.get("url"),
+                                "title": result.data.get("title"),
+                                "content_summary": result.data.get("content_summary")
+                            }
+                            logger.info(f"Updated browser context: {current_context['browser_state']}")
+                        # 对于browser_get_text等不会改变页面状态的操作，保持当前上下文不变
                     
                     # 如果是Python执行成功，并且有标准输出，添加到current_outputs
                     if tool_success and actual_server_id == 'python-executor-mcp-server' and result.data:
@@ -208,6 +245,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     
                     # 浏览器状态和Python执行输出现在由各自的MCP Server管理，并通过ExecutionResult返回
                     # ReasoningRuntime 不再直接处理这些状态
+                # 移除旧的被动触发逻辑，现在AI可以主动选择MCP搜索工具
                 else:
                     tool_success = False
                     current_attempt_err_type = ErrorType.SYSTEM_ERROR
@@ -235,10 +273,48 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         else:
                             current_attempt_err_type = result.error_type if result.error_type else ErrorType.TOOL_ERROR
                         
-                        current_attempt_err_msg = result.error_message if result.error_message else "Unknown tool error"
+                        # 处理不同类型的result对象
+                        if hasattr(result, 'error_message') and result.error_message:
+                            current_attempt_err_msg = result.error_message
+                        elif hasattr(result, 'message') and result.message:
+                            current_attempt_err_msg = result.message
+                        else:
+                            current_attempt_err_msg = "Unknown tool error"
                     # 如果result为None，使用已设置的错误信息（current_attempt_err_type和current_attempt_err_msg）
                 
                 if tool_success:
+                    # 对 observation 进行净化和简化
+                    simplified_observation = f"Tool '{tool_id}/{action}' executed successfully."
+                    if result and result.data:
+                        if actual_server_id == 'browser-navigator-mcp-server' and isinstance(result.data, dict):
+                            # 为浏览器操作创建更具信息量的摘要
+                            if action == 'browser_get_text':
+                                # 特殊处理browser_get_text
+                                text = result.data.get('text', '')
+                                text_length = result.data.get('length', 0)
+                                if text:
+                                    # 截取前500个字符作为预览
+                                    preview = text[:500] + ('...' if len(text) > 500 else '')
+                                    simplified_observation = f"Successfully retrieved page text ({text_length} characters). Preview:\n---\n{preview}\n---"
+                                else:
+                                    simplified_observation = "Successfully executed 'browser_get_text' but no text content was found."
+                            else:
+                                # 其他浏览器操作
+                                url = result.data.get('url', 'N/A')
+                                title = result.data.get('title', 'N/A')
+                                simplified_observation = f"Successfully executed '{action}' on '{url}'. Page title is '{title}'."
+                        elif actual_server_id == 'python-executor-mcp-server' and isinstance(result.data, dict):
+                            # 为Python执行创建摘要
+                            stdout = result.data.get('stdout', '').strip()
+                            if stdout:
+                                simplified_observation = f"Python code executed. Output (stdout):\n---\n{stdout[:200]}\n---" # 限制长度
+                            else:
+                                simplified_observation = "Python code executed with no output (stdout)."
+                        else:
+                            # 通用数据格式
+                            simplified_observation = f"Tool '{tool_id}/{action}' executed successfully. Data received: {str(result.data)[:200]}" # 限制长度
+
+                    observation = simplified_observation
                     break
                 else:
                     logger.warning(
@@ -246,18 +322,12 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         f"ErrorType: {current_attempt_err_type}, ErrorMsg: {current_attempt_err_msg}"
                     )
                     
+                    # 使用净化后的错误信息作为 observation
+                    observation = f"Tool '{tool_id}/{action}' failed. Error: {current_attempt_err_msg}"
+
                     # 重试逻辑
                     is_retryable = False
-                    # 确保current_attempt_err_type是ErrorType枚举或字符串
-                    if isinstance(current_attempt_err_type, ErrorType):
-                        is_navigation_error = (current_attempt_err_type == ErrorType.NETWORK_ERROR or
-                                             current_attempt_err_type.value == "NavigationError")
-                    elif isinstance(current_attempt_err_type, str):
-                        is_navigation_error = current_attempt_err_type == "NavigationError"
-                    else:
-                        is_navigation_error = False
-                    
-                    if is_navigation_error and current_attempt_err_msg and "timeout" in current_attempt_err_msg.lower():
+                    if current_attempt_err_type in [ErrorType.NETWORK_ERROR, ErrorType.TIMEOUT, ErrorType.RATE_LIMIT]:
                         is_retryable = True
 
                     if is_retryable and attempt < max_retries:
@@ -314,6 +384,12 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if completion.get('completed'):
                 success = True
                 break
+        
+        # 如果循环结束但任务没有成功完成，设置错误状态
+        if not success and steps:
+            final_trajectory_error_type = steps[-1].error_type or ErrorType.EXECUTION_FAILED
+            final_trajectory_error_message = steps[-1].error_message or f"Task failed after {len(steps)} steps"
+            logger.warning(f"Task execution completed without success: {final_trajectory_error_message}")
 
         total_duration = time.time() - start_time
         
@@ -330,7 +406,34 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if last_step_exec_code.get('action') == 'complete_task':
                 final_result = steps[-1].observation
             else:
-                final_result = f"Task completed successfully after {len(steps)} steps."
+                # 智能生成包含实际结果的最终结果
+                # 首先检查是否有浏览器获取的内容
+                browser_content = None
+                python_output = None
+                
+                for step in reversed(steps[-3:]):  # 检查最近3个步骤
+                    if not browser_content and 'Successfully retrieved page text' in step.observation:
+                        if 'Preview:' in step.observation:
+                            preview_start = step.observation.find('Preview:') + len('Preview:')
+                            preview_end = step.observation.find('---', preview_start + 10)
+                            if preview_end > preview_start:
+                                browser_content = step.observation[preview_start:preview_end].strip()
+                    
+                    if not python_output and 'Python code executed' in step.observation and 'Output' in step.observation:
+                        python_output = step.observation
+                
+                # 基于获取的内容生成智能摘要
+                if browser_content:
+                    final_result = f"任务完成。成功访问了网站并获取了页面内容：\n\n{browser_content[:800]}{'...' if len(browser_content) > 800 else ''}"
+                elif python_output:
+                    final_result = f"任务完成。{python_output}"
+                elif current_outputs:
+                    final_result = f"任务完成。生成结果：\n{chr(10).join(current_outputs[-2:])}"
+                else:
+                    # 回退到使用LLM生成摘要
+                    final_result = await self.client.generate_task_summary(
+                        task.description, [s.__dict__ for s in steps], current_outputs
+                    )
         elif steps:
             final_result = f"Task failed after {len(steps)} steps. Last error: {steps[-1].error_message or 'Unknown error'}"
         else:
@@ -384,9 +487,294 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         logger.info(f"Saved trajectory {trajectory.task_id} to collection")
 
+    async def _should_install_new_mcp_server(self, task_description: str, current_steps: List[ExecutionStep], 
+                                             failed_tool_id: str, failed_action: str) -> bool:
+        """判断是否应该安装新的MCP服务器"""
+        if not self.dynamic_mcp_manager:
+            return False
+        
+        # 获取当前可用工具列表
+        available_tools = []
+        try:
+            tool_specs = await self.tool_library.get_all_tools()
+            for tool_spec in tool_specs:
+                available_tools.append({
+                    'name': tool_spec.name,
+                    'description': tool_spec.description,
+                    'capabilities': [{'name': cap.name} for cap in tool_spec.capabilities]
+                })
+        except Exception as e:
+            logger.error(f"Failed to get available tools: {e}")
+            return False
+        
+        # 准备之前的尝试信息
+        previous_attempts = []
+        for step in current_steps:
+            if not step.success:
+                previous_attempts.append({
+                    'error_message': step.error_message or '',
+                    'observation': step.observation or '',
+                    'action': step.action_params.get('action', ''),
+                    'tool_id': step.action_params.get('tool_id', '')
+                })
+        
+        # 使用工具缺口检测器判断
+        should_search, detection_result = await self.tool_gap_detector.should_trigger_mcp_search(
+            task_description, available_tools, previous_attempts
+        )
+        
+        if should_search:
+            logger.info(f"MCP search triggered: {detection_result.overall_assessment}")
+            return True
+        
+        return False
+    
+    async def _attempt_dynamic_mcp_installation(self, task_description: str, current_steps: List[ExecutionStep]) -> bool:
+        """尝试动态安装MCP服务器"""
+        if not self.dynamic_mcp_manager:
+            logger.error("Dynamic MCP Manager not initialized")
+            return False
+        
+        try:
+            # 获取当前可用工具
+            available_tools = []
+            tool_specs = await self.tool_library.get_all_tools()
+            for tool_spec in tool_specs:
+                available_tools.append({
+                    'name': tool_spec.name,
+                    'description': tool_spec.description,
+                    'capabilities': [{'name': cap.name} for cap in tool_spec.capabilities]
+                })
+            
+            # 检测工具缺口
+            detection_result = await self.tool_gap_detector.analyze_tool_sufficiency(task_description, available_tools)
+            
+            if detection_result.has_sufficient_tools:
+                logger.info("No tool gaps detected")
+                return False
+            
+            # 选择置信度最高的工具需求
+            primary_requirement = max(detection_result.tool_requirements, key=lambda x: x.confidence_score)
+            logger.info(f"Attempting to install MCP server for requirement: {primary_requirement.description}")
+            
+            # 搜索相关的MCP服务器
+            search_strategy = await self.tool_gap_detector.get_search_strategy(detection_result)
+            if not search_strategy:
+                logger.warning("No valid search strategy generated")
+                return False
+            
+            candidates = await self.dynamic_mcp_manager.search_mcp_servers(
+                query=search_strategy["query"],
+                capability_tags=search_strategy["keywords"]
+            )
+            
+            if not candidates:
+                logger.warning(f"No MCP server candidates found for query: {search_strategy['query']}")
+                return False
+            
+            # 尝试安装最佳候选者
+            best_candidate = candidates[0]
+            logger.info(f"Installing best candidate: {best_candidate.name}")
+            
+            install_result = await self.dynamic_mcp_manager.install_mcp_server(best_candidate)
+            
+            if install_result.success:
+                # 注册到工具库
+                registration_result = await self.dynamic_mcp_manager.register_installed_server(
+                    best_candidate, install_result
+                )
+                
+                if registration_result.success:
+                    logger.info(f"Successfully installed and registered MCP server: {best_candidate.name}")
+                    return True
+                else:
+                    logger.error(f"Failed to register installed MCP server: {registration_result.error}")
+                    return False
+            else:
+                logger.error(f"Failed to install MCP server: {install_result.error_message}")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Error during dynamic MCP installation: {e}")
+            return False
+
+    async def _register_mcp_search_tool(self):
+        """注册MCP搜索工具为一个可用工具"""
+        from core.toolscore.interfaces import FunctionToolSpec, ToolCapability, ToolType
+        
+        try:
+            # 定义MCP搜索工具的能力
+            search_capability = ToolCapability(
+                name="search_and_install_tools",
+                description="**主要功能**：立即搜索并安装新的MCP服务器工具来完成当前任务。当发现缺少关键工具时，应优先使用此功能！",
+                parameters={
+                    "task_description": {
+                        "type": "string",
+                        "description": "当前任务的描述",
+                        "required": True
+                    },
+                    "reason": {
+                        "type": "string", 
+                        "description": "为什么需要搜索新工具的原因",
+                        "required": False
+                    }
+                },
+                examples=[{
+                    "task_description": "生成一张图片",
+                    "reason": "当前没有图像生成工具"
+                }]
+            )
+            
+            analyze_capability = ToolCapability(
+                name="analyze_tool_needs",
+                description="仅分析工具需求，不执行安装。通常情况下应直接使用search_and_install_tools",
+                parameters={
+                    "task_description": {
+                        "type": "string",
+                        "description": "当前任务的描述",
+                        "required": True
+                    }
+                },
+                examples=[{
+                    "task_description": "处理PDF文件"
+                }]
+            )
+            
+            # 创建工具规范
+            mcp_search_spec = FunctionToolSpec(
+                tool_id="mcp-search-tool",
+                name="🔧 智能工具安装器",
+                description="⚡ 当缺少工具时，立即搜索并安装新的MCP服务器工具。图像生成、文档处理、数据分析等新能力一键安装！",
+                tool_type=ToolType.FUNCTION,
+                capabilities=[search_capability, analyze_capability],
+                tags=["essential", "tool-installer", "dynamic"],
+                function_handler=self._handle_mcp_search_tool_call
+            )
+            
+            # 注册到工具库
+            result = await self.tool_library.register_function_tool(mcp_search_spec)
+            
+            if result.success:
+                logger.info("MCP搜索工具已注册为系统工具")
+            else:
+                logger.error(f"MCP搜索工具注册失败: {result.error}")
+                
+        except Exception as e:
+            logger.error(f"注册MCP搜索工具时发生错误: {e}")
+
+    async def _handle_mcp_search_tool_call(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """处理MCP搜索工具调用"""
+        try:
+            if action == "search_and_install_tools":
+                logger.info("MCP搜索工具被调用: search_and_install_tools")
+                
+                # 获取当前可用工具
+                all_tools = await self.tool_library.get_all_tools()
+                current_tools = [{"name": tool.tool_id, "description": tool.description} for tool in all_tools]
+                
+                # 调用MCP搜索工具
+                result = await self.mcp_search_tool.search_and_install_tools(
+                    task_description=parameters.get("task_description", ""),
+                    current_available_tools=current_tools,
+                    reason=parameters.get("reason", "")
+                )
+                
+                # 如果安装成功，刷新工具库连接以获取新安装的工具
+                if result.success and result.installed_tools:
+                    logger.info(f"成功安装了 {len(result.installed_tools)} 个工具，正在刷新工具库连接...")
+                    try:
+                        # 对于Docker Hub安装的工具，需要特殊处理连接
+                        for installed_tool in result.installed_tools:
+                            if installed_tool.get("install_method") == "docker_hub":
+                                await self._connect_docker_hub_tool(installed_tool)
+                        
+                        # 重新初始化工具库以发现新工具
+                        await self.tool_library.initialize()
+                        
+                        # 获取更新后的工具列表
+                        updated_tools = await self.tool_library.get_all_tools()
+                        logger.info(f"工具库刷新完成，当前工具数量: {len(updated_tools)}")
+                        
+                    except Exception as e:
+                        logger.warning(f"工具库刷新失败: {e}")
+                
+                return {
+                    "success": result.success,
+                    "message": result.message,
+                    "installed_tools": result.installed_tools,
+                    "error": result.message if not result.success else None
+                }
+                
+            elif action == "analyze_tool_needs":
+                logger.info("MCP搜索工具被调用: analyze_tool_needs")
+                
+                # 获取当前可用工具
+                all_tools = await self.tool_library.get_all_tools()
+                current_tools = [{"name": tool.tool_id, "description": tool.description} for tool in all_tools]
+                
+                # 调用工具需求分析
+                result = await self.mcp_search_tool.analyze_tool_needs(
+                    task_description=parameters.get("task_description", ""),
+                    current_available_tools=current_tools
+                )
+                
+                return result
+                
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unknown action: {action}"
+                }
+                
+        except Exception as e:
+            logger.error(f"MCP搜索工具调用失败: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def _connect_docker_hub_tool(self, installed_tool: Dict[str, Any]) -> None:
+        """连接Docker Hub安装的MCP工具"""
+        try:
+            server_id = installed_tool.get("server_id")
+            container_id = installed_tool.get("container_id") 
+            
+            if not server_id or not container_id:
+                logger.warning(f"缺少连接信息: server_id={server_id}, container_id={container_id}")
+                return
+            
+            # 检查容器是否正在运行
+            import docker
+            docker_client = docker.from_env()
+            
+            try:
+                container = docker_client.containers.get(container_id)
+                if container.status == 'running':
+                    logger.info(f"Docker容器 {container_id} 正在运行，工具 {server_id} 可用")
+                    
+                    # 这里可以添加额外的连接逻辑，例如：
+                    # - 验证MCP端点是否响应
+                    # - 注册容器化工具到工具库
+                    # - 设置工具库与容器的通信连接
+                    
+                else:
+                    logger.warning(f"Docker容器 {container_id} 状态异常: {container.status}")
+                    
+            except docker.errors.NotFound:
+                logger.error(f"Docker容器 {container_id} 未找到")
+            except Exception as e:
+                logger.error(f"检查Docker容器状态失败: {e}")
+                
+        except Exception as e:
+            logger.error(f"连接Docker Hub工具失败: {e}")
+
     async def cleanup(self):
         """清理资源"""
         logger.info("Cleaning up EnhancedReasoningRuntime resources")
+        
+        # 清理动态MCP管理器
+        if self.dynamic_mcp_manager:
+            await self.dynamic_mcp_manager.cleanup()
         
         # 清理UnifiedToolLibrary管理的资源
         await self.tool_library.cleanup()

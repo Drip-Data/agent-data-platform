@@ -248,7 +248,28 @@ main() {
             log_info "重启 Agent Data Platform..."
             docker-compose down
             sleep 2
-            main start
+            # 强制重新构建所有镜像并重启服务
+            docker-compose up -d --build
+            log_success "平台已重启并更新"
+            show_status
+            ;;
+        "rebuild")
+            log_info "强制重建并启动 Agent Data Platform..."
+            check_environment
+            cleanup_containers --clean-images
+            docker-compose down --volumes --remove-orphans
+            docker system prune -f
+            build_images
+            start_core_services
+            start_tool_services  
+            start_runtime_services
+            start_task_services
+            start_synthesis_services
+            start_monitoring_services
+            
+            echo ""
+            log_success "🎉 Agent Data Platform 启动完成！"
+            show_status
             ;;
         "status")
             show_status
@@ -270,6 +291,7 @@ main() {
             echo "  start      启动完整平台 (默认)"
             echo "  stop       停止平台"
             echo "  restart    重启平台"
+            echo "  rebuild    强制重建并启动平台"
             echo "  status     显示服务状态"
             echo "  logs [服务] 显示日志（可指定特定服务）"
             echo "  clean      清理所有容器、镜像和数据"

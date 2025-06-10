@@ -17,3 +17,5 @@ watchdog>=2.1.0
 aiofiles>=0.8.0
 websockets>=10.0
 aiohttp_retry
+docker>=6.0.0
+PyYAML>=6.0

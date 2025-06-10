@@ -90,16 +90,21 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=INFO
+      - DOCKER_NETWORK=agent-data-platform_agent_network
+      - DOCKER_PORT_RANGE=8100-8200
     ports:
       - "8080:8080" # MCP WebSocket server port
       - "8090:8090" # HTTP monitoring API port
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # 允许访问Docker socket
     networks:
       - agent_network
     dns: 8.8.8.8 # Add this line
     restart: unless-stopped
+    privileged: true  # 需要特权模式来使用Docker
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(1); s.connect((\"localhost\", 8080)); s.close(); print(\"healthy\")'"]
       interval: 10s
@@ -248,6 +253,14 @@ services:
       # 通用OpenAI兼容API配置（备用）
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
       # - OPENAI_API_BASE=${OPENAI_API_BASE}
+      # MCP动态搜索和安装配置
+      - MCP_SEARCH_ENABLED=true
+      - MCP_SEARCH_TIMEOUT=30
+      - MCP_SEARCH_MAX_CANDIDATES=10
+      - MCP_SECURITY_LEVEL=high
+      - MCP_TRUSTED_AUTHORS=anthropic,microsoft,google
+      - DOCKER_NETWORK=agent-data-platform_agent_network
+      - DOCKER_PORT_RANGE=8100-8200
     depends_on:
       redis:
         condition: service_healthy
@@ -255,9 +268,11 @@ services:
         condition: service_healthy
     volumes:
       - ./output:/app/output
+      - /var/run/docker.sock:/var/run/docker.sock  # 允许访问Docker socket
     networks:
       - agent_network
     restart: unless-stopped
+    privileged: true  # 需要特权模式来使用Docker
     healthcheck:
       test: ["CMD", "python", "-c", "import asyncio; from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime; print('healthy')"]
 

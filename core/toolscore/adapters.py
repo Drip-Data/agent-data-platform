@@ -33,6 +33,13 @@ class FunctionToolAdapter(BaseToolAdapter):
             return
         
         try:
+            # 优先使用function_handler
+            if self.tool_spec.function_handler:
+                self._tool_instance = self.tool_spec.function_handler
+                self._initialized = True
+                logger.info(f"Initialized Function Tool with handler: {self.tool_spec.name}")
+                return
+            
             # 动态导入工具模块
             if self.tool_spec.module_path:
                 module = importlib.import_module(self.tool_spec.module_path)
@@ -67,8 +74,15 @@ class FunctionToolAdapter(BaseToolAdapter):
                     error_message="Tool instance not initialized"
                 )
             
+            # 如果是function_handler，直接调用
+            if self.tool_spec.function_handler:
+                if asyncio.iscoroutinefunction(self._tool_instance):
+                    result = await self._tool_instance(action, parameters)
+                else:
+                    result = self._tool_instance(action, parameters)
+            
             # 优先使用统一的execute接口
-            if hasattr(self._tool_instance, 'execute'):
+            elif hasattr(self._tool_instance, 'execute'):
                 method = getattr(self._tool_instance, 'execute')
                 
                 if asyncio.iscoroutinefunction(method):

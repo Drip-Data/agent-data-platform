@@ -506,6 +506,9 @@ async def main():
     # 创建工具库实例
     tool_library = UnifiedToolLibrary()
     
+    # 初始化工具库（包括恢复持久化的MCP服务器）
+    await tool_library.initialize()
+    
     # 创建MCP服务器
     server = MCPServer(
         server_name="toolscore",

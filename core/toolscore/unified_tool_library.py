@@ -35,6 +35,9 @@ class UnifiedToolLibrary:
         self.dispatcher = UnifiedDispatcher(self.tool_registry, mcp_client) # 将mcp_client传递给UnifiedDispatcher
         self.mcp_client = mcp_client  # 保存MCP客户端引用
         
+        # 动态MCP管理器（延迟初始化）
+        self.dynamic_mcp_manager = None
+        
         self._initialized = False
         logger.info("Unified Tool Library initialized - Pure service mode")
     
@@ -48,6 +51,11 @@ class UnifiedToolLibrary:
             await self.tool_registry.initialize()
             await self.description_engine.initialize()
             await self.dispatcher.initialize()
+            
+            # 初始化动态MCP管理器
+            from .dynamic_mcp_manager import DynamicMCPManager
+            self.dynamic_mcp_manager = DynamicMCPManager(self)
+            await self.dynamic_mcp_manager.initialize()
             
             logger.info("Tool library initialization completed")
             self._initialized = True
@@ -69,22 +77,111 @@ class UnifiedToolLibrary:
         """注销工具"""
         return await self.tool_registry.unregister_tool(tool_id)
     
+    # ============ 动态MCP管理API ============
+    
+    async def search_and_install_mcp_server(self, query: str, capability_tags: List[str] = None) -> Dict[str, Any]:
+        """搜索并安装MCP服务器"""
+        if not self.dynamic_mcp_manager:
+            return {
+                "success": False,
+                "error": "Dynamic MCP manager not initialized"
+            }
+        
+        try:
+            # 搜索候选服务器
+            candidates = await self.dynamic_mcp_manager.search_mcp_servers(query, capability_tags)
+            
+            if not candidates:
+                return {
+                    "success": False,
+                    "error": "No suitable MCP servers found",
+                    "candidates_count": 0
+                }
+            
+            # 安装最佳候选者
+            best_candidate = candidates[0]
+            install_result = await self.dynamic_mcp_manager.install_mcp_server(best_candidate)
+            
+            if install_result.success:
+                # 注册到工具库
+                registration_result = await self.dynamic_mcp_manager.register_installed_server(
+                    best_candidate, install_result
+                )
+                
+                return {
+                    "success": registration_result.success,
+                    "server_name": best_candidate.name,
+                    "server_id": install_result.server_id,
+                    "capabilities": best_candidate.capabilities,
+                    "endpoint": install_result.endpoint,
+                    "error": registration_result.error if not registration_result.success else None
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": install_result.error_message,
+                    "server_name": best_candidate.name
+                }
+        
+        except Exception as e:
+            logger.error(f"Failed to search and install MCP server: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def get_dynamic_mcp_stats(self) -> Dict[str, Any]:
+        """获取动态MCP管理器统计信息"""
+        if not self.dynamic_mcp_manager:
+            return {"error": "Dynamic MCP manager not initialized"}
+        
+        try:
+            installed_servers = await self.dynamic_mcp_manager.get_installed_servers()
+            health_status = await self.dynamic_mcp_manager.health_check_installed_servers()
+            
+            if hasattr(self.dynamic_mcp_manager, 'persistent_storage') and self.dynamic_mcp_manager._storage_initialized:
+                storage_stats = await self.dynamic_mcp_manager.persistent_storage.get_storage_stats()
+            else:
+                storage_stats = {"error": "Persistent storage not initialized"}
+            
+            return {
+                "installed_servers_count": len(installed_servers),
+                "installed_servers": {k: {"endpoint": v.endpoint, "success": v.success} for k, v in installed_servers.items()},
+                "health_status": health_status,
+                "storage_stats": storage_stats
+            }
+        except Exception as e:
+            logger.error(f"Failed to get dynamic MCP stats: {e}")
+            return {"error": str(e)}
+    
     # ============ 工具查询API ============
     
     async def get_all_tools(self) -> List[ToolSpec]:
         """获取所有可用工具"""
-        # 如果有MCP客户端，从ToolScore获取工具
+        all_tools = []
+        
+        # 总是获取本地注册的工具（包括Function Tools）
+        local_tools = await self.tool_registry.get_all_tools()
+        all_tools.extend(local_tools)
+        
+        # 如果有MCP客户端，还要获取远程工具并合并
         if self.mcp_client:
             try:
-                # 直接调用MCP客户端的get_all_tools方法
-                return await self.mcp_client.get_all_tools()
+                # 调用MCP客户端获取远程工具
+                remote_tools = await self.mcp_client.get_all_tools()
+                
+                # 去重合并：避免相同tool_id的工具重复
+                existing_tool_ids = {tool.tool_id for tool in all_tools}
+                for remote_tool in remote_tools:
+                    if remote_tool.tool_id not in existing_tool_ids:
+                        all_tools.append(remote_tool)
+                        
+                logger.debug(f"Merged {len(local_tools)} local tools and {len(remote_tools)} remote tools")
             except Exception as e:
                 logger.error(f"Failed to get tools from MCP client: {e}")
-                # 降级到本地注册表
-                return await self.tool_registry.get_all_tools()
-        else:
-            # 没有MCP客户端，使用本地注册表
-            return await self.tool_registry.get_all_tools()
+                # 继续使用本地工具，不抛出异常
+        
+        return all_tools
     
     async def get_tools_by_type(self, tool_type: ToolType) -> List[ToolSpec]:
         """按类型获取工具"""
@@ -185,15 +282,26 @@ class UnifiedToolLibrary:
         registry_stats = await self.tool_registry.get_registry_stats()
         dispatcher_stats = await self.dispatcher.get_dispatcher_stats()
         
-        return {
+        stats = {
             "registry": registry_stats,
             "dispatcher": dispatcher_stats,
             "initialized": self._initialized
         }
+        
+        # 添加动态MCP管理器统计信息
+        if self.dynamic_mcp_manager:
+            stats["dynamic_mcp"] = await self.get_dynamic_mcp_stats()
+        
+        return stats
     
     async def cleanup(self):
         """清理资源"""
         try:
+            # 清理动态MCP管理器
+            if self.dynamic_mcp_manager:
+                await self.dynamic_mcp_manager.cleanup()
+                logger.info("Dynamic MCP manager cleaned up")
+            
             await self.dispatcher.cleanup_all_adapters()
             logger.info("Tool library cleanup completed")
         except Exception as e:

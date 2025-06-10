@@ -156,7 +156,10 @@ class BrowserNavigatorMCPServer:
                 result = await self.browser_tool.screenshot(filename)
                 
             elif action == "browser_get_text":
-                selector = parameters.get("selector", "")
+                selector = parameters.get("selector")
+                # 如果selector是空字符串，将其转换为None
+                if selector == "":
+                    selector = None
                 result = await self.browser_tool.get_text(selector)
                 
             else:

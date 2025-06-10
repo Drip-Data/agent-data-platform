@@ -28,6 +28,9 @@ class ToolScoreMonitoringAPI:
         self.app.router.add_get('/tools', self.list_tools)
         self.app.router.add_get('/tools/{tool_id}', self.get_tool_detail)
         self.app.router.add_get('/stats', self.get_stats)
+        self.app.router.add_get('/mcp/persistent', self.get_persistent_storage)
+        self.app.router.add_post('/mcp/search', self.search_mcp_servers)
+        self.app.router.add_post('/mcp/install', self.install_mcp_server)
     
     async def health_check(self, request):
         """健康检查"""
@@ -165,6 +168,103 @@ class ToolScoreMonitoringAPI:
         await site.start()
         logger.info(f"ToolScore monitoring API started on port {self.port}")
         return runner
+
+    async def get_persistent_storage(self, request):
+        """获取持久化存储状态"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 获取动态MCP管理器的持久化状态
+            stats = await self.tool_library.get_library_stats()
+            dynamic_mcp_stats = stats.get("dynamic_mcp", {})
+            
+            return web.json_response({
+                "status": "success",
+                "total_servers": dynamic_mcp_stats.get("installed_servers_count", 0),
+                "servers": dynamic_mcp_stats.get("installed_servers", {}),
+                "storage_stats": dynamic_mcp_stats.get("storage_stats", {}),
+                "redis_connected": dynamic_mcp_stats.get("storage_stats", {}).get("redis_connected", False)
+            })
+        except Exception as e:
+            logger.error(f"Error getting persistent storage: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def search_mcp_servers(self, request):
+        """搜索MCP服务器"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            query = data.get("query", "")
+            max_candidates = data.get("max_candidates", 5)
+            
+            # 获取动态MCP管理器
+            dynamic_mcp = getattr(self.tool_library, 'dynamic_mcp_manager', None)
+            if not dynamic_mcp:
+                return web.json_response({
+                    "status": "error",
+                    "message": "Dynamic MCP manager not available"
+                }, status=500)
+            
+            # 执行搜索
+            candidates = await dynamic_mcp.search_mcp_candidates(query, max_candidates)
+            
+            return web.json_response({
+                "status": "success",
+                "candidates": candidates,
+                "total_found": len(candidates)
+            })
+        except Exception as e:
+            logger.error(f"Error searching MCP servers: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def install_mcp_server(self, request):
+        """安装MCP服务器"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            
+            # 获取动态MCP管理器
+            dynamic_mcp = getattr(self.tool_library, 'dynamic_mcp_manager', None)
+            if not dynamic_mcp:
+                return web.json_response({
+                    "status": "error",
+                    "message": "Dynamic MCP manager not available"
+                }, status=500)
+            
+            # 执行安装
+            success = await dynamic_mcp.install_and_register_mcp_server(data)
+            
+            return web.json_response({
+                "status": "success" if success else "error",
+                "success": success,
+                "message": "Installation completed" if success else "Installation failed"
+            })
+        except Exception as e:
+            logger.error(f"Error installing MCP server: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
 
 async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8080):
     """启动监控API的便捷函数"""

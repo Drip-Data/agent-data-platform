@@ -32,9 +32,46 @@ class UnifiedDispatcher:
         start_time = time.time()
         
         try:
-            # 如果有MCP客户端，直接通过MCP客户端执行工具
-            if self.mcp_client:
-                logger.info(f"Executing tool {tool_id} action: {action} via MCP client")
+            # 首先尝试从本地注册表获取工具规范
+            tool_spec = await self.tool_registry.get_tool_spec(tool_id)
+            
+            if tool_spec:
+                # 本地有该工具，直接执行
+                logger.info(f"Executing local tool {tool_spec.name} (ID: {tool_id}) action: {action}")
+                
+                # 检查工具是否启用
+                if not tool_spec.enabled:
+                    return ExecutionResult(
+                        success=False,
+                        error_type="ToolDisabled",
+                        error_message=f"Tool {tool_spec.name} is disabled"
+                    )
+                
+                # 创建适配器并执行
+                adapter = await self._create_adapter(tool_id, tool_spec)
+                if not adapter:
+                    return ExecutionResult(
+                        success=False,
+                        error_type="AdapterError",
+                        error_message=f"Failed to create adapter for tool {tool_spec.name}"
+                    )
+                
+                # 执行工具调用
+                result = await adapter.execute(tool_id, action, parameters)
+                
+                # 更新工具指标
+                await self.tool_registry.update_tool_metrics(
+                    tool_id, result.success, result.execution_time
+                )
+                
+                # 清理适配器
+                await adapter.cleanup()
+                
+                return result
+                
+            elif self.mcp_client:
+                # 本地没有该工具，尝试通过MCP客户端执行
+                logger.info(f"Tool {tool_id} not found locally, trying MCP client for action: {action}")
                 try:
                     result = await self.mcp_client.execute_tool(tool_id, action, parameters)
                     return result
@@ -47,47 +84,13 @@ class UnifiedDispatcher:
                         execution_time=time.time() - start_time,
                         metadata={"tool_id": tool_id, "action": action}
                     )
-            
-            # 降级到本地工具执行
-            # 获取工具规范
-            tool_spec = await self.tool_registry.get_tool_spec(tool_id)
-            if not tool_spec:
+            else:
+                # 既没有本地工具，也没有MCP客户端
                 return ExecutionResult(
                     success=False,
                     error_type="ToolNotFound",
-                    error_message=f"Tool with ID {tool_id} not found"
+                    error_message=f"Tool with ID {tool_id} not found in local registry or MCP client"
                 )
-            
-            # 检查工具是否启用
-            if not tool_spec.enabled:
-                return ExecutionResult(
-                    success=False,
-                    error_type="ToolDisabled",
-                    error_message=f"Tool {tool_spec.name} is disabled"
-                )
-            
-            # 直接创建适配器，不再缓存
-            adapter = await self._create_adapter(tool_id, tool_spec)
-            if not adapter:
-                return ExecutionResult(
-                    success=False,
-                    error_type="AdapterError",
-                    error_message=f"Failed to create adapter for tool {tool_spec.name}"
-                )
-            
-            # 执行工具调用
-            logger.info(f"Executing tool {tool_spec.name} (ID: {tool_id}) action: {action}")
-            result = await adapter.execute(tool_id, action, parameters)
-            
-            # 更新工具指标
-            await self.tool_registry.update_tool_metrics(
-                tool_id, result.success, result.execution_time
-            )
-            
-            # 清理适配器
-            await adapter.cleanup()
-            
-            return result
             
         except Exception as e:
             execution_time = time.time() - start_time

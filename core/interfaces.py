@@ -21,12 +21,14 @@ class ActionType(Enum):
 class ErrorType(Enum):
     TIMEOUT = "timeout"
     NETWORK_ERROR = "network_error"
+    RATE_LIMIT = "rate_limit"  # 添加速率限制错误
     COMPILE_ERROR = "compile_error"
     RUNTIME_ERROR = "runtime_error"
     BROWSER_ERROR = "browser_error"
     SYSTEM_ERROR = "system_error"
     TOOL_ERROR = "tool_error"
     EXECUTION_ERROR = "ExecutionError"
+    EXECUTION_FAILED = "execution_failed"  # 添加缺失的枚举值
 
 @dataclass
 class TaskSpec:
