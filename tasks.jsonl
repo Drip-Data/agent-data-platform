@@ -1,0 +1,15 @@
+{"task_id": "fibonacci_recursive", "task_type": "code", "description": "实现递归版本的斐波那契数列函数，计算第15个斐波那契数，并添加记忆化优化以提高性能", "expected_tools": ["python_executor"], "max_steps": 6}
+{"task_id": "matrix_operations", "task_type": "code", "description": "创建两个3x3随机矩阵，计算它们的乘积、行列式和特征值，使用numpy库实现", "expected_tools": ["python_executor"], "max_steps": 5}
+{"task_id": "data_analysis_task", "task_type": "code", "description": "生成100个随机数据点，使用pandas创建DataFrame，计算统计信息（均值、标准差、分位数），并用matplotlib绘制直方图", "expected_tools": ["python_executor"], "max_steps": 7}
+{"task_id": "quicksort_implementation", "task_type": "code", "description": "实现快速排序算法，对数组[64,34,25,12,22,11,90,5,77,30]进行排序，并分析时间复杂度", "expected_tools": ["python_executor"], "max_steps": 6}
+{"task_id": "machine_learning_basics", "task_type": "code", "description": "使用scikit-learn生成分类数据集，训练决策树模型，评估准确率并绘制决策边界", "expected_tools": ["python_executor"], "max_steps": 8}
+{"task_id": "object_oriented_design", "task_type": "code", "description": "设计银行账户类系统：包括Account基类、SavingsAccount和CheckingAccount子类，实现存款、取款、转账功能", "expected_tools": ["python_executor"], "max_steps": 8}
+{"task_id": "analyze_python_library_popularity", "task_type": "reasoning", "description": "分析NumPy和Pandas两个Python库在GitHub上的流行度。首先使用浏览器访问GitHub获取两个库的星标数，然后使用Python代码生成比较两者流行度的条形图，最后得出结论哪个库更受欢迎以及可能的原因。", "expected_tools": ["browser", "python_executor"], "max_steps": 15}
+{"task_id": "research_ai_frameworks", "task_type": "reasoning", "description": "研究当前最流行的深度学习框架。使用浏览器访问PyTorch和TensorFlow的官网，获取它们的最新版本信息和主要特性，然后用Python创建一个对比表格，分析两个框架的优劣势。", "expected_tools": ["browser", "python_executor"], "max_steps": 12}
+{"task_id": "crypto_price_analysis", "task_type": "reasoning", "description": "分析比特币价格趋势。使用浏览器访问CoinMarketCap获取比特币当前价格和历史数据，然后用Python绘制价格趋势图，并基于数据给出短期价格预测建议。", "expected_tools": ["browser", "python_executor"], "max_steps": 10}
+{"task_id": "web_search_python", "task_type": "web", "description": "在Google上搜索Python官方文档，访问python.org获取最新版本信息和主要特性，提取核心内容并以markdown格式输出", "expected_tools": ["browser"], "max_steps": 8}
+{"task_id": "web_github_trending", "task_type": "web", "description": "访问GitHub trending页面，搜索Python相关的热门仓库，获取前3个项目的名称、描述、星标数等信息，以结构化markdown格式输出", "expected_tools": ["browser"], "max_steps": 10}
+{"task_id": "web_scraping_advanced", "task_type": "web", "description": "访问GitHub上的TensorFlow项目页面，提取项目名称、描述、星标数、主要编程语言等信息，要求输出结构化的markdown格式，避免HTML乱码", "expected_tools": ["browser"], "max_steps": 8}
+{"task_id": "web_data_extraction", "task_type": "web", "description": "访问Stack Overflow问答页面，搜索Python相关问题，提取问题标题、回答数量、标签信息，以markdown格式整理输出，避免HTML标签干扰", "expected_tools": ["browser"], "max_steps": 5}
+{"task_id": "web_news_analysis", "task_type": "web", "description": "访问技术新闻网站（如Hacker News），搜索人工智能相关新闻，提取标题、摘要、链接等信息，并以markdown格式整理输出", "expected_tools": ["browser"], "max_steps": 7}
+{"task_id": "web_api_documentation", "task_type": "web", "description": "访问REST API文档网站，搜索JSON API的使用说明，提取关键信息并以markdown格式输出，确保内容清晰可读", "expected_tools": ["browser"], "max_steps": 6}

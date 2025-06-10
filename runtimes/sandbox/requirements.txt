@@ -1,0 +1,5 @@
+redis[hiredis]
+prometheus-client
+aiohttp
+httpx
+pydantic
