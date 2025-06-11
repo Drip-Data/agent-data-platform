@@ -23,11 +23,9 @@ COPY core/cache.py /app/core/cache.py
 COPY core/llm_client.py /app/core/llm_client.py
 COPY core/metrics.py /app/core/metrics.py
 COPY core/browser_state_manager.py /app/core/browser_state_manager.py
-COPY core/dispatcher.py /app/core/dispatcher.py
 COPY core/dispatcher_enhanced.py /app/core/dispatcher_enhanced.py
 COPY core/router.py /app/core/router.py
 COPY core/task_manager.py /app/core/task_manager.py
-COPY core/tool_registry.py /app/core/tool_registry.py
 COPY core/__init__.py /app/core/__init__.py
 
 # Expose the port the MCP server will run on

@@ -5,8 +5,7 @@ import websockets
 from typing import Dict, Any, Callable, Optional, List # 导入 List
 from uuid import uuid4
 
-from core.interfaces import ErrorType # 从 core.interfaces 导入 ErrorType
-from .interfaces import ToolSpec, ToolType, RegistrationResult, ExecutionResult, ToolCapability, MCPServerSpec, FunctionToolSpec # 导入 ToolCapability, MCPServerSpec, FunctionToolSpec
+from .interfaces import ToolSpec, ToolType, RegistrationResult, ExecutionResult, ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType # 导入 ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType
 from .unified_tool_library import UnifiedToolLibrary # 导入UnifiedToolLibrary，用于注册工具
 
 logger = logging.getLogger(__name__)

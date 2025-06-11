@@ -6,7 +6,7 @@ Agent Data Platform - Main Entry Point
 import asyncio
 import logging
 import os
-from core.dispatcher import main
+from core.dispatcher_enhanced import main
 
 if __name__ == "__main__":
     logging.basicConfig(

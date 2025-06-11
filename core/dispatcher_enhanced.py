@@ -24,12 +24,29 @@ class EnhancedTaskDispatcher:
         # 工具管理服务配置
         self.tool_service_url = os.getenv("TOOL_SERVICE_URL", "http://toolscore:8083")
         
-        # 队列映射表
-        self.queue_mapping = {
+        # 队列映射表 - 支持环境变量配置
+        default_mapping = {
             TaskType.CODE: "tasks:code",
             TaskType.WEB: "tasks:web", 
             TaskType.REASONING: "tasks:reasoning"
         }
+        
+        # 从环境变量读取队列映射配置
+        queue_mapping_env = os.getenv("QUEUE_MAPPING")
+        if queue_mapping_env:
+            try:
+                custom_mapping = json.loads(queue_mapping_env)
+                # 转换字符串键为TaskType枚举
+                self.queue_mapping = {}
+                for task_type_str, queue_name in custom_mapping.items():
+                    task_type = TaskType(task_type_str)
+                    self.queue_mapping[task_type] = queue_name
+                logger.info(f"使用自定义队列映射: {self.queue_mapping}")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"解析QUEUE_MAPPING环境变量失败，使用默认配置: {e}")
+                self.queue_mapping = default_mapping
+        else:
+            self.queue_mapping = default_mapping
         
     async def _call_tool_selector_service(self, task: TaskSpec) -> Dict:
         """调用工具管理服务进行智能推荐"""
@@ -56,16 +73,33 @@ class EnhancedTaskDispatcher:
             return self._get_fallback_tools(task.task_type)
     
     def _get_fallback_tools(self, task_type: TaskType) -> Dict:
-        """获取备选工具推荐"""
-        fallback_mapping = {
+        """获取备选工具推荐 - 支持环境变量配置"""
+        # 默认备选工具映射
+        default_fallback = {
             TaskType.CODE: ["python_executor"],
             TaskType.WEB: ["browser", "web_search"],
             TaskType.REASONING: ["browser", "python_executor"]
         }
         
+        # 从环境变量读取备选工具配置
+        fallback_env = os.getenv("FALLBACK_TOOLS_MAPPING")
+        if fallback_env:
+            try:
+                custom_fallback = json.loads(fallback_env)
+                # 转换字符串键为TaskType枚举
+                fallback_mapping = {}
+                for task_type_str, tools in custom_fallback.items():
+                    task_type_enum = TaskType(task_type_str)
+                    fallback_mapping[task_type_enum] = tools
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"解析FALLBACK_TOOLS_MAPPING环境变量失败，使用默认配置: {e}")
+                fallback_mapping = default_fallback
+        else:
+            fallback_mapping = default_fallback
+        
         return {
             "recommended_tools": fallback_mapping.get(task_type, ["python_executor"]),
-            "confidence": 0.5,
+            "confidence": float(os.getenv("FALLBACK_CONFIDENCE", "0.5")),
             "reason": "使用备选工具配置",
             "strategy": "fallback"
         }

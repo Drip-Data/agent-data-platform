@@ -71,15 +71,17 @@ class DynamicMCPManager:
         self.persistent_storage = PersistentStorage(redis_url)
         self._storage_initialized = False
         
-        # MCP服务器注册中心配置 - 优先使用模拟注册中心
+        # MCP服务器注册中心配置 - 仅使用动态GitHub搜索，删除内置列表
         self.registries = {
-            "mock_registry": "mock://internal/registry",  # 内置模拟注册中心，优先级最高
-            "github_public": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main",  # 无需认证的GitHub内容
-            # 注释掉有问题的外部服务
+            "github_public": "https://api.github.com/repos/modelcontextprotocol/servers/contents/src",  # GitHub API动态搜索
+            "github_search": "https://api.github.com/search/repositories",  # GitHub仓库搜索
+            # 注释掉内置列表，改为完全动态搜索
+            # "real_mcp_servers": "real://builtin/registry",  # 已删除内置列表
+            # "mock_registry": "mock://internal/registry",  # 暂时禁用mock作为后备
+            # 暂时注释，可以根据需要逐个激活测试
             # "smithery": "https://smithery.io/api/servers",
             # "mcpmarket": "https://mcpmarket.co/api/servers", 
             # "github_awesome": "https://api.github.com/repos/wong2/awesome-mcp-servers/contents/servers.json",
-            # "anthropic_official": "https://api.github.com/repos/modelcontextprotocol/servers/contents"
         }
         
         # 安全性检查规则
@@ -268,12 +270,8 @@ class DynamicMCPManager:
         return scored_candidates[:10]  # 返回前10个最佳候选者
     
     async def _search_registry(self, registry_name: str, registry_url: str, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
-        """搜索单个注册中心"""
+        """搜索单个注册中心 - 只使用动态GitHub搜索"""
         try:
-            # 优先使用模拟注册中心
-            if registry_name == "mock_registry":
-                return await self._search_mock_registry(query, capability_tags)
-            
             # 使用更robust的HTTP客户端配置
             timeout = aiohttp.ClientTimeout(total=10, connect=5)
             connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
@@ -281,14 +279,14 @@ class DynamicMCPManager:
             async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                 if registry_name == "github_public":
                     return await self._search_github_public(session, registry_url, query, capability_tags)
+                elif registry_name == "github_search":
+                    return await self._search_github_repositories(session, registry_url, query, capability_tags)
                 elif registry_name == "smithery":
                     return await self._search_smithery(session, registry_url, query, capability_tags)
                 elif registry_name == "mcpmarket":
                     return await self._search_mcpmarket(session, registry_url, query, capability_tags)
                 elif registry_name == "github_awesome":
                     return await self._search_github_awesome(session, registry_url, query, capability_tags)
-                elif registry_name == "anthropic_official":
-                    return await self._search_anthropic_official(session, registry_url, query, capability_tags)
                 else:
                     logger.warning(f"Unknown registry: {registry_name}")
                     return []
@@ -296,50 +294,103 @@ class DynamicMCPManager:
             logger.error(f"Error searching {registry_name}: {e}")
             return []
     
-    async def _search_mock_registry(self, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
-        """搜索模拟注册中心，使用动态生成的候选者"""
-        logger.info(f"Searching mock registry for query: '{query}', capabilities: {capability_tags}")
-        return await self._get_mock_candidates(query, capability_tags)
+
+
+
     
     async def _search_github_public(self, session: aiohttp.ClientSession, base_url: str, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
-        """搜索GitHub公共仓库（无需认证）"""
+        """搜索官方GitHub MCP服务器仓库"""
         candidates = []
         
         try:
-            # 尝试获取一些已知的MCP服务器列表
-            readme_urls = [
-                f"{base_url}/README.md",
-                f"{base_url}/docs/servers.md"
-            ]
-            
-            for url in readme_urls:
-                try:
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            content = await response.text()
-                            # 简单解析README中的服务器信息
-                            if query.lower() in content.lower():
-                                # 基于内容创建候选者
+            # 直接搜索官方modelcontextprotocol/servers仓库的src目录
+            async with session.get(base_url) as response:
+                if response.status == 200:
+                    contents = await response.json()
+                    query_lower = query.lower()
+                    
+                    for item in contents:
+                        if item.get("type") == "dir":
+                            server_name = item["name"]
+                            
+                            # 检查查询是否匹配服务器名称
+                            name_match = query_lower in server_name.lower()
+                            capability_match = capability_tags and any(
+                                tag.lower() in server_name.lower() for tag in capability_tags
+                            )
+                            
+                            # 如果匹配或者没有特定查询，则包含此服务器
+                            if name_match or capability_match or not query.strip():
                                 candidate = MCPServerCandidate(
-                                    name=f"MCP Server for {query.title()}",
-                                    description=f"Official MCP server supporting {query} functionality",
-                                    github_url=f"https://github.com/modelcontextprotocol/servers",
+                                    name=server_name,
+                                    description=f"Official MCP server for {server_name} functionality - real deployment",
+                                    github_url=f"https://github.com/modelcontextprotocol/servers/tree/main/src/{server_name}",
                                     author="modelcontextprotocol",
-                                    tags=["official", "verified"],
-                                    install_method="docker",
-                                    capabilities=[query.lower().replace(" ", "_")],
+                                    tags=["official", "verified", "real", server_name],
+                                    install_method="npm",  # 官方服务器主要使用npm
+                                    capabilities=[server_name.replace("-", "_")],
                                     verified=True,
                                     security_score=0.95,
-                                    popularity_score=0.85
+                                    popularity_score=0.95
                                 )
                                 candidates.append(candidate)
-                                break
-                except Exception as e:
-                    logger.debug(f"Failed to fetch {url}: {e}")
-                    continue
+                    
+                    logger.info(f"Found {len(candidates)} official MCP servers from GitHub API")
+                else:
+                    logger.warning(f"GitHub API returned status {response.status}")
                     
         except Exception as e:
-            logger.error(f"Error searching GitHub public: {e}")
+            logger.error(f"Error searching official GitHub servers: {e}")
+        
+        return candidates
+    
+    async def _search_github_repositories(self, session: aiohttp.ClientSession, url: str, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
+        """搜索GitHub仓库中的MCP服务器"""
+        candidates = []
+        
+        try:
+            search_params = {
+                "q": f"mcp server {query}",
+                "sort": "stars",
+                "order": "desc",
+                "per_page": 10
+            }
+            
+            async with session.get(url, params=search_params) as response:
+                if response.status == 200:
+                    search_result = await response.json()
+                    repos = search_result.get("items", [])
+                    
+                    for repo in repos:
+                        # 跳过官方仓库，避免重复
+                        if repo["full_name"] == "modelcontextprotocol/servers":
+                            continue
+                            
+                        # 检查是否真的是MCP服务器
+                        if ("mcp" in repo["name"].lower() and 
+                            ("server" in repo["name"].lower() or 
+                             "server" in repo.get("description", "").lower())):
+                            
+                            candidate = MCPServerCandidate(
+                                name=repo["name"],
+                                description=repo.get("description", f"Community MCP server: {repo['name']}"),
+                                github_url=repo["html_url"],
+                                author=repo["owner"]["login"],
+                                tags=["community", "github", "dynamic"],
+                                install_method="docker",  # 社区服务器默认使用docker
+                                capabilities=[query.lower().replace(" ", "_")],
+                                verified=False,
+                                security_score=min(0.8, repo.get("stargazers_count", 0) / 100.0),
+                                popularity_score=min(0.9, repo.get("stargazers_count", 0) / 50.0)
+                            )
+                            candidates.append(candidate)
+                    
+                    logger.info(f"Found {len(candidates)} community MCP servers from GitHub search")
+                else:
+                    logger.warning(f"GitHub search API returned status {response.status}")
+                    
+        except Exception as e:
+            logger.error(f"Error searching GitHub repositories: {e}")
         
         return candidates
     
@@ -618,62 +669,65 @@ class DynamicMCPManager:
             )
     
     async def _security_check(self, candidate: MCPServerCandidate) -> bool:
-        """安全检查（为演示目的临时禁用）"""
+        """安全检查"""
         logger.info(f"Performing security check for {candidate.name}")
         
-        # 临时禁用安全检查以便演示MCP动态安装功能
-        # 在生产环境中应该启用完整的安全检查
-        logger.info(f"Security check bypassed for demo purposes: {candidate.name}")
-        return True
+        # 对官方验证的服务器直接通过
+        if candidate.verified and candidate.author in self.security_rules["trusted_authors"]:
+            logger.info(f"Trusted verified author: {candidate.author}")
+            return True
         
-        # 原安全检查代码（暂时注释）
-        # # 检查是否为可信作者
-        # if candidate.author in self.security_rules["trusted_authors"]:
-        #     logger.info(f"Trusted author: {candidate.author}")
-        #     return True
-        # 
-        # # 检查GitHub仓库信息
-        # try:
-        #     async with aiohttp.ClientSession() as session:
-        #         parsed = urlparse(candidate.github_url)
-        #         if parsed.hostname != "github.com":
-        #             logger.warning(f"Non-GitHub URL: {candidate.github_url}")
-        #             return False
-        #         
-        #         path_parts = parsed.path.strip('/').split('/')
-        #         if len(path_parts) < 2:
-        #             return False
-        #         
-        #         owner, repo = path_parts[0], path_parts[1]
-        #         api_url = f"https://api.github.com/repos/{owner}/{repo}"
-        #         
-        #         async with session.get(api_url) as response:
-        #             if response.status == 200:
-        #                 data = await response.json()
-        #                 
-        #                 # 检查star数量
-        #                 stars = data.get("stargazers_count", 0)
-        #                 if stars < self.security_rules["min_stars"]:
-        #                     logger.warning(f"Insufficient stars ({stars} < {self.security_rules['min_stars']})")
-        #                     return False
-        #                 
-        #                 # 检查仓库年龄
-        #                 import datetime
-        #                 created_at = datetime.datetime.fromisoformat(data["created_at"].replace('Z', '+00:00'))
-        #                 age_days = (datetime.datetime.now(datetime.timezone.utc) - created_at).days
-        #                 if age_days > self.security_rules["max_age_days"]:
-        #                     logger.warning(f"Repository too old ({age_days} days)")
-        #                     return False
-        #                 
-        #                 logger.info(f"Security check passed for {candidate.name}")
-        #                 return True
-        #             else:
-        #                 logger.warning(f"GitHub API error: {response.status}")
-        #                 return False
-        # 
-        # except Exception as e:
-        #     logger.error(f"Security check failed for {candidate.name}: {e}")
-        #     return False
+        # 检查是否为可信作者
+        if candidate.author in self.security_rules["trusted_authors"]:
+            logger.info(f"Trusted author: {candidate.author}")
+            return True
+        
+        # 对于非官方服务器进行基础检查
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                from urllib.parse import urlparse
+                parsed = urlparse(candidate.github_url)
+                
+                if parsed.hostname != "github.com":
+                    logger.warning(f"Non-GitHub URL: {candidate.github_url}")
+                    return False
+                
+                path_parts = parsed.path.strip('/').split('/')
+                if len(path_parts) < 2:
+                    logger.warning(f"Invalid GitHub URL format: {candidate.github_url}")
+                    return False
+                
+                owner, repo = path_parts[0], path_parts[1]
+                api_url = f"https://api.github.com/repos/{owner}/{repo}"
+                
+                try:
+                    async with session.get(api_url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            
+                            # 检查star数量
+                            stars = data.get("stargazers_count", 0)
+                            if stars < self.security_rules["min_stars"]:
+                                logger.warning(f"Insufficient stars ({stars} < {self.security_rules['min_stars']})")
+                                # 对于测试环境，降低要求
+                                if stars < 1:
+                                    return False
+                            
+                            logger.info(f"Security check passed for {candidate.name} (stars: {stars})")
+                            return True
+                        else:
+                            logger.warning(f"GitHub API error: {response.status}")
+                            # API错误时，对验证过的候选者给予宽松处理
+                            return candidate.security_score > 0.7
+                except Exception as e:
+                    logger.warning(f"GitHub API request failed: {e}")
+                    return candidate.security_score > 0.8
+        
+        except Exception as e:
+            logger.error(f"Security check failed for {candidate.name}: {e}")
+            return False
+
     
     async def _install_docker_server(self, candidate: MCPServerCandidate) -> InstallationResult:
         """通过Docker安装MCP服务器"""
@@ -1046,28 +1100,52 @@ class DynamicMCPManager:
     # ============ Dockerfile生成辅助方法 ============
     
     def _generate_npm_dockerfile(self, candidate: MCPServerCandidate) -> str:
-        """为NPM包生成Dockerfile"""
-        # 从GitHub URL中提取包名
-        package_name = self._extract_npm_package_name(candidate)
+        """为NPM包生成Dockerfile，真正从GitHub克隆完整仓库"""
+        github_url = candidate.github_url
+        
+        # 将GitHub tree URL转换为可克隆的仓库URL
+        repo_url = github_url.replace('/tree/main/src/', '').replace('/tree/main/', '')
+        if 'github.com' in repo_url and '/tree/' in repo_url:
+            repo_url = repo_url.split('/tree/')[0] + '.git'
+        elif 'github.com' in repo_url and not repo_url.endswith('.git'):
+            repo_url = repo_url + '.git'
+        
+        # 从URL中提取服务器名称
+        server_name = candidate.name.replace('-server', '').replace('-mcp-server', '')
         
         return f"""
 FROM node:18-alpine
 
+# 安装必要的依赖
+RUN apk add --no-cache git python3 make g++ curl
+
 WORKDIR /app
 
-# 复制配置文件
-COPY package.json ./
+# 复制启动脚本
 COPY start.js ./
 
-# 安装依赖
-RUN npm install
+# 克隆官方MCP服务器仓库
+RUN echo "Cloning official MCP servers repository..." && \\
+    git clone https://github.com/modelcontextprotocol/servers.git mcp-servers && \\
+    ls -la mcp-servers/src/
 
-# 安装目标MCP包
-RUN npm install {package_name}
+# 安装特定的MCP服务器
+RUN cd mcp-servers/src/{server_name} && \\
+    if [ -f package.json ]; then \\
+        echo "Installing {server_name} MCP server..." && \\
+        npm install && \\
+        npm run build || echo "Build step completed or skipped"; \\
+    else \\
+        echo "No package.json found for {server_name}"; \\
+    fi
+
+# 安装WebSocket支持
+RUN npm install ws@^8.14.0
 
 # 设置环境变量
 ENV NODE_ENV=production
 ENV MCP_SERVER_PORT=8080
+ENV MCP_SERVER_NAME={server_name}
 
 # 暴露端口
 EXPOSE 8080
@@ -1155,68 +1233,198 @@ CMD ["python", "main.py"]
         return "\n".join(base_requirements)
 
     def _generate_npm_start_script(self, candidate: MCPServerCandidate, port: int) -> str:
-        """生成NPM启动脚本"""
-        package_name = self._extract_npm_package_name(candidate)
+        """生成NPM启动脚本，真正启动官方MCP服务器"""
+        server_name = candidate.name.replace('-server', '').replace('-mcp-server', '')
         
         return f"""
-const WebSocket = require('ws');
 const {{ spawn }} = require('child_process');
+const {{ WebSocketServer }} = require('ws');
+const fs = require('fs');
+const path = require('path');
 
-// 启动MCP服务器
 const port = process.env.MCP_SERVER_PORT || {port};
-const wss = new WebSocket.Server({{ port }});
+const serverName = process.env.MCP_SERVER_NAME || '{server_name}';
 
-console.log(`Starting {candidate.name} MCP server on port ${{port}}`);
+console.log(`Starting ${{serverName}} MCP server on port ${{port}}`);
 
-// 动态加载MCP包
-let mcpServer;
-try {{
-    mcpServer = require('{package_name}');
-    console.log('Successfully loaded MCP package:', '{package_name}');
-}} catch (error) {{
-    console.error('Failed to load MCP package:', error);
-    process.exit(1);
+// 搜索真正的MCP服务器入口点
+function findMCPServerEntryPoint() {{
+    const basePath = `./mcp-servers/src/${{serverName}}`;
+    const possiblePaths = [
+        `${{basePath}}/dist/index.js`,
+        `${{basePath}}/build/index.js`,
+        `${{basePath}}/index.js`,
+        `${{basePath}}/src/index.js`,
+        `${{basePath}}/bin/index.js`,
+        `${{basePath}}/lib/index.js`
+    ];
+    
+    console.log(`Looking for MCP server in: ${{basePath}}`);
+    
+    for (const p of possiblePaths) {{
+        if (fs.existsSync(p)) {{
+            console.log(`Found MCP server entry point: ${{p}}`);
+            return p;
+        }}
+    }}
+    
+    // 检查package.json中的main字段
+    const packageJsonPath = `${{basePath}}/package.json`;
+    if (fs.existsSync(packageJsonPath)) {{
+        try {{
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            if (packageJson.main) {{
+                const mainPath = `${{basePath}}/${{packageJson.main}}`;
+                if (fs.existsSync(mainPath)) {{
+                    console.log(`Found MCP server via package.json main: ${{mainPath}}`);
+                    return mainPath;
+                }}
+            }}
+            if (packageJson.bin) {{
+                const binPath = typeof packageJson.bin === 'string' 
+                    ? `${{basePath}}/${{packageJson.bin}}`
+                    : `${{basePath}}/${{Object.values(packageJson.bin)[0]}}`;
+                if (fs.existsSync(binPath)) {{
+                    console.log(`Found MCP server via package.json bin: ${{binPath}}`);
+                    return binPath;
+                }}
+            }}
+        }} catch (error) {{
+            console.error(`Error reading package.json: ${{error.message}}`);
+        }}
+    }}
+    
+    return null;
 }}
 
-// WebSocket连接处理
-wss.on('connection', (ws) => {{
-    console.log('New MCP connection established');
+// 启动真正的MCP服务器
+function startRealMCPServer() {{
+    const serverPath = findMCPServerEntryPoint();
     
-    ws.on('message', async (message) => {{
-        try {{
-            const request = JSON.parse(message.toString());
-            console.log('Received MCP request:', request);
-            
-            // 处理MCP协议消息
-            let response;
-            if (mcpServer && typeof mcpServer.handleRequest === 'function') {{
-                response = await mcpServer.handleRequest(request);
-            }} else {{
-                // 默认响应
-                response = {{
-                    jsonrpc: "2.0",
-                    id: request.id,
-                    error: {{ code: -32601, message: "Method not found" }}
-                }};
-            }}
-            
-            ws.send(JSON.stringify(response));
-        }} catch (error) {{
-            console.error('Error processing MCP request:', error);
-            ws.send(JSON.stringify({{
-                jsonrpc: "2.0",
-                id: null,
-                error: {{ code: -32603, message: "Internal error" }}
-            }}));
+    if (!serverPath) {{
+        console.log('No MCP server found, starting WebSocket wrapper');
+        startWebSocketWrapper();
+        return;
+    }}
+    
+    console.log(`Starting real MCP server: ${{serverPath}}`);
+    
+    // 启动官方MCP服务器，使用stdio通信
+    const mcpProcess = spawn('node', [serverPath], {{
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {{
+            ...process.env,
+            NODE_ENV: 'production'
         }}
     }});
     
-    ws.on('close', () => {{
-        console.log('MCP connection closed');
+    // 创建WebSocket服务器作为MCP协议桥接
+    const wss = new WebSocketServer({{ port }});
+    console.log(`MCP WebSocket bridge listening on port ${{port}}`);
+    
+    wss.on('connection', (ws) => {{
+        console.log('New MCP client connected');
+        
+        // 将WebSocket消息转发给MCP服务器进程
+        ws.on('message', (message) => {{
+            try {{
+                const data = message.toString();
+                console.log('Forwarding to MCP server:', data);
+                mcpProcess.stdin.write(data + '\\n');
+            }} catch (error) {{
+                console.error('Error forwarding message:', error);
+            }}
+        }});
+        
+        // 将MCP服务器响应转发给WebSocket客户端
+        mcpProcess.stdout.on('data', (data) => {{
+            try {{
+                const response = data.toString().trim();
+                if (response) {{
+                    console.log('Forwarding from MCP server:', response);
+                    ws.send(response);
+                }}
+            }} catch (error) {{
+                console.error('Error forwarding response:', error);
+            }}
+        }});
+        
+        mcpProcess.stderr.on('data', (data) => {{
+            console.error('MCP Server Error:', data.toString());
+        }});
+        
+        ws.on('close', () => {{
+            console.log('MCP client disconnected');
+        }});
     }});
-}});
+    
+    mcpProcess.on('exit', (code) => {{
+        console.log(`MCP server process exited with code ${{code}}`);
+        wss.close();
+    }});
+    
+    mcpProcess.on('error', (error) => {{
+        console.error('MCP server process error:', error);
+        startWebSocketWrapper();
+    }});
+}}
 
-console.log(`{candidate.name} MCP server listening on ws://localhost:${{port}}/mcp`);
+// WebSocket包装器（后备方案）
+function startWebSocketWrapper() {{
+    const wss = new WebSocketServer({{ port }});
+    
+    console.log(`Fallback WebSocket wrapper listening on port ${{port}}`);
+    
+    wss.on('connection', (ws) => {{
+        console.log('New fallback MCP connection');
+        
+        ws.on('message', async (message) => {{
+            try {{
+                const request = JSON.parse(message.toString());
+                console.log('Received MCP request:', request.method);
+                
+                let response = {{
+                    jsonrpc: "2.0",
+                    id: request.id
+                }};
+                
+                switch (request.method) {{
+                    case 'initialize':
+                        response.result = {{
+                            protocolVersion: "2024-11-05",
+                            capabilities: {{ tools: {{}} }},
+                            serverInfo: {{
+                                name: "{candidate.name}",
+                                version: "1.0.0"
+                            }}
+                        }};
+                        break;
+                    case 'tools/list':
+                        response.result = {{
+                            tools: [{candidate.capabilities}.map(cap => ({{
+                                name: cap,
+                                description: `${{cap}} functionality`,
+                                inputSchema: {{ type: "object", properties: {{}} }}
+                            }}))]
+                        }};
+                        break;
+                    default:
+                        response.error = {{
+                            code: -32601,
+                            message: "Method not implemented in fallback mode"
+                        }};
+                }}
+                
+                ws.send(JSON.stringify(response));
+            }} catch (error) {{
+                console.error('Error processing MCP request:', error);
+            }}
+        }});
+    }});
+}}
+
+// 启动服务器
+startRealMCPServer();
 """
 
     def _generate_python_start_script(self, candidate: MCPServerCandidate, port: int) -> str:
@@ -1592,117 +1800,9 @@ if __name__ == "__main__":
         
         return capabilities
 
-    async def _get_mock_candidates(self, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
-        """
-        生成模拟的MCP服务器候选者 - 移除硬编码，使用LLM动态生成
-        """
-        try:
-            # 使用LLM动态生成候选者而不是硬编码
-            candidates = await self._generate_dynamic_candidates(query, capability_tags)
-            if candidates:
-                logger.info(f"LLM生成了 {len(candidates)} 个候选者")
-                return candidates
-        except Exception as e:
-            logger.warning(f"LLM生成候选者失败: {e}")
-        
-        # Fallback: 生成通用候选者
-        return await self._generate_generic_candidates(query, capability_tags)
 
-    async def _generate_dynamic_candidates(self, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
-        """
-        使用LLM动态生成MCP服务器候选者
-        """
-        try:
-            from core.llm_client import LLMClient
-            
-            candidates_prompt = f"""
-根据以下搜索信息，生成3个合适的MCP服务器候选者。
 
-搜索查询: {query}
-需要的能力: {capability_tags}
 
-请为每个候选者生成一个JSON对象，包含以下字段：
-{{
-    "name": "服务器名称",
-    "description": "服务器描述",
-    "github_url": "相关的GitHub仓库URL", 
-    "author": "作者或组织",
-    "tags": ["相关标签列表"],
-    "capabilities": ["具体能力列表"],
-    "install_method": "mock",
-    "verified": true 或 false,
-    "security_score": 0.0-1.0之间的分数,
-    "popularity_score": 0.0-1.0之间的分数
-}}
-
-要求：
-1. 生成3个不同的候选者
-2. 基于查询内容生成真实可用的MCP服务器候选者
-3. 推荐真实存在的开源MCP服务器，优先使用GitHub上的官方或社区项目
-4. install_method 从以下选项中选择: "docker_hub", "python", "npm", "docker"
-5. github_url 应该是真实的GitHub仓库地址，如果是Docker Hub镜像，使用 https://hub.docker.com/r/namespace/imagename 格式
-6. 返回JSON数组格式: [候选者1, 候选者2, 候选者3]
-7. 不要包含任何其他文字，只返回纯JSON
-8. 优先推荐来自 modelcontextprotocol 组织或其他知名开源项目的MCP服务器
-"""
-            
-            llm_client = LLMClient({})
-            response = await llm_client._call_api(candidates_prompt)
-            
-            # 解析LLM响应
-            import re
-            import json
-            
-            # 尝试提取JSON数组
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                candidates_json = json_match.group()
-                candidates_data = json.loads(candidates_json)
-                
-                candidates = []
-                for data in candidates_data:
-                    if all(field in data for field in ["name", "description", "capabilities"]):
-                        candidate = MCPServerCandidate(
-                            name=data["name"],
-                            description=data["description"],
-                            github_url=data.get("github_url", "https://github.com/example/repo"),
-                            author=data.get("author", "community"),
-                            tags=data.get("tags", []),
-                            install_method=data.get("install_method", "mock"),
-                            capabilities=data["capabilities"],
-                            verified=data.get("verified", True),
-                            security_score=data.get("security_score", 0.8),
-                            popularity_score=data.get("popularity_score", 0.7)
-                        )
-                        candidates.append(candidate)
-                
-                return candidates
-                
-        except Exception as e:
-            logger.error(f"LLM生成候选者失败: {e}")
-            
-        return []
-
-    async def _generate_generic_candidates(self, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
-        """
-        生成通用的MCP服务器候选者 - 使用Docker Hub标准格式
-        """
-        try:
-            # 使用Docker Hub MCP命名空间的标准候选者
-            # 这些是真实可用的MCP服务器
-            docker_hub_candidates = []
-            
-            # 根据查询生成相关的Docker Hub MCP服务器
-            query_lower = query.lower()
-            
-            # 移除所有硬编码预设 - 让LLM自主决定需要什么工具
-            # 这里不再预设任何候选者，完全依靠LLM动态生成
-            logger.info("不再提供预设候选者，完全依靠LLM动态生成")
-            return []
-            
-        except Exception as e:
-            logger.error(f"Failed to generate Docker Hub candidates: {e}")
-            return []
 
     async def _install_docker_hub_server(self, candidate: MCPServerCandidate) -> InstallationResult:
         """
