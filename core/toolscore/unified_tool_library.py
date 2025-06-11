@@ -72,6 +72,60 @@ class UnifiedToolLibrary:
     async def register_mcp_server(self, server_spec: MCPServerSpec) -> RegistrationResult:
         """注册MCP Server"""
         return await self.tool_registry.register_mcp_server(server_spec)
+
+    async def register_external_mcp_server(self, server_info: Dict[str, Any]) -> RegistrationResult:
+        """通过统一信息注册外部MCP服务器"""
+        required_fields = ["name", "endpoint", "capabilities"]
+        for field in required_fields:
+            if field not in server_info:
+                return RegistrationResult(success=False, error=f"Missing field: {field}")
+
+        capabilities = []
+        for cap in server_info.get("capabilities", []):
+            if isinstance(cap, ToolCapability):
+                capabilities.append(cap)
+            elif isinstance(cap, dict) and "name" in cap:
+                capabilities.append(
+                    ToolCapability(
+                        name=cap.get("name", ""),
+                        description=cap.get("description", ""),
+                        parameters=cap.get("parameters", {}),
+                        examples=cap.get("examples", []),
+                    )
+                )
+            else:
+                return RegistrationResult(success=False, error="Invalid capability format")
+
+        tool_id = server_info.get("tool_id") or server_info["name"].lower().replace(" ", "_")
+
+        server_spec = MCPServerSpec(
+            tool_id=tool_id,
+            name=server_info["name"],
+            description=server_info.get("description", ""),
+            tool_type=ToolType.MCP_SERVER,
+            capabilities=capabilities,
+            tags=server_info.get("tags", []),
+            endpoint=server_info["endpoint"],
+            connection_params=server_info.get("connection_params", {}),
+            server_config=server_info.get("server_config", {}),
+        )
+
+        result = await self.register_mcp_server(server_spec)
+
+        if result.success and self.dynamic_mcp_manager and self.dynamic_mcp_manager._storage_initialized:
+            try:
+                install_data = {
+                    "success": True,
+                    "server_id": tool_id,
+                    "endpoint": server_info["endpoint"],
+                    "container_id": None,
+                    "port": None,
+                }
+                await self.dynamic_mcp_manager.persistent_storage.save_mcp_server(server_spec, install_data)
+            except Exception as e:
+                logger.warning(f"Failed to persist external MCP server {server_spec.name}: {e}")
+
+        return result
     
     async def unregister_tool(self, tool_id: str) -> bool:
         """注销工具"""

@@ -343,6 +343,22 @@ class DynamicMCPManager:
             logger.error(f"Error searching official GitHub servers: {e}")
         
         return candidates
+
+    async def list_official_mcp_servers(self) -> List[MCPServerCandidate]:
+        """列出官方仓库中所有可用的MCP服务器"""
+        try:
+            timeout = aiohttp.ClientTimeout(total=10, connect=5)
+            connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
+
+            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+                base_url = self.registries.get(
+                    "github_public",
+                    "https://api.github.com/repos/modelcontextprotocol/servers/contents/src",
+                )
+                return await self._search_github_public(session, base_url, "", [])
+        except Exception as e:
+            logger.error(f"Failed to list official MCP servers: {e}")
+            return []
     
     async def _search_github_repositories(self, session: aiohttp.ClientSession, url: str, query: str, capability_tags: List[str]) -> List[MCPServerCandidate]:
         """搜索GitHub仓库中的MCP服务器"""
@@ -1009,6 +1025,41 @@ class DynamicMCPManager:
                 success=False,
                 error=str(e)
             )
+
+    async def install_and_register_mcp_server(self, server_info: Dict[str, Any]) -> bool:
+        """统一接口安装或直接注册外部MCP服务器"""
+        try:
+            install_method = server_info.get("install_method")
+
+            if install_method:
+                candidate = MCPServerCandidate(
+                    name=server_info.get("name", "external-server"),
+                    description=server_info.get("description", ""),
+                    github_url=server_info.get("github_url", ""),
+                    author=server_info.get("author", "unknown"),
+                    tags=server_info.get("tags", []),
+                    install_method=install_method,
+                    capabilities=server_info.get("capabilities", []),
+                    verified=server_info.get("verified", False),
+                )
+                install_res = await self.install_mcp_server(candidate)
+                if not install_res.success:
+                    return False
+                reg_res = await self.register_installed_server(candidate, install_res)
+                return reg_res.success
+
+            # 无安装步骤，直接注册外部服务
+            reg_result = await self.tool_library.register_external_mcp_server(server_info)
+            if reg_result.success:
+                self.installed_servers[reg_result.tool_id] = InstallationResult(
+                    success=True,
+                    server_id=reg_result.tool_id,
+                    endpoint=server_info.get("endpoint"),
+                )
+            return reg_result.success
+        except Exception as e:
+            logger.error(f"Failed to install/register MCP server: {e}")
+            return False
     
     async def uninstall_server(self, server_id: str) -> bool:
         """卸载动态安装的MCP服务器"""
