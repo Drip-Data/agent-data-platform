@@ -184,6 +184,8 @@ agent-data-platform/
 - **[系统架构分析](ARCHITECTURE_ANALYSIS.md)** - 架构设计和实现状况
 - **[快速开始指南](QUICK_START.md)** - 详细的部署和使用说明
 - **[外部API配置指南](docs/外部API配置指南.md)** - LLM API配置说明
+- **[外部 MCP 服务器注册接口](docs/外部MCP服务器注册接口.md)** - 统一注册外部服务器的方法
+- **[官方 MCP 服务器列表](docs/外部MCP服务器注册接口.md#获取官方服务器列表)** - 自动获取官方可用服务器
 
 ## 🔧 高级配置
 

@@ -1,0 +1,66 @@
+# 外部 MCP 服务器注册接口
+
+本文档介绍如何通过统一接口在 Agent Data Platform 中注册任意外部的 MCP 服务器。
+
+## 接口说明
+
+调用 `UnifiedToolLibrary.register_external_mcp_server()` 方法即可注册一个已经运行的 MCP 服务器。该方法接受一个字典形式的 `server_info` 参数。
+
+示例:
+
+```python
+server_info = {
+    "tool_id": "my_image_server",       # 可选，不提供则自动根据名称生成
+    "name": "图像生成服务器",            # 必填
+    "description": "提供图像生成能力",    # 可选
+    "endpoint": "ws://localhost:9000/mcp",  # 必填，MCP WebSocket 地址
+    "tags": ["image", "generation"],      # 可选
+    "capabilities": [                      # 必填，每个能力需要 name/description/parameters
+        {
+            "name": "generate_image",
+            "description": "根据提示生成图片",
+            "parameters": {
+                "prompt": {"type": "string", "required": True}
+            },
+            "examples": [{"prompt": "a cute cat"}]
+        }
+    ],
+    "connection_params": {"timeout": 30}   # 可选
+}
+
+result = await tool_library.register_external_mcp_server(server_info)
+```
+
+字段说明：
+
+| 字段名            | 必填 | 说明                               |
+|-------------------|-----|------------------------------------|
+| `name`            | 是  | 服务器名称                          |
+| `endpoint`        | 是  | MCP WebSocket 服务地址              |
+| `capabilities`    | 是  | 服务器提供的工具能力列表            |
+| `tool_id`         | 否  | 工具唯一标识，不传则自动生成        |
+| `description`     | 否  | 服务器描述                          |
+| `tags`            | 否  | 标签列表                            |
+| `connection_params`| 否 | 与服务器通讯的额外参数              |
+| `server_config`   | 否  | 其他自定义配置信息                  |
+
+注册成功后，该服务器会被加入工具库，并可在 Docker 环境下持久化保存。
+
+## 获取官方服务器列表
+
+`DynamicMCPManager` 提供 `list_official_mcp_servers()` 方法，可从
+[`modelcontextprotocol/servers`](https://github.com/modelcontextprotocol/servers)
+仓库读取所有官方维护的 MCP 服务器目录。调用示例：
+
+```python
+from core.toolscore.dynamic_mcp_manager import DynamicMCPManager
+
+manager = DynamicMCPManager(tool_library)
+await manager.initialize()
+
+servers = await manager.list_official_mcp_servers()
+for srv in servers:
+    print(srv.name, srv.github_url)
+```
+
+该方法返回 `MCPServerCandidate` 列表，方便进一步安装或注册。
