@@ -2203,5 +2203,291 @@
       }
     },
     "created_at": 1749569123.041775
+  },
+  {
+    "task_name": "0174fcc8-08e2-4b3a-b613-68c256ecdc08",
+    "task_id": "a9169905-9dd7-4def-bb25-53f081dfc879",
+    "task_description": "请生成一张可爱的小猫咪在绿色花园中玩耍的图片，小猫是橙色的毛发，有蓝色的眼睛，背景是绿色的草地和花朵",
+    "runtime_id": "enhanced-reasoning-6917cae0-7023-428d-8cd4-356382adc8c7",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'task_description': '生成一张可爱的小猫咪在绿色花园中玩耍的图片，小猫是橙色的毛发，有蓝色的眼睛，背景是绿色的草地和花朵'}, observation=\"Tool 'mcp-search-tool/analyze_tool_needs' executed successfully. Data received: {'has_sufficient_tools': False, 'overall_assessment': '需要图像生成工具', 'recommended_action': 'search_for_new_tools', 'tool_requirements': [], 'auto_install_triggered': True, 'install_result': {'success': F\", success=True, thinking=\"STEP 1-TASK ANALYSIS: The task requires generating an image of a cat in a garden. This is an image generation task.\\nSTEP 2-CAPABILITY CHECK: I currently only have the 'mcp-search-tool' which is for installing tools, not for generating images directly. Therefore, I lack the necessary image generation capability.\\nSTEP 3-DECISION: According to the 'Intelligent Decision Framework' for image generation tasks, if no image tools are available and it's the first analysis attempt (analyze_count = 0), I should use 'mcp-search-tool.analyze_tool_needs' to identify the required tools.\\nSTEP 4-EXECUTION PLAN: I will call the 'mcp-search-tool' with the 'analyze_tool_needs' action, providing the task description.\", execution_code='{\"action\": \"analyze_tool_needs\", \"tool_id\": \"mcp-search-tool\", \"parameters\": {\"task_description\": \"生成一张可爱的小猫咪在绿色花园中玩耍的图片，小猫是橙色的毛发，有蓝色的眼睛，背景是绿色的草地和花朵\"}}', error_type=None, error_message=None, timestamp=1749596828.7501106, duration=30.96740460395813)"
+    ],
+    "final_result": "任务执行总结：\n\n**任务目标:** 生成一张可爱的小猫咪在绿色花园中玩耍的图片，小猫为橙色毛发、蓝色眼睛，背景为绿色的草地和花朵。\n\n**执行步骤:**  首先，使用工具 `mcp-search-tool/analyze_tool_needs` 分析了完成任务所需的工具。分析结果显示缺少必要的图像生成工具 (`has_sufficient_tools`: False)。系统自动尝试安装所需工具 (`auto_install_triggered`: True)，但安装失败 (`install_result`: {'success': False})。\n\n**结果:**  由于图像生成工具安装失败，任务未能成功生成图片。  后续需要解决工具安装问题，才能继续执行图像生成任务。",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 39.40265941619873,
+    "metadata": {
+      "confidence": 0.85,
+      "original_task_id": "0174fcc8-08e2-4b3a-b613-68c256ecdc08",
+      "available_tools": [
+        "mcp-search-tool"
+      ],
+      "tool_library_stats": {
+        "registry": {
+          "total_tools": 1,
+          "function_tools": 1,
+          "mcp_servers": 0,
+          "available_tags": [
+            "essential",
+            "tool-installer",
+            "dynamic"
+          ],
+          "tools_by_type": {
+            "function": 1,
+            "mcp_server": 0
+          }
+        },
+        "dispatcher": {
+          "active_adapters": 0,
+          "adapter_types": {},
+          "cache_ttl": 0
+        },
+        "initialized": true,
+        "dynamic_mcp": {
+          "installed_servers_count": 0,
+          "installed_servers": {},
+          "health_status": {},
+          "storage_stats": {
+            "server_count": 1,
+            "install_count": 1,
+            "last_update": "1749568839",
+            "redis_connected": true
+          }
+        }
+      }
+    },
+    "created_at": 1749596839.987035
+  },
+  {
+    "task_name": "acf469bd-ff6e-40a2-892e-ef496e6ca7a5",
+    "task_id": "b49770fb-27b1-4d7f-8d81-4476da5a465a",
+    "task_description": "请为我生成一张图片：一只橙色小猫在绿色花园里快乐地玩耍，小猫有美丽的蓝色眼睛，周围是绿色的草地和鲜艳的花朵",
+    "runtime_id": "enhanced-reasoning-6917cae0-7023-428d-8cd4-356382adc8c7",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'task_description': '生成一张图片：一只橙色小猫在绿色花园里快乐地玩耍，小猫有美丽的蓝色眼睛，周围是绿色的草地和鲜艳的花朵'}, observation=\"Tool 'mcp-search-tool/analyze_tool_needs' executed successfully. Data received: {'has_sufficient_tools': False, 'overall_assessment': '需要图像生成工具', 'recommended_action': 'auto_install_completed', 'tool_requirements': [{'needed': True, 'description': '能够根据文本描述（prompt）生成高质量图像的工具，即文本到\", success=True, thinking=\"STEP 1-TASK ANALYSIS: The task requires generating an image of an orange cat in a green garden with specific details (blue eyes, green grass, vibrant flowers).\\nSTEP 2-CAPABILITY CHECK: I currently only have the 'mcp-search-tool', which is designed for searching and installing new tools, not for direct image generation. Therefore, I lack the necessary image generation capability.\\nSTEP 3-DECISION: According to the 'Intelligent Decision Framework' for image generation tasks, if no image tools are available, the first step is to use 'mcp-search-tool.analyze_tool_needs' to identify the required tool. This is the initial attempt to address the missing capability.\\nSTEP 4-EXECUTION PLAN: I will call the 'mcp-search-tool' with the 'analyze_tool_needs' action, providing the full task description.\", execution_code='{\"action\": \"analyze_tool_needs\", \"tool_id\": \"mcp-search-tool\", \"parameters\": {\"task_description\": \"生成一张图片：一只橙色小猫在绿色花园里快乐地玩耍，小猫有美丽的蓝色眼睛，周围是绿色的草地和鲜艳的花朵\"}}', error_type=None, error_message=None, timestamp=1749597065.9369438, duration=34.02532696723938)"
+    ],
+    "final_result": "好的，根据您提供的描述和步骤，以下是任务执行总结：\n\n---\n\n**任务执行总结**\n\n**任务目标：**\n根据文本描述生成一张图片：一只橙色小猫在绿色花园里快乐地玩耍，小猫有美丽的蓝色眼睛，周围是绿色的草地和鲜艳的花朵。\n\n**执行过程：**\n1.  系统首先调用了 `mcp-search-tool/analyze_tool_needs` 工具对任务需求进行了分析。\n2.  分析结果显示，当前环境缺少执行此任务所需的关键工具，即一个能够根据文本描述（prompt）生成高质量图像的工具（文本到图像生成工具）。\n3.  系统已识别到此工具需求，并推荐执行自动安装或准备操作 (`auto_install_completed`)。\n\n**关键发现：**\n*   任务的成功执行依赖于一个图像生成工具。\n*   当前环境尚未具备该工具。\n\n**当前状态与最终输出：**\n*   图像生成工具的识别和准备工作已启动。\n*   由于核心图像生成工具尚未就绪或安装完成，图片生成任务尚未实际执行，因此最终输出为空。任务目前处于工具准备阶段，等待图像生成工具可用后才能继续。",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 40.66384792327881,
+    "metadata": {
+      "confidence": 0.85,
+      "original_task_id": "acf469bd-ff6e-40a2-892e-ef496e6ca7a5",
+      "available_tools": [
+        "mcp-search-tool"
+      ],
+      "tool_library_stats": {
+        "registry": {
+          "total_tools": 2,
+          "function_tools": 1,
+          "mcp_servers": 1,
+          "available_tags": [
+            "essential",
+            "tool-installer",
+            "dynamic",
+            "AI",
+            "Image Generation",
+            "Text-to-Image",
+            "Customization",
+            "auto-installed"
+          ],
+          "tools_by_type": {
+            "function": 1,
+            "mcp_server": 1
+          }
+        },
+        "dispatcher": {
+          "active_adapters": 0,
+          "adapter_types": {},
+          "cache_ttl": 0
+        },
+        "initialized": true,
+        "dynamic_mcp": {
+          "installed_servers_count": 0,
+          "installed_servers": {},
+          "health_status": {},
+          "storage_stats": {
+            "server_count": 2,
+            "install_count": 2,
+            "last_update": "1749597065",
+            "redis_connected": true
+          }
+        }
+      }
+    },
+    "created_at": 1749597072.7898388
+  },
+  {
+    "task_name": "a8fa6742-cb8e-4deb-8f1a-7d5372ec5d23",
+    "task_id": "e39c1ff0-4666-4625-a8c4-077ca771aea0",
+    "task_description": "现在我已经有了AI Image Forge工具，请直接使用它生成一张图片：橙色小猫在绿色花园里玩耍，小猫有蓝色眼睛",
+    "runtime_id": "enhanced-reasoning-6917cae0-7023-428d-8cd4-356382adc8c7",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'prompt': '橙色小猫在绿色花园里玩耍，小猫有蓝色眼睛'}, observation=\"Tool 'mcp-simple-image-mcp-latest-1749597062/Generate images from textual descriptions' failed. Error: Toolscore error: Tool with ID mcp-simple-image-mcp-latest-1749597062 not found in local registry or MCP client\", success=False, thinking=\"STEP 1-TASK ANALYSIS: The user wants to generate an image based on a specific description: '橙色小猫在绿色花园里玩耍，小猫有蓝色眼睛'.\\nSTEP 2-CAPABILITY CHECK: I have the 'AI Image Forge' tool (ID: mcp-simple-image-mcp-latest-1749597062) available, which is designed for image generation from textual descriptions. This tool directly supports the task.\\nSTEP 3-DECISION: The 'AI Image Forge' tool is perfectly suited for this task. I will use its 'Generate images from textual descriptions' function.\\nSTEP 4-EXECUTION PLAN: Call the 'Generate images from textual descriptions' action of the 'AI Image Forge' tool with the provided prompt.\", execution_code='{\"action\": \"Generate images from textual descriptions\", \"tool_id\": \"mcp-simple-image-mcp-latest-1749597062\", \"parameters\": {\"prompt\": \"橙色小猫在绿色花园里玩耍，小猫有蓝色眼睛\"}}', error_type=<ErrorType.TOOL_ERROR: 'ToolError'>, error_message='Toolscore error: Tool with ID mcp-simple-image-mcp-latest-1749597062 not found in local registry or MCP client', timestamp=1749597118.1556327, duration=0.024834394454956055)"
+    ],
+    "final_result": "**任务执行总结**\n\n**任务目标：**\n使用AI Image Forge工具，根据文本描述“橙色小猫在绿色花园里玩耍，小猫有蓝色眼睛”生成一张图片。\n\n**执行状态：**\n失败\n\n**失败原因：**\n在尝试调用图片生成工具时",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 10.609421491622925,
+    "metadata": {
+      "confidence": 0.95,
+      "original_task_id": "a8fa6742-cb8e-4deb-8f1a-7d5372ec5d23",
+      "available_tools": [
+        "mcp-search-tool",
+        "mcp-simple-image-mcp-latest-1749597062"
+      ],
+      "tool_library_stats": {
+        "registry": {
+          "total_tools": 2,
+          "function_tools": 1,
+          "mcp_servers": 1,
+          "available_tags": [
+            "essential",
+            "tool-installer",
+            "dynamic",
+            "AI",
+            "Image Generation",
+            "Text-to-Image",
+            "Customization",
+            "auto-installed"
+          ],
+          "tools_by_type": {
+            "function": 1,
+            "mcp_server": 1
+          }
+        },
+        "dispatcher": {
+          "active_adapters": 0,
+          "adapter_types": {},
+          "cache_ttl": 0
+        },
+        "initialized": true,
+        "dynamic_mcp": {
+          "installed_servers_count": 0,
+          "installed_servers": {},
+          "health_status": {},
+          "storage_stats": {
+            "server_count": 2,
+            "install_count": 2,
+            "last_update": "1749597065",
+            "redis_connected": true
+          }
+        }
+      }
+    },
+    "created_at": 1749597132.792585
+  },
+  {
+    "task_name": "b75591f7-c50a-47e0-aa29-93f1bfa8eafc",
+    "task_id": "ac5a3c64-baf5-4d8b-82c7-4c69f1437967",
+    "task_description": "请为我生成一张美丽的图片：一只可爱的小猫咪在阳光明媚的花园中玩耍，要求小猫是橙色的毛发，蓝色的眼睛，周围是绿色的草地和五彩斑斓的花朵",
+    "runtime_id": "enhanced-reasoning-4589db78-e534-4fbe-8f76-1bb6bb1a1219",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'task_description': '生成一张美丽的图片：一只可爱的小猫咪在阳光明媚的花园中玩耍，要求小猫是橙色的毛发，蓝色的眼睛，周围是绿色的草地和五彩斑斓的花朵'}, observation=\"Tool 'mcp-search-tool/analyze_tool_needs' executed successfully. Data received: {'has_sufficient_tools': False, 'overall_assessment': '解析失败', 'recommended_action': 'search_for_new_tools', 'tool_requirements': [], 'auto_install_triggered': True, 'install_result': {'success': False\", success=True, thinking=\"STEP 1-TASK ANALYSIS: The user wants to generate a beautiful image of an orange cat with blue eyes in a sunny garden with green grass and colorful flowers. This is clearly an image generation task.\\nSTEP 2-CAPABILITY CHECK: I have reviewed my available tools and found only the 'mcp-search-tool', which is designed for searching and installing new tools, not for direct image generation. Therefore, I currently lack the necessary image generation capability.\\nSTEP 3-DECISION: According to the 'Intelligent Decision Framework' for image generation tasks, if no image tools are available, and it's the first attempt (analyze_count == 0), I should use 'mcp-search-tool.analyze_tool_needs'. This will help identify the specific image generation tools required.\\nSTEP 4-EXECUTION PLAN: I will call the 'mcp-search-tool' with the 'analyze_tool_needs' action, providing the full task description so it can accurately assess the tool requirements.\", execution_code='{\"action\": \"analyze_tool_needs\", \"tool_id\": \"mcp-search-tool\", \"parameters\": {\"task_description\": \"生成一张美丽的图片：一只可爱的小猫咪在阳光明媚的花园中玩耍，要求小猫是橙色的毛发，蓝色的眼睛，周围是绿色的草地和五彩斑斓的花朵\"}}', error_type=None, error_message=None, timestamp=1749597990.1726649, duration=28.936668634414673)"
+    ],
+    "final_result": "任务执行总结：\n\n**任务目标:** 生成一张图片：一只橙色毛发、蓝色眼睛的小猫在阳光明媚的花园中玩耍，周围是绿色的草地和五彩斑斓的花朵。\n\n**执行过程:**  尝试使用工具 'mcp-search-tool/analyze_tool_needs'  分析所需工具。该工具执行失败，返回“解析失败”的评估结果，并自动尝试安装所需工具，但安装失败 (install_result: {'success': False})。因此，未能生成目标图片。\n\n**结果:**  任务失败。未生成图片。\n\n**后续步骤:**  需要寻找并安装合适的图像生成工具，例如Midjourney, Stable Diffusion, Dall-E 2 等，然后重新执行图像生成任务。  需要调查 'mcp-search-tool/analyze_tool_needs' 工具失败的原因并进行修复。",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 39.48273229598999,
+    "metadata": {
+      "confidence": 0.85,
+      "original_task_id": "b75591f7-c50a-47e0-aa29-93f1bfa8eafc",
+      "available_tools": [
+        "mcp-search-tool"
+      ],
+      "tool_library_stats": {
+        "registry": {
+          "total_tools": 1,
+          "function_tools": 1,
+          "mcp_servers": 0,
+          "available_tags": [
+            "essential",
+            "tool-installer",
+            "dynamic"
+          ],
+          "tools_by_type": {
+            "function": 1,
+            "mcp_server": 0
+          }
+        },
+        "dispatcher": {
+          "active_adapters": 0,
+          "adapter_types": {},
+          "cache_ttl": 0
+        },
+        "initialized": true,
+        "dynamic_mcp": {
+          "installed_servers_count": 0,
+          "installed_servers": {},
+          "health_status": {},
+          "storage_stats": {
+            "server_count": 0,
+            "install_count": 0,
+            "last_update": null,
+            "redis_connected": true
+          }
+        }
+      }
+    },
+    "created_at": 1749598002.3478334
+  },
+  {
+    "task_name": "c2e41d18-0f8e-4d08-a7aa-38f9ce763c81",
+    "task_id": "75ae26fb-1a56-4aa1-8700-cf2a4ff0a548",
+    "task_description": "请为我生成一张美丽的图片：一只可爱的橙色小猫在阳光明媚的花园中玩耍，小猫有蓝色的眼睛，周围是绿色的草地和五彩斑斓的花朵",
+    "runtime_id": "enhanced-reasoning-f014adab-a5bd-4eba-8d21-fd409d441d77",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'task_description': '生成一张美丽的图片：一只可爱的橙色小猫在阳光明媚的花园中玩耍，小猫有蓝色的眼睛，周围是绿色的草地和五彩斑斓的花朵'}, observation=\"Tool 'mcp-search-tool/analyze_tool_needs' executed successfully. Data received: {'has_sufficient_tools': False, 'overall_assessment': '需要图像生成类型工具', 'recommended_action': 'search_for_new_tools', 'tool_requirements': [{'needed': True, 'description': '一个能够将文本描述转换为图像的工具，即文本到图像（Text-t\", success=True, thinking=\"STEP 1-TASK ANALYSIS: The user wants a beautiful image generated: a cute orange kitten with blue eyes playing in a sunny garden with green grass and colorful flowers.\\nSTEP 2-CAPABILITY CHECK: I currently only have the 'mcp-search-tool', which is designed for searching and installing new tools, not for direct image generation. Therefore, I lack the necessary image generation capability.\\nSTEP 3-DECISION: According to the 'Intelligent Decision Framework' for image generation tasks, if no image tools are available and it's the first attempt (analyze_count == 0), I should use 'mcp-search-tool.analyze_tool_needs' to identify the required tools.\\nSTEP 4-EXECUTION PLAN: I will call the 'mcp-search-tool' with the 'analyze_tool_needs' action, providing the original task description.\", execution_code='{\"action\": \"analyze_tool_needs\", \"tool_id\": \"mcp-search-tool\", \"parameters\": {\"task_description\": \"生成一张美丽的图片：一只可爱的橙色小猫在阳光明媚的花园中玩耍，小猫有蓝色的眼睛，周围是绿色的草地和五彩斑斓的花朵\"}}', error_type=None, error_message=None, timestamp=1749598269.7728455, duration=26.685406923294067)"
+    ],
+    "final_result": "任务执行总结：\n\n**任务目标:** 生成一张图片，展现一只可爱的橙色小猫在阳光明媚的花园中玩耍，小猫拥有蓝色的眼睛，周围环绕着绿色的草地和五彩斑斓的花朵。\n\n**执行步骤:**  首先，使用工具 'mcp-search-tool/analyze_tool_needs' 分析了完成任务所需的工具。分析结果表明，当前环境缺乏能够将文本描述转换为图像的工具。因此，下一步需要搜索并集成合适的文本到图像生成工具。\n\n**结果:**  由于缺少必要的图像生成工具，任务未能生成最终的图片输出。  后续步骤需要寻找并集成合适的工具（例如Stable Diffusion, Midjourney, Dall-E 2等），然后重新执行图像生成任务。  当前状态为：**任务未完成，等待工具集成。**",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 37.52796530723572,
+    "metadata": {
+      "confidence": 0.9,
+      "original_task_id": "c2e41d18-0f8e-4d08-a7aa-38f9ce763c81",
+      "available_tools": [
+        "mcp-search-tool"
+      ],
+      "tool_library_stats": {
+        "registry": {
+          "total_tools": 1,
+          "function_tools": 1,
+          "mcp_servers": 0,
+          "available_tags": [
+            "essential",
+            "tool-installer",
+            "dynamic"
+          ],
+          "tools_by_type": {
+            "function": 1,
+            "mcp_server": 0
+          }
+        },
+        "dispatcher": {
+          "active_adapters": 0,
+          "adapter_types": {},
+          "cache_ttl": 0
+        },
+        "initialized": true,
+        "dynamic_mcp": {
+          "installed_servers_count": 0,
+          "installed_servers": {},
+          "health_status": {},
+          "storage_stats": {
+            "server_count": 0,
+            "install_count": 0,
+            "last_update": null,
+            "redis_connected": true
+          }
+        }
+      }
+    },
+    "created_at": 1749598284.372056
   }
 ]

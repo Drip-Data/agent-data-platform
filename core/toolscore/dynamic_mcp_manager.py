@@ -565,7 +565,8 @@ class DynamicMCPManager:
             
             # 根据安装方法选择安装策略
             if candidate.install_method == "docker_local":
-                return await self._install_docker_local_server(candidate)
+                logger.warning(f"docker_local installation method blocked for security: {candidate.name}")
+                return await self._mock_install_server(candidate)
             elif candidate.install_method == "docker_hub":
                 return await self._install_docker_hub_server(candidate)
             elif candidate.install_method == "docker":
@@ -1636,12 +1637,13 @@ if __name__ == "__main__":
 
 要求：
 1. 生成3个不同的候选者
-2. 基于查询内容生成合理的名称和描述
-3. 不要使用具体的产品名称，而是基于功能生成通用名称
-4. install_method 应该从以下选项中选择: "mock", "docker_local", "python", "npm"
-5. 如果是图像生成相关任务，优先使用 "docker_local" 方法并设置 github_url 为 "local://simple-image-mcp:latest"
+2. 基于查询内容生成真实可用的MCP服务器候选者
+3. 推荐真实存在的开源MCP服务器，优先使用GitHub上的官方或社区项目
+4. install_method 从以下选项中选择: "docker_hub", "python", "npm", "docker"
+5. github_url 应该是真实的GitHub仓库地址，如果是Docker Hub镜像，使用 https://hub.docker.com/r/namespace/imagename 格式
 6. 返回JSON数组格式: [候选者1, 候选者2, 候选者3]
 7. 不要包含任何其他文字，只返回纯JSON
+8. 优先推荐来自 modelcontextprotocol 组织或其他知名开源项目的MCP服务器
 """
             
             llm_client = LLMClient({})
@@ -1757,9 +1759,9 @@ if __name__ == "__main__":
                     error_message=f"Container failed to start: {logs[:200]}"
                 )
             
-            # 构建端点URL（对于stdio MCP，这是容器访问点）
-            # 修复：使用stdio协议而不是docker协议，因为MCP通过容器的stdio通信
-            endpoint = f"stdio://container:{container.id}"
+            # 构建端点URL - 修复：MCP客户端需要WebSocket协议
+            # 我们的容器运行HTTP服务，需要使用WebSocket连接
+            endpoint = f"ws://localhost:{port}/mcp"
             
             logger.info(f"Successfully installed Docker Hub MCP server: {image_name}")
             
@@ -1861,9 +1863,9 @@ if __name__ == "__main__":
             except Exception as e:
                 logger.warning(f"Health check failed for {image_name}: {e}")
             
-            # 构建端点URL（对于stdio MCP，这是容器访问点）
-            # 修复：使用stdio协议而不是docker协议，因为MCP通过容器的stdio通信
-            endpoint = f"stdio://container:{container.id}"
+            # 构建端点URL - 修复：MCP客户端需要WebSocket协议
+            # 我们的容器运行HTTP服务，需要使用WebSocket连接
+            endpoint = f"ws://localhost:{port}/mcp"
             
             logger.info(f"Successfully installed local Docker MCP server: {image_name}")
             
@@ -1894,7 +1896,7 @@ if __name__ == "__main__":
         url = candidate.github_url
         
         if url.startswith("local://"):
-            # 格式: local://simple-image-mcp:latest
+            # 格式: local://image-name:tag
             return url[8:]  # 移除 "local://" 前缀
         
         # 回退到候选者名称
@@ -1908,16 +1910,12 @@ if __name__ == "__main__":
         url = candidate.github_url
         
         if "hub.docker.com/r/" in url:
-            # 格式: https://hub.docker.com/r/mcp/puppeteer
+            # 格式: https://hub.docker.com/r/namespace/imagename
             parts = url.split("/r/")
             if len(parts) > 1:
                 return parts[1].rstrip("/")
         
-        # 回退到名称映射
-        name_mapping = {
-            "Puppeteer Browser Automation": "mcp/puppeteer",
-            "SQLite Database Server": "mcp/sqlite", 
-            "Filesystem Operations": "mcp/filesystem"
-        }
-        
-        return name_mapping.get(candidate.name, f"mcp/{candidate.name.lower().replace(' ', '-')}")
+        # 不使用任何预设映射，完全依靠LLM生成的URL或通用格式
+        # 如果LLM没有提供正确的Docker Hub URL，说明候选者不可用
+        logger.warning(f"No valid Docker Hub URL found for {candidate.name}, using generic format")
+        return f"mcp/{candidate.name.lower().replace(' ', '-')}"
