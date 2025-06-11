@@ -12,6 +12,7 @@ from core.llm_client import LLMClient
 from core.metrics import EnhancedMetrics
 from core.browser_state_manager import BrowserStateManager # Import the new state manager
 from .tools import get_browser_tool, get_python_executor_tool
+from core.mcp_tool_registry import MCPToolRegistry
 
 logger = logging.getLogger(__name__)
 metrics = EnhancedMetrics(port=8003)
@@ -32,6 +33,11 @@ class ReasoningRuntime(RuntimeInterface):
         self.client = LLMClient(self.config)
         self.redis_url = os.getenv('REDIS_URL', 'redis://redis:6379')
         self.metrics = metrics
+        self.tool_registry = MCPToolRegistry()
+        try:
+            self.tool_registry.refresh()
+        except Exception as e:
+            logger.warning(f"Failed to load MCP tools: {e}")
 
     @property
     def runtime_id(self) -> str:
@@ -39,7 +45,15 @@ class ReasoningRuntime(RuntimeInterface):
 
     @property
     def capabilities(self) -> list:
-        return ['browser', 'python_executor']
+        names = ['browser', 'python_executor']
+        try:
+            dynamic = self.tool_registry.list_tool_names()
+            for n in dynamic:
+                if n not in names:
+                    names.append(n)
+        except Exception as e:
+            logger.warning(f"MCP registry unavailable: {e}")
+        return names
 
     async def health_check(self) -> bool:
         # 简单检查 LLM 服务可用性

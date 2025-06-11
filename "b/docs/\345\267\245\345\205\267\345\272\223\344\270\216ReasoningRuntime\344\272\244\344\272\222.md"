@@ -1,0 +1,17 @@
+# 工具库与 Enhanced Reasoning Runtime 交互说明
+
+本节说明 `runtimes/reasoning` 中的推理运行时如何使用工具库，以及如何通过 MCP 服务实现动态工具管理。
+
+## 交互流程
+1. **注册与刷新**：启动时 `ReasoningRuntime` 会初始化 `MCPToolRegistry` 并调用 `refresh()`，从 MCP Server 拉取可用工具列表。
+2. **能力声明**：`capabilities` 属性会返回内置工具（`browser`、`python_executor`）与从 MCP Server 获取的工具名称，并提供给 LLM 构建提示词。
+3. **工具调用**：在推理执行过程中，根据 LLM 决策选择具体工具，再由工具库中的实现（如 `browser_tool`、`python_executor_tool`）完成具体操作。
+
+## MCP 动态搜索与管理
+`core/mcp_tool_registry.py` 提供以下能力：
+- `refresh()`：从 MCP Server `/tools` 接口同步最新工具列表，默认间隔 5 分钟自动更新。
+- `list_tool_names()`：返回当前已知的工具名称。
+- `search(keyword)`：按名称或描述关键词模糊搜索工具，便于在运行时动态选取。
+- `register(tool_info)` / `remove(name)`：向 MCP Server 注册或删除工具，实现集中管理。
+
+通过该机制，可在不重启运行时的情况下实时扩展工具库。只需在 MCP Server 新增工具描述，运行时下一次刷新即可感知并向 LLM 暴露新能力。

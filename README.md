@@ -379,11 +379,12 @@ agent-data-platform/
 │   ├── 用户使用指南.md
 │   ├── AGENT_IMPROVEMENT_PLAN.md
 │   ├── BROWSER_TOOL_GUIDE.md
-│   └── 外部API配置指南.md
+│   ├── 外部API配置指南.md
+│   └── 工具库与ReasoningRuntime交互.md
 ├── output/                # 输出目录
 │   └── trajectories/      # 任务轨迹
 ├── docker/                # Docker文件
-│   └── reasoning.Dockerfile.fixed
+│   └── reasoning.Dockerfile
 ├── docker-compose.yml     # 完整服务编排
 ├── docker-compose.minimal.yml  # 最小配置
 ├── Dockerfile            # 主服务镜像
