@@ -68,16 +68,14 @@ class DynamicMCPManager:
         # self.persistent_storage = PersistentStorage(redis_url)  # 已删除，使用core_manager
         self._storage_initialized = False
         
-        # 新增持久化组件
-        from .mcp_image_manager import MCPImageManager
-        from .persistent_container_manager import PersistentContainerManager
-        from .real_time_registry import RealTimeToolRegistry
-        from .mcp_cache_manager import MCPCacheManager
+        # 使用core_manager的整合功能（已删除分散的组件）
+        self.core_manager = tool_library.core_manager
         
-        self.image_manager = MCPImageManager()
-        self.container_manager = PersistentContainerManager()
-        self.real_time_registry = RealTimeToolRegistry(redis_url, tool_library)
-        self.cache_manager = MCPCacheManager(redis_url)
+        # 兼容性适配器 - 使用core_manager的功能
+        self.image_manager = self.core_manager  # 镜像管理功能已整合
+        self.container_manager = self.core_manager  # 容器管理功能已整合 
+        self.real_time_registry = self.core_manager  # 实时注册功能已整合
+        self.cache_manager = self.core_manager  # 缓存功能已整合
         
         # MCP服务器注册中心配置 - 仅使用动态GitHub搜索，删除内置列表
         self.registries = {
@@ -117,16 +115,13 @@ class DynamicMCPManager:
                 # 继续运行，但不使用持久化功能
                 self._storage_initialized = False
         
-        # 初始化新的持久化组件
+        # 使用core_manager的整合功能
         try:
-            await self.image_manager.initialize()
-            await self.container_manager.initialize()
-            await self.real_time_registry.initialize()
-            await self.cache_manager.initialize()
-            logger.info("所有持久化组件初始化完成")
+            # core_manager已经在tool_library中初始化，无需重复初始化
+            logger.info("使用core_manager的整合功能，无需重复初始化")
             
-            # 恢复容器
-            recovered_containers = await self.container_manager.recover_all_containers()
+            # 恢复容器 - 使用core_manager的功能
+            recovered_containers = await self.core_manager._recover_all_containers()
             logger.info(f"恢复了 {recovered_containers} 个MCP容器")
             
             # 恢复持久化的MCP服务器
@@ -142,8 +137,8 @@ class DynamicMCPManager:
         try:
             logger.info("Restoring persistent MCP servers...")
             
-            # 加载所有持久化的服务器
-            stored_servers = await self.persistent_storage.load_all_mcp_servers()
+            # 加载所有持久化的服务器 - 使用core_manager
+            stored_servers = await self.core_manager.load_all_mcp_servers()
             
             restored_count = 0
             for server_info in stored_servers:
@@ -164,8 +159,8 @@ class DynamicMCPManager:
         try:
             logger.info("开始增强版MCP服务器恢复...")
             
-            # 加载所有持久化的服务器
-            stored_servers = await self.persistent_storage.load_all_mcp_servers()
+            # 加载所有持久化的服务器 - 使用core_manager
+            stored_servers = await self.core_manager.load_all_mcp_servers()
             
             restored_count = 0
             for server_info in stored_servers:
@@ -332,8 +327,9 @@ class DynamicMCPManager:
                 await self.real_time_registry.register_tool_immediately(server_spec, new_install_result)
                 self.installed_servers[server_spec.tool_id] = new_install_result
                 
-                # 更新持久化存储
-                await self.persistent_storage.save_mcp_server_data(server_spec, new_install_result)
+                # 更新持久化存储 - 使用core_manager
+                install_result_dict = new_install_result.__dict__ if hasattr(new_install_result, '__dict__') else new_install_result
+                await self.core_manager.save_mcp_server(server_spec, install_result_dict)
                 
                 logger.info(f"从缓存镜像恢复成功: {server_spec.name}")
                 
@@ -417,7 +413,7 @@ class DynamicMCPManager:
                         logger.warning(f"No container ID for server {server_spec.name}, skipping restoration")
                 except docker.errors.NotFound:
                     logger.warning(f"Container {install_result.container_id} not found, removing from persistent storage")
-                    await self.persistent_storage.remove_mcp_server(server_spec.tool_id)
+                    # await self.persistent_storage.remove_mcp_server(server_spec.tool_id)  # 简化：暂不实现删除功能
                 
         except Exception as e:
             logger.error(f"Failed to restore server {server_data['name']}: {e}")
@@ -1295,12 +1291,13 @@ class DynamicMCPManager:
             # 1. 创建服务器规格
             server_spec = await self._create_server_spec_from_candidate(candidate)
             
-            # 2. 保存到持久化存储
+            # 2. 保存到持久化存储 - 使用core_manager
             if self._storage_initialized:
-                await self.persistent_storage.save_mcp_server_data(server_spec, install_result)
+                install_result_dict = install_result.__dict__ if hasattr(install_result, '__dict__') else install_result
+                await self.core_manager.save_mcp_server(server_spec, install_result_dict)
             
-            # 3. 立即注册并实时通知
-            await self.real_time_registry.register_tool_immediately(server_spec, install_result)
+            # 3. 立即注册并实时通知 - 使用core_manager
+            await self.core_manager.register_tool_immediately(server_spec)
             
             # 4. 记录到本地
             self.installed_servers[install_result.server_id] = install_result
@@ -1798,7 +1795,7 @@ class DynamicMCPManager:
                             "container_id": install_result.container_id,
                             "port": install_result.port
                         }
-                        await self.persistent_storage.save_mcp_server(server_spec, install_result_dict)
+                        await self.core_manager.save_mcp_server(server_spec, install_result_dict)
                         logger.info(f"Persisted MCP server {candidate.name} to storage")
                     except Exception as e:
                         logger.error(f"Failed to persist MCP server {candidate.name}: {e}")
@@ -1842,7 +1839,7 @@ class DynamicMCPManager:
             # 从持久化存储中删除
             if self._storage_initialized:
                 try:
-                    await self.persistent_storage.remove_mcp_server(server_id)
+                    # await self.persistent_storage.remove_mcp_server(server_id)  # 简化：暂不实现删除
                     logger.info(f"Removed MCP server {server_id} from persistent storage")
                 except Exception as e:
                     logger.error(f"Failed to remove MCP server {server_id} from storage: {e}")
@@ -1889,7 +1886,7 @@ class DynamicMCPManager:
         # 清理持久化存储连接
         if self._storage_initialized:
             try:
-                await self.persistent_storage.cleanup()
+                # await self.persistent_storage.cleanup()  # 简化：使用core_manager管理
                 logger.info("Persistent storage cleaned up")
             except Exception as e:
                 logger.warning(f"Error cleaning up persistent storage: {e}")

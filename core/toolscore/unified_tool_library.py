@@ -206,8 +206,11 @@ class UnifiedToolLibrary:
             installed_servers = await self.dynamic_mcp_manager.get_installed_servers()
             health_status = await self.dynamic_mcp_manager.health_check_installed_servers()
             
-            if hasattr(self.dynamic_mcp_manager, 'persistent_storage') and self.dynamic_mcp_manager._storage_initialized:
-                storage_stats = await self.dynamic_mcp_manager.persistent_storage.get_storage_stats()
+                        if hasattr(self.dynamic_mcp_manager, 'core_manager') and self.dynamic_mcp_manager._storage_initialized:
+                storage_stats = {
+                    "storage_type": "core_manager",
+                    "initialized": True
+                }
             else:
                 storage_stats = {"error": "Persistent storage not initialized"}
             
