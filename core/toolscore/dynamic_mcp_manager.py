@@ -226,7 +226,7 @@ class DynamicMCPManager:
                 logger.info(f"⚠️ 使用基础方法恢复了 {server_data['name']}")
             except Exception as fallback_error:
                 logger.error(f"基础恢复方法也失败: {fallback_error}")
-                raise
+            raise
     
     async def _rebuild_server_spec(self, server_data: Dict[str, Any]) -> MCPServerSpec:
         """重建服务器规格"""
