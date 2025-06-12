@@ -92,14 +92,20 @@ services:
       - LOG_LEVEL=INFO
       - DOCKER_NETWORK=agent-data-platform_agent_network
       - DOCKER_PORT_RANGE=8100-8200
+      - MCP_IMAGE_CACHE_PATH=/app/mcp_images
+      - MCP_CONTAINER_DATA_PATH=/app/mcp_containers
+      - MCP_AUTO_RECOVERY=true
     ports:
       - "8080:8080" # MCP WebSocket server port
       - "8090:8090" # HTTP monitoring API port
+      - "8091:8091" # WebSocket实时通知端口
     depends_on:
       redis:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # 允许访问Docker socket
+      - mcp_images:/app/mcp_images              # MCP镜像缓存
+      - mcp_containers:/app/mcp_containers      # MCP容器数据
     networks:
       - agent_network
     dns: 8.8.8.8 # Add this line
@@ -268,6 +274,7 @@ services:
         condition: service_healthy
     volumes:
       - ./output:/app/output
+      - ./tests:/app/tests # 挂载测试目录
       - /var/run/docker.sock:/var/run/docker.sock  # 允许访问Docker socket
     networks:
       - agent_network
@@ -412,6 +419,8 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
+  mcp_images:      # MCP镜像缓存
+  mcp_containers:  # MCP容器持久化数据
 
 networks:
   agent_network:

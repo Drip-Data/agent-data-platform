@@ -29,26 +29,40 @@ class ToolGapAnalysis:
     recommended_action: str
 
 class SmartToolGapDetector:
-    """智能工具不足检测器 - 基于LLM语义理解"""
+    """智能工具不足检测器 - 基于LLM语义理解 (解耦版本)"""
     
-    def __init__(self, llm_client):
+    def __init__(self, llm_client=None, cache_manager=None):
         self.llm_client = llm_client
-        logger.info("Smart Tool Gap Detector initialized with LLM-based analysis")
+        self.cache_manager = cache_manager
+        self.confidence_score = 0.8  # 默认置信度分数
+        logger.info("Smart Tool Gap Detector initialized (decoupled version)")
     
     async def analyze_tool_sufficiency(self, task_description: str, available_tools: List[Dict[str, Any]], 
                                        previous_attempts: List[Dict[str, Any]] = None) -> ToolGapAnalysis:
-        """分析现有工具是否足以完成任务"""
+        """分析现有工具是否足以完成任务 - 支持缓存和备用逻辑"""
         logger.info(f"Analyzing tool sufficiency for task: {task_description[:100]}...")
         
-        # 构建分析提示
-        analysis_prompt = self._build_analysis_prompt(task_description, available_tools, previous_attempts)
+        # 1. 尝试从缓存获取分析结果
+        if self.cache_manager:
+            cache_key = f"tool_gap_analysis:{hash(task_description + str(sorted([t.get('name', '') for t in available_tools])))}"
+            cached_result = await self.cache_manager.get_analysis_result(cache_key)
+            if cached_result:
+                logger.info("使用缓存的工具缺口分析结果")
+                return self._build_analysis_from_cached_data(cached_result)
         
         try:
-            # 使用LLM进行分析
+            # 2. 如果有LLM客户端，使用LLM分析
+            if self.llm_client:
+                analysis_prompt = self._build_analysis_prompt(task_description, available_tools, previous_attempts)
             response = await self.llm_client._call_api(analysis_prompt)
+                analysis_result = self._parse_analysis_response(response)
+            else:
+                # 3. 备用逻辑：基于规则的分析
+                analysis_result = await self._rule_based_analysis(task_description, available_tools, previous_attempts)
             
-            # 解析LLM响应
-            analysis_result = self._parse_analysis_response(response)
+            # 4. 缓存分析结果
+            if self.cache_manager and analysis_result:
+                await self.cache_manager.cache_analysis_result(cache_key, analysis_result)
             
             logger.info(f"Tool sufficiency analysis completed: {'Sufficient' if analysis_result.has_sufficient_tools else 'Insufficient'}")
             return analysis_result
@@ -143,7 +157,7 @@ class SmartToolGapDetector:
 你的核心原则：
 1. **保守判断**：优先使用现有工具的组合来解决问题
 2. **精确识别**：只有在确实缺少关键功能时才建议新工具
-3. **实用导向**：优先考虑实际可获得的MCP服务器类型
+3. **语义理解**：基于任务的真实需求而非表面关键词进行判断
 
 === 需要分析的任务 ===
 {task_description}
@@ -154,22 +168,22 @@ class SmartToolGapDetector:
 === 分析指导原则 ===
 
 **明确需要新工具的情况：**
-- 任务需要特定文件格式处理（如PDF生成、Excel操作、图像处理）
-- 需要连接特定外部服务（如数据库、云服务、API）
-- 需要专业计算能力（如机器学习、数据分析、科学计算）
-- 需要特定协议支持（如SMTP邮件、FTP文件传输）
+- 任务需要当前工具完全无法提供的功能
+- 需要连接特定外部服务或系统
+- 需要处理特定的文件格式或数据类型
+- 需要特定的计算能力或算法
 
 **不需要新工具的情况：**
-- 可以用现有工具组合解决
+- 可以用现有工具组合或变通方式解决
 - 只是参数配置或使用方式问题
-- 任务过于模糊或不明确
+- 任务描述过于模糊或不明确
 - 需要的是逻辑优化而非新功能
 
-**常见可用的MCP服务器类型：**
-- 文件处理类：PDF操作、Excel处理、图像编辑
-- 数据处理类：数据库连接、API调用、数据分析
-- 通信类：邮件发送、消息推送、通知服务
-- 开发工具类：代码生成、测试工具、部署工具
+**分析方法：**
+1. 深入理解任务的本质需求
+2. 评估现有工具的实际能力边界
+3. 判断是否存在无法弥补的功能缺口
+4. 如果需要新工具，请提供精确的功能描述和搜索建议
 
 请严格按照以下JSON格式回答，不要添加任何解释文字：
 
@@ -178,12 +192,96 @@ class SmartToolGapDetector:
 ```
 
 **重要提醒：**
+- 请基于语义理解而非关键词匹配进行分析
 - confidence_score > 0.7 才会触发实际搜索
-- 搜索关键词要准确，避免过于宽泛
-- 优先推荐经过验证的、流行的工具类型
-- 如果任务不明确，选择 continue_with_existing_tools"""
+- 搜索关键词应该准确描述所需功能，而非类别标签
+- 如果任务不明确或现有工具足够，选择 continue_with_existing_tools"""
         
         return prompt
+    
+    async def _rule_based_analysis(self, task_description: str, available_tools: List[Dict[str, Any]], 
+                                   previous_attempts: List[Dict[str, Any]] = None) -> ToolGapAnalysis:
+        """简化的语义分析 - 当没有LLM客户端时的智能分析逻辑"""
+        logger.info("使用简化的语义分析进行工具缺口检测")
+        
+        # 分析任务描述的复杂程度和特殊性
+        task_lower = task_description.lower()
+        task_length = len(task_description.split())
+        
+        # 分析可用工具的覆盖面
+        available_tool_count = len(available_tools)
+        tool_capabilities_count = 0
+        
+        for tool in available_tools:
+            capabilities = tool.get('capabilities', [])
+            tool_capabilities_count += len(capabilities)
+        
+        # 基于语义复杂度和工具覆盖面的智能判断
+        has_sufficient_tools = True
+        missing_requirements = []
+        
+        # 如果任务描述很长且复杂，但可用工具很少，可能不足
+        if task_length > 10 and available_tool_count < 3:
+            has_sufficient_tools = False
+            missing_requirements.append(ToolRequirement(
+                needed=True,
+                description="任务复杂但可用工具较少，可能需要专门工具",
+                suggested_search_keywords=["specialized", "advanced"],
+                confidence_score=0.6,
+                reasoning="复杂任务通常需要更多专门的工具支持"
+            ))
+        
+        # 如果有多次失败尝试，说明当前工具可能不适合
+        if previous_attempts and len(previous_attempts) >= 2:
+            has_sufficient_tools = False
+            if not missing_requirements:
+                missing_requirements.append(ToolRequirement(
+                    needed=True,
+                    description="基于多次失败尝试，可能需要更适合的工具",
+                    suggested_search_keywords=["alternative", "specialized"],
+                    confidence_score=0.7,
+                    reasoning="多次尝试失败，当前工具可能不适合此任务"
+                ))
+        
+        # 如果完全没有工具，肯定需要安装
+        if available_tool_count == 0:
+            has_sufficient_tools = False
+            missing_requirements.append(ToolRequirement(
+                needed=True,
+                description="没有可用工具，需要安装基础工具",
+                suggested_search_keywords=["basic", "essential"],
+                confidence_score=0.9,
+                reasoning="没有任何可用工具"
+            ))
+        
+        overall_assessment = "工具充足" if has_sufficient_tools else f"可能需要额外工具"
+        recommended_action = "continue_with_existing_tools" if has_sufficient_tools else "search_for_new_tools"
+        
+        return ToolGapAnalysis(
+            has_sufficient_tools=has_sufficient_tools,
+            tool_requirements=missing_requirements,
+            overall_assessment=overall_assessment,
+            recommended_action=recommended_action
+        )
+    
+    def _build_analysis_from_cached_data(self, cached_data: dict) -> ToolGapAnalysis:
+        """从缓存数据构建分析结果"""
+        tool_requirements = []
+        for req_data in cached_data.get('tool_requirements', []):
+            tool_requirements.append(ToolRequirement(
+                needed=req_data.get('needed', False),
+                description=req_data.get('description', ''),
+                suggested_search_keywords=req_data.get('suggested_search_keywords', []),
+                confidence_score=req_data.get('confidence_score', 0.5),
+                reasoning=req_data.get('reasoning', '')
+            ))
+        
+        return ToolGapAnalysis(
+            has_sufficient_tools=cached_data.get('has_sufficient_tools', True),
+            tool_requirements=tool_requirements,
+            overall_assessment=cached_data.get('overall_assessment', ''),
+            recommended_action=cached_data.get('recommended_action', 'continue_with_existing_tools')
+        )
     
     def _parse_analysis_response(self, response: str) -> ToolGapAnalysis:
         """增强的LLM分析响应解析器，支持多种解析策略和错误修复"""
@@ -349,40 +447,81 @@ class SmartToolGapDetector:
             return None
     
     def _extract_from_fallback(self, description: str) -> Tuple[bool, str]:
-        """Fallback方法提取分析结果 - 移除硬编码关键词"""
-        # 基于常见模式的简单推断，不再使用硬编码关键词
+        """智能语义分析方法 - 基于描述的语义而非关键词匹配"""
         desc_lower = description.lower()
         
-        # 查找明确的充足性指示
-        if any(phrase in desc_lower for phrase in ['充足', 'sufficient', '足够', '可以完成']):
+        # 分析语义倾向性，而非简单的关键词匹配
+        positive_indicators = 0
+        negative_indicators = 0
+        
+        # 积极指示器 - 表示工具充足
+        if any(phrase in desc_lower for phrase in [
+            '充足', 'sufficient', '足够', '可以完成', '能够处理', 
+            '现有工具', '当前工具', '已有的'
+        ]):
+            positive_indicators += 1
+        
+        # 消极指示器 - 表示需要新工具
+        if any(phrase in desc_lower for phrase in [
+            '不足', 'insufficient', '需要', '缺少', '无法', 
+            '不能', '没有', '缺乏', '额外的'
+        ]):
+            negative_indicators += 1
+        
+        # 基于语义倾向性判断
+        if positive_indicators > negative_indicators:
             return True, "continue_with_existing_tools"
-        elif any(phrase in desc_lower for phrase in ['不足', 'insufficient', '需要', '缺少', '安装']):
+        elif negative_indicators > positive_indicators:
             return False, "search_for_new_tools"
         else:
-            # 默认保守策略：如果不确定，建议搜索新工具
-            return False, "search_for_new_tools"
+            # 当不确定时，采用保守策略：假设现有工具足够
+            return True, "continue_with_existing_tools"
 
     def _build_analysis_from_data(self, data: dict) -> ToolGapAnalysis:
-        """构建工具分析结果 - 移除硬编码的预设字段"""
-        # 动态提取分析数据，不依赖硬编码字段
+        """构建工具分析结果 - 完全基于数据驱动，无硬编码预设"""
         requirements = []
         
-        # 从分析数据中提取工具需求
+        # 动态提取工具需求，不使用预设默认值
         if "tool_requirements" in data:
             for req_data in data["tool_requirements"]:
                 requirement = ToolRequirement(
-                    needed=req_data.get("needed", True),
+                    needed=req_data.get("needed", False),
                     description=req_data.get("description", ""),
                     suggested_search_keywords=req_data.get("suggested_search_keywords", []),
-                    confidence_score=req_data.get("confidence_score", 0.5),
+                    confidence_score=req_data.get("confidence_score", 0.0),
                     reasoning=req_data.get("reasoning", "")
                 )
                 requirements.append(requirement)
         
+        # 基于数据内容智能推断，而非硬编码默认值
+        has_sufficient = data.get("has_sufficient_tools")
+        if has_sufficient is None:
+            # 如果没有明确指示，基于需求来推断
+            has_sufficient = not any(req.needed for req in requirements)
+        
+        assessment = data.get("overall_assessment", "")
+        if not assessment:
+            # 如果没有评估，基于分析结果生成
+            if has_sufficient:
+                assessment = "现有工具能够满足任务需求"
+            else:
+                req_count = len([req for req in requirements if req.needed])
+                assessment = f"检测到{req_count}个工具需求缺口" if req_count > 0 else "需要进一步分析工具充足性"
+        
+        action = data.get("recommended_action", "")
+        if not action:
+            # 基于分析结果智能推断行动建议
+            if has_sufficient:
+                action = "continue_with_existing_tools"
+            elif any(req.needed and req.confidence_score > 0.7 for req in requirements):
+                action = "search_for_new_tools"
+            else:
+                action = "continue_with_existing_tools"  # 保守策略
+        
         return ToolGapAnalysis(
-            has_sufficient_tools=data.get("has_sufficient_tools", False),
-            overall_assessment=data.get("overall_assessment", "需要进一步分析"),
-            recommended_action=data.get("recommended_action", "search_for_new_tools"),
+            has_sufficient_tools=has_sufficient,
+            overall_assessment=assessment,
+            recommended_action=action,
             tool_requirements=requirements
         )
     

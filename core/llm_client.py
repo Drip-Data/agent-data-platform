@@ -160,6 +160,23 @@ class LLMClient:
             logger.error(f"Failed to check completion: {e}")
             return {"completed": False, "confidence": 0.0, "reason": f"Error: {e}"}
 
+    async def analyze_task_requirements(self, task_description: str) -> Dict[str, Any]:
+        """分析任务描述，总结需要的功能和能力 - 帮助LLM更好地在mcp_tools.json中找到合适工具"""
+        prompt = self._build_task_analysis_prompt(task_description)
+        
+        try:
+            response = await self._call_api(prompt)
+            return self._parse_task_requirements_response(response)
+        except Exception as e:
+            logger.error(f"Failed to analyze task requirements: {e}")
+            return {
+                "task_type": "unknown",
+                "required_capabilities": [],
+                "tools_needed": [],
+                "reasoning": f"分析失败: {str(e)}",
+                "confidence": 0.0
+            }
+
     async def _call_api(self, prompt: str) -> str:
         """调用相应的API"""
         if self.provider == LLMProvider.VLLM:
@@ -841,3 +858,151 @@ class LLMClient:
         """解析完成检查响应"""
         # 这里需要实现解析完成检查响应的逻辑
         return {"completed": True, "confidence": 1.0}
+
+    def _build_task_analysis_prompt(self, task_description: str) -> str:
+        """构建任务需求分析提示词"""
+        prompt = f"""你是一个专业的任务分析助手。请仔细分析以下任务描述，总结完成这个任务需要什么样的功能和能力。
+
+任务描述: {task_description}
+
+请从以下维度分析这个任务：
+
+1. **任务类型分类** (task_type):
+   - reasoning: 需要复杂推理、多工具协同、分析对比
+   - web: 主要涉及网页操作、信息搜索、网站导航  
+   - code: 主要是编程、算法、计算、数据处理
+   - image: 图像生成、图像处理、视觉相关
+   - file: 文件操作、文档处理、格式转换
+   - data: 数据分析、统计、可视化
+   - communication: 通信、发送消息、API调用
+
+2. **核心能力需求** (required_capabilities):
+   分析任务需要哪些具体的技术能力，例如：
+   - image_generation (图像生成)
+   - web_scraping (网页抓取)
+   - data_analysis (数据分析)
+   - file_processing (文件处理)
+   - code_execution (代码执行)
+   - search (搜索功能)
+   - browser_automation (浏览器自动化)
+   - database_access (数据库访问)
+   - api_calls (API调用)
+   - text_processing (文本处理)
+
+3. **具体工具类型** (tools_needed):
+   基于能力需求，推测可能需要的工具类型，例如：
+   - 图像生成工具 (如DALL-E, Stable Diffusion相关)
+   - 浏览器操作工具 (如Selenium, Playwright相关)
+   - 数据分析工具 (如pandas, numpy相关)
+   - 文件处理工具 (如PDF, Excel处理相关)
+   - API调用工具 (如HTTP客户端相关)
+
+4. **关键特征识别** (key_features):
+   识别任务描述中的关键特征，帮助匹配工具
+
+请严格按照以下JSON格式返回分析结果，不要包含任何其他文字：
+
+{{
+  "task_type": "...",
+  "required_capabilities": ["capability1", "capability2", "..."],
+  "tools_needed": ["tool_type1", "tool_type2", "..."],
+  "key_features": ["feature1", "feature2", "..."],
+  "reasoning": "详细的分析推理过程，说明为什么需要这些能力和工具",
+  "confidence": 0.9
+}}
+
+要求：
+- 分析要准确且具体
+- 不要猜测不存在的需求
+- 重点关注任务的核心功能需求
+- 确保JSON格式正确"""
+        
+        return prompt
+
+    def _parse_task_requirements_response(self, response: str) -> Dict[str, Any]:
+        """解析任务需求分析响应"""
+        try:
+            import re
+            import json
+            
+            # 提取JSON
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+                
+                # 确保所有必需字段存在，设置默认值
+                result = {
+                    "task_type": parsed.get("task_type", "unknown"),
+                    "required_capabilities": parsed.get("required_capabilities", []),
+                    "tools_needed": parsed.get("tools_needed", []),
+                    "key_features": parsed.get("key_features", []),
+                    "reasoning": parsed.get("reasoning", "无分析过程"),
+                    "confidence": float(parsed.get("confidence", 0.7))
+                }
+                
+                logger.info(f"✅ 任务需求分析完成:")
+                logger.info(f"   任务类型: {result['task_type']}")
+                logger.info(f"   所需能力: {result['required_capabilities']}")
+                logger.info(f"   工具类型: {result['tools_needed']}")
+                logger.info(f"   置信度: {result['confidence']}")
+                
+                return result
+            else:
+                logger.error("无法从响应中提取有效的JSON格式")
+                return self._create_fallback_requirements_analysis(response)
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON解析失败: {e}")
+            return self._create_fallback_requirements_analysis(response)
+        except Exception as e:
+            logger.error(f"解析任务需求响应时出错: {e}")
+            return self._create_fallback_requirements_analysis(response)
+
+    def _create_fallback_requirements_analysis(self, response: str) -> Dict[str, Any]:
+        """创建备用的需求分析结果"""
+        # 基于响应内容的简单关键词分析
+        response_lower = response.lower()
+        
+        capabilities = []
+        tools_needed = []
+        task_type = "unknown"
+        
+        # 简单的关键词匹配逻辑
+        if any(word in response_lower for word in ['图', '图片', '图像', 'image', 'picture', '生成']):
+            capabilities.append("image_generation")
+            tools_needed.append("图像生成工具")
+            task_type = "image"
+        
+        if any(word in response_lower for word in ['网页', 'web', 'browser', '浏览', '搜索']):
+            capabilities.append("web_scraping")
+            capabilities.append("browser_automation")
+            tools_needed.append("浏览器操作工具")
+            if task_type == "unknown":
+                task_type = "web"
+        
+        if any(word in response_lower for word in ['代码', 'code', 'python', '编程', '算法']):
+            capabilities.append("code_execution")
+            tools_needed.append("代码执行工具")
+            if task_type == "unknown":
+                task_type = "code"
+        
+        if any(word in response_lower for word in ['数据', 'data', '分析', 'analysis']):
+            capabilities.append("data_analysis")
+            tools_needed.append("数据分析工具")
+            if task_type == "unknown":
+                task_type = "data"
+        
+        if any(word in response_lower for word in ['文件', 'file', '文档', 'document']):
+            capabilities.append("file_processing")
+            tools_needed.append("文件处理工具")
+            if task_type == "unknown":
+                task_type = "file"
+        
+        return {
+            "task_type": task_type,
+            "required_capabilities": list(set(capabilities)),
+            "tools_needed": list(set(tools_needed)),
+            "key_features": [],
+            "reasoning": f"基于响应内容的简单分析: {response[:100]}...",
+            "confidence": 0.6
+        }

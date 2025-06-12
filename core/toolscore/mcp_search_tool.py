@@ -133,57 +133,56 @@ class MCPSearchTool:
             )
     
     async def analyze_tool_needs(self, task_description: str, current_available_tools: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        分析当前任务的工具需求，如果检测到工具不足则自动触发安装
-        
-        Returns:
-            分析结果，包括是否需要新工具、需要什么工具等
-        """
-        logger.info(f"Analyzing tool needs for task: {task_description[:100]}...")
+        """分析工具需求，不执行安装"""
+        logger.info(f"分析任务的工具需求: {task_description[:100]}...")
         
         try:
+            # 使用工具缺口检测器
             analysis = await self.tool_gap_detector.analyze_tool_sufficiency(
                 task_description, current_available_tools
             )
             
-            result = {
-                "has_sufficient_tools": analysis.has_sufficient_tools,
-                "overall_assessment": analysis.overall_assessment,
-                "recommended_action": analysis.recommended_action,
-                "tool_requirements": []
-            }
-            
+            # 构建兼容的结果格式
+            if hasattr(analysis, 'has_sufficient_tools'):
+                has_sufficient = analysis.has_sufficient_tools
+                overall_assessment = analysis.overall_assessment
+                recommended_action = analysis.recommended_action if hasattr(analysis, 'recommended_action') else None
+                
+                # 提取工具需求
+                tool_requirements = []
+                if hasattr(analysis, 'tool_requirements'):
             for req in analysis.tool_requirements:
-                result["tool_requirements"].append({
-                    "needed": req.needed,
+                        if hasattr(req, 'needed') and req.needed:
+                            tool_requirements.append({
                     "description": req.description,
-                    "suggested_search_keywords": req.suggested_search_keywords,
-                    "confidence_score": req.confidence_score,
-                    "reasoning": req.reasoning
-                })
-            
-            # 如果检测到工具不足，自动触发安装
-            if not analysis.has_sufficient_tools and analysis.recommended_action == "search_for_new_tools":
-                logger.info("⚡ 检测到工具不足，自动触发MCP搜索和安装...")
+                                "suggested_keywords": req.suggested_search_keywords,
+                                "confidence": req.confidence_score
+                            })
                 
-                # 自动调用搜索和安装
-                install_result = await self.search_and_install_tools(
-                    task_description=task_description,
-                    current_available_tools=current_available_tools,
-                    reason="analyze_tool_needs自动触发"
-                )
-                
-                # 将安装结果添加到分析结果中
-                result["auto_install_triggered"] = True
-                result["install_result"] = {
-                    "success": install_result.success,
-                    "message": install_result.message,
-                    "installed_tools": install_result.installed_tools
+                result = {
+                    "has_sufficient_tools": has_sufficient,
+                    "overall_assessment": overall_assessment,
+                    "recommended_action": recommended_action or ("continue_with_existing_tools" if has_sufficient else "search_for_new_tools"),
+                    "tool_requirements": tool_requirements
                 }
-                
-                if install_result.success:
-                    result["recommended_action"] = "auto_install_completed"
+            else:
+                # 兼容字典格式
+                result = {
+                    "has_sufficient_tools": analysis.get("has_sufficient_tools", False),
+                    "overall_assessment": analysis.get("overall_assessment", "Unknown analysis result"),
+                    "recommended_action": analysis.get("recommended_action", "search_for_new_tools"),
+                    "tool_requirements": analysis.get("tool_requirements", [])
+                }
             
+            # 添加智能工具推荐
+            if not result["has_sufficient_tools"]:
+                recommended_tools = await self.find_matching_tools_from_analysis(
+                    task_description, 
+                    result.get("tool_requirements", [])
+                )
+                result["recommended_mcp_tools"] = recommended_tools
+            
+            logger.info(f"工具需求分析完成: 充足性={result['has_sufficient_tools']}, 推荐={result.get('recommended_action')}")
             return result
             
         except Exception as e:
@@ -195,6 +194,221 @@ class MCPSearchTool:
                 "tool_requirements": [],
                 "error": str(e)
             }
+
+    async def find_matching_tools_from_analysis(self, task_description: str, 
+                                              tool_requirements: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """基于任务需求分析结果，在mcp_tools.json中智能匹配合适的MCP工具"""
+        logger.info(f"🔍 基于需求分析在mcp_tools.json中查找匹配工具...")
+        
+        try:
+            # 1. 使用LLM分析任务需求
+            from core.llm_client import LLMClient
+            llm_client = LLMClient({})
+            task_analysis = await llm_client.analyze_task_requirements(task_description)
+            
+            logger.info(f"📋 任务分析结果: {task_analysis}")
+            
+            # 2. 在mcp_tools.json中搜索匹配工具
+            matching_tools = await self._search_tools_by_capabilities(
+                required_capabilities=task_analysis.get("required_capabilities", []),
+                tools_needed=task_analysis.get("tools_needed", []),
+                key_features=task_analysis.get("key_features", []),
+                task_type=task_analysis.get("task_type", "unknown")
+            )
+            
+            # 3. 根据匹配度排序
+            ranked_tools = await self._rank_tools_by_relevance(
+                matching_tools, 
+                task_description, 
+                task_analysis
+            )
+            
+            logger.info(f"✅ 找到 {len(ranked_tools)} 个匹配的MCP工具")
+            for tool in ranked_tools[:3]:  # 显示前3个最匹配的工具
+                logger.info(f"   - {tool['name']}: {tool.get('match_score', 0):.2f} 分")
+            
+            return ranked_tools
+            
+        except Exception as e:
+            logger.error(f"智能工具匹配失败: {e}")
+            return []
+
+    async def _search_tools_by_capabilities(self, required_capabilities: List[str], 
+                                          tools_needed: List[str], 
+                                          key_features: List[str],
+                                          task_type: str) -> List[Dict[str, Any]]:
+        """在mcp_tools.json中基于能力需求搜索工具"""
+        matching_tools = []
+        
+        try:
+            # 加载mcp_tools.json
+            mcp_tools_path = await self._find_mcp_tools_json()
+            if not mcp_tools_path:
+                logger.error("❌ 无法找到mcp_tools.json文件")
+                return []
+                
+            with open(mcp_tools_path, 'r', encoding='utf-8') as f:
+                tools_data = json.load(f)
+            
+            logger.info(f"📚 加载了 {len(tools_data)} 个MCP工具进行匹配")
+            
+            # 遍历所有工具进行匹配
+            for tool in tools_data:
+                match_score = self._calculate_tool_match_score(
+                    tool, required_capabilities, tools_needed, key_features, task_type
+                )
+                
+                if match_score > 0.3:  # 只保留匹配度>30%的工具
+                    tool_info = {
+                        "name": tool.get("name", ""),
+                        "description": tool.get("description", ""),
+                        "url": tool.get("url", ""),
+                        "summary": tool.get("summary", ""),
+                        "tools": tool.get("tools", []),
+                        "match_score": match_score,
+                        "match_reasons": self._get_match_reasons(
+                            tool, required_capabilities, tools_needed, key_features
+                        )
+                    }
+                    matching_tools.append(tool_info)
+            
+            return matching_tools
+            
+        except Exception as e:
+            logger.error(f"搜索工具时出错: {e}")
+            return []
+
+    def _calculate_tool_match_score(self, tool: Dict[str, Any], 
+                                   required_capabilities: List[str],
+                                   tools_needed: List[str], 
+                                   key_features: List[str],
+                                   task_type: str) -> float:
+        """计算工具与需求的匹配分数 (0-1之间)"""
+        total_score = 0.0
+        max_score = 0.0
+        
+        tool_name = tool.get("name", "").lower()
+        tool_desc = tool.get("description", "").lower()
+        tool_summary = tool.get("summary", "").lower()
+        tool_tools = tool.get("tools", [])
+        
+        # 1. 能力匹配 (权重: 40%)
+        capability_score = 0.0
+        capability_weight = 0.4
+        max_score += capability_weight
+        
+        if required_capabilities:
+            matches = 0
+            for capability in required_capabilities:
+                capability_lower = capability.lower()
+                # 检查能力是否在工具名称、描述或工具列表中出现
+                if (capability_lower in tool_name or 
+                    capability_lower in tool_desc or 
+                    capability_lower in tool_summary or
+                    any(capability_lower in str(t).lower() for t in tool_tools)):
+                    matches += 1
+            capability_score = (matches / len(required_capabilities)) * capability_weight
+        
+        total_score += capability_score
+        
+        # 2. 工具类型匹配 (权重: 30%)
+        tool_type_score = 0.0
+        tool_type_weight = 0.3
+        max_score += tool_type_weight
+        
+        if tools_needed:
+            matches = 0
+            for tool_needed in tools_needed:
+                tool_needed_lower = tool_needed.lower()
+                if (tool_needed_lower in tool_name or 
+                    tool_needed_lower in tool_desc or 
+                    tool_needed_lower in tool_summary):
+                    matches += 1
+            tool_type_score = (matches / len(tools_needed)) * tool_type_weight
+        
+        total_score += tool_type_score
+        
+        # 3. 关键特征匹配 (权重: 20%)
+        feature_score = 0.0
+        feature_weight = 0.2
+        max_score += feature_weight
+        
+        if key_features:
+            matches = 0
+            for feature in key_features:
+                feature_lower = feature.lower()
+                if (feature_lower in tool_name or 
+                    feature_lower in tool_desc or 
+                    feature_lower in tool_summary):
+                    matches += 1
+            feature_score = (matches / len(key_features)) * feature_weight
+        
+        total_score += feature_score
+        
+        # 4. 任务类型匹配 (权重: 10%)
+        task_type_score = 0.0
+        task_type_weight = 0.1
+        max_score += task_type_weight
+        
+        task_type_keywords = {
+            "image": ["image", "picture", "visual", "photo", "graphic", "art", "generate"],
+            "web": ["web", "browser", "scraping", "crawl", "http", "api", "search"],
+            "code": ["python", "code", "execute", "programming", "script", "development"],
+            "data": ["data", "analysis", "statistics", "csv", "excel", "database"],
+            "file": ["file", "document", "pdf", "convert", "processing", "format"],
+            "communication": ["email", "message", "notification", "send", "api", "webhook"]
+        }
+        
+        if task_type in task_type_keywords:
+            keywords = task_type_keywords[task_type]
+            matches = sum(1 for keyword in keywords 
+                         if keyword in tool_name or keyword in tool_desc or keyword in tool_summary)
+            if matches > 0:
+                task_type_score = min(matches / len(keywords), 1.0) * task_type_weight
+        
+        total_score += task_type_score
+        
+        # 归一化分数
+        final_score = total_score / max_score if max_score > 0 else 0.0
+        return min(final_score, 1.0)
+
+    def _get_match_reasons(self, tool: Dict[str, Any], 
+                          required_capabilities: List[str],
+                          tools_needed: List[str], 
+                          key_features: List[str]) -> List[str]:
+        """获取匹配原因的详细说明"""
+        reasons = []
+        
+        tool_name = tool.get("name", "").lower()
+        tool_desc = tool.get("description", "").lower()
+        tool_summary = tool.get("summary", "").lower()
+        
+        # 检查能力匹配
+        for capability in required_capabilities:
+            if capability.lower() in tool_name or capability.lower() in tool_desc:
+                reasons.append(f"支持 {capability} 能力")
+        
+        # 检查工具类型匹配
+        for tool_needed in tools_needed:
+            if tool_needed.lower() in tool_name or tool_needed.lower() in tool_desc:
+                reasons.append(f"提供 {tool_needed}")
+        
+        # 检查关键特征匹配
+        for feature in key_features:
+            if feature.lower() in tool_name or feature.lower() in tool_desc:
+                reasons.append(f"匹配特征: {feature}")
+        
+        return reasons if reasons else ["基础匹配"]
+
+    async def _rank_tools_by_relevance(self, matching_tools: List[Dict[str, Any]], 
+                                     task_description: str,
+                                     task_analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """根据相关度对工具进行排序"""
+        # 按匹配分数降序排序
+        ranked_tools = sorted(matching_tools, key=lambda x: x.get("match_score", 0), reverse=True)
+        
+        # 限制返回数量，避免过多结果
+        return ranked_tools[:10]
 
     async def _generate_dynamic_search_strategy(self, task_description: str, analysis) -> Optional[Dict[str, Any]]:
         """
@@ -294,3 +508,26 @@ class MCPSearchTool:
                 "expected_capabilities": ["general_processing"],
                 "reasoning": "Fallback策略：通用任务处理"
             } 
+    
+    async def _find_mcp_tools_json(self) -> Optional[str]:
+        """查找mcp_tools.json文件"""
+        import os
+        
+        # 可能的文件位置
+        possible_paths = [
+            "/app/mcp_tools.json",  # Docker容器内位置
+            "mcp_tools.json",  # 当前目录
+            "../mcp_tools.json",  # 上级目录
+            "/Users/muz1lee/PycharmProjects/DataGenerator/agent-data-platform/mcp_tools.json",  # 项目根目录
+            "/Users/muz1lee/Downloads/mcp_tools.json",  # 用户下载目录
+            "data/mcp_tools.json",  # 项目data目录
+            os.path.expanduser("~/Downloads/mcp_tools.json"),  # 用户下载目录
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                logger.info(f"找到MCP数据库文件: {path}")
+                return path
+        
+        logger.warning("未找到mcp_tools.json文件")
+        return None 

@@ -508,6 +508,27 @@ async def main():
     # 初始化工具库（包括恢复持久化的MCP服务器）
     await tool_library.initialize()
     
+    # 自动注册预置MCP服务器
+    from .auto_register import AutoMCPRegistrar
+    auto_registrar = AutoMCPRegistrar(tool_library)
+    
+    logger.info("🚀 开始自动注册预置MCP服务器...")
+    auto_register_results = await auto_registrar.auto_register_predefined_servers()
+    logger.info(f"📊 自动注册结果: {auto_register_results['success_count']} 成功, {auto_register_results['failed_count']} 失败")
+    
+    # 发现并注册动态MCP服务器
+    logger.info("🔍 开始发现动态MCP服务器...")
+    discovery_results = await auto_registrar.discover_and_register_dynamic_servers()
+    logger.info(f"📊 动态发现结果: {discovery_results['registered_count']} 个服务器已注册")
+    
+    # 注册内置工具
+    from .builtin_tools import BuiltinToolsRegistrar
+    builtin_registrar = BuiltinToolsRegistrar(tool_library)
+    
+    logger.info("📦 开始注册内置工具...")
+    builtin_results = await builtin_registrar.register_all_builtin_tools()
+    logger.info(f"📊 内置工具注册结果: {builtin_results['success_count']} 成功, {builtin_results['failed_count']} 失败")
+    
     # 创建MCP服务器
     server = MCPServer(
         server_name="toolscore",

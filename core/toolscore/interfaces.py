@@ -187,3 +187,13 @@ class RegistrationResult:
             "error": self.error,
             "deployment_info": self.deployment_info
         } 
+
+@dataclass
+class InstallationResult:
+    """安装结果"""
+    success: bool
+    server_id: Optional[str] = None
+    endpoint: Optional[str] = None
+    error_message: Optional[str] = None
+    container_id: Optional[str] = None
+    port: Optional[int] = None 

@@ -82,6 +82,7 @@ COPY runtimes/reasoning/ /app/runtimes/reasoning/
 COPY runtimes/sandbox/ /app/runtimes/sandbox/
 COPY runtimes/web_navigator/ /app/runtimes/web_navigator/
 COPY runtimes/__init__.py /app/runtimes/
+COPY tests/ /app/tests/
 
 # 设置环境变量
 ENV PYTHONPATH=/app

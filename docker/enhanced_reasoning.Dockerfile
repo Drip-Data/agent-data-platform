@@ -14,6 +14,7 @@ COPY requirements.txt .
 COPY runtimes/reasoning/requirements.txt ./runtimes/reasoning/
 
 # 安装Python依赖
+ENV PIP_DEFAULT_TIMEOUT=1000
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir -r runtimes/reasoning/requirements.txt
 

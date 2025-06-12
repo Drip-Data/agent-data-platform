@@ -166,6 +166,50 @@ def get_runtime(task_type: str):
     else:
         raise ValueError(f"Unsupported task type: {task_type}. Supported types: reasoning, code, web")
 
+async def _update_task_api_status(redis_client, task_id: str, status: str, result: TrajectoryResult = None):
+    """更新Task API使用的任务状态"""
+    try:
+        from datetime import datetime
+        
+        # 更新Task API使用的状态键
+        status_data = {
+            "task_id": task_id,
+            "status": status,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        if result:
+            status_data["message"] = f"Task {status} with success={result.success}"
+        else:
+            status_data["message"] = f"Task {status}"
+        
+        # 设置状态，保存1小时
+        await redis_client.setex(
+            f"task_status:{task_id}", 
+            3600, 
+            json.dumps(status_data)
+        )
+        
+        # 如果有结果，也保存结果数据
+        if result and status in ["completed", "failed"]:
+            result_data = {
+                "success": result.success,
+                "final_result": result.final_result,
+                "error_message": result.error_message,
+                "total_duration": result.total_duration,
+                "steps_count": len(result.steps)
+            }
+            await redis_client.setex(
+                f"task_result:{task_id}",
+                3600,
+                json.dumps(result_data)
+            )
+        
+        logger.info(f"Task API status updated: {task_id} -> {status}")
+        
+    except Exception as e:
+        logger.error(f"Failed to update Task API status for {task_id}: {e}")
+
 async def start_runtime_service(runtime):
     """启动给定运行时的任务消费服务"""
     import os
@@ -180,6 +224,9 @@ async def start_runtime_service(runtime):
         
         # 根据runtime的能力确定队列名
         queue_name = None
+
+
+        
         # if hasattr(runtime, 'capabilities'):
         #     try:
         #         # 如果capabilities是协程，需要await
@@ -237,12 +284,25 @@ async def start_runtime_service(runtime):
                         data = json.loads(fields[b'task'].decode())
                         task = TaskSpec.from_dict(data)
                         logger.info(f"Processing task {task.task_id} from queue {queue_name}")
+                        
+                        # 更新任务状态为运行中
+                        await _update_task_api_status(r, task.task_id, "running")
+                        
                         result = await runtime.execute(task)
+                        
+                        # 更新任务状态为已完成
+                        final_status = "completed" if result.success else "failed"
+                        await _update_task_api_status(r, task.task_id, final_status, result)
+                        
                         # 路径由 runtime 自行保存轨迹
                         logger.info(f"Task {task.task_id} executed successfully: {result.success}")
                     except Exception as e:
                         # 记录详细的错误信息
                         logger.error(f"Error executing task {data.get('task_id', 'unknown')}: {e}", exc_info=True)
+                        
+                        # 更新任务状态为失败
+                        task_id = data.get('task_id', 'unknown')
+                        await _update_task_api_status(r, task_id, "failed")
                         
                         # 创建错误轨迹结果
                         try:

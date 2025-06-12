@@ -38,6 +38,11 @@ class UnifiedToolLibrary:
         # 动态MCP管理器（延迟初始化）
         self.dynamic_mcp_manager = None
         
+        # 新增组件 - Step 1.7
+        self.cache_manager = None
+        self.tool_gap_detector = None
+        self.mcp_search_tool = None
+        
         self._initialized = False
         logger.info("Unified Tool Library initialized - Pure service mode")
     
@@ -52,10 +57,32 @@ class UnifiedToolLibrary:
             await self.description_engine.initialize()
             await self.dispatcher.initialize()
             
+            # 初始化缓存管理器
+            from .mcp_cache_manager import MCPCacheManager
+            self.cache_manager = MCPCacheManager()
+            await self.cache_manager.initialize()
+            
+            # 初始化工具缺口检测器
+            from .tool_gap_detector import SmartToolGapDetector
+            self.tool_gap_detector = SmartToolGapDetector(
+                llm_client=None,  # 解耦LLM客户端
+                cache_manager=self.cache_manager
+            )
+            
             # 初始化动态MCP管理器
             from .dynamic_mcp_manager import DynamicMCPManager
             self.dynamic_mcp_manager = DynamicMCPManager(self)
             await self.dynamic_mcp_manager.initialize()
+            
+            # 引用实时注册器 (为了API访问)
+            self.real_time_registry = self.dynamic_mcp_manager.real_time_registry
+            
+            # 初始化MCP搜索工具
+            from .mcp_search_tool import MCPSearchTool
+            self.mcp_search_tool = MCPSearchTool(
+                tool_gap_detector=self.tool_gap_detector,
+                dynamic_mcp_manager=self.dynamic_mcp_manager
+            )
             
             logger.info("Tool library initialization completed")
             self._initialized = True
@@ -72,14 +99,51 @@ class UnifiedToolLibrary:
     async def register_mcp_server(self, server_spec: MCPServerSpec) -> RegistrationResult:
         """注册MCP Server"""
         return await self.tool_registry.register_mcp_server(server_spec)
+
+    async def register_external_mcp_server(self, server_spec: MCPServerSpec) -> RegistrationResult:
+        """
+        注册外部MCP服务器。
+        此接口用于手动注册已在外部运行或管理的MCP服务器。
+        它将服务器规范直接添加到工具注册中心。
+        """
+        logger.info(f"Registering external MCP server: {server_spec.name} (ID: {server_spec.tool_id})")
+        
+        # 可以在此处添加额外的验证逻辑，例如检查endpoint的可达性
+        if not server_spec.endpoint:
+            return RegistrationResult(success=False, error="MCP Server endpoint is required.")
+        
+        # 确保tool_type是MCP_SERVER
+        server_spec.tool_type = ToolType.MCP_SERVER
+        
+        # 调用底层的工具注册中心进行注册
+        registration_result = await self.tool_registry.register_mcp_server(server_spec)
+        
+        if registration_result.success:
+            logger.info(f"Successfully registered external MCP server: {server_spec.name}")
+        else:
+            logger.error(f"Failed to register external MCP server {server_spec.name}: {registration_result.error}")
+            
+        return registration_result
     
-    async def unregister_tool(self, tool_id: str) -> bool:
+    async def unregister_tool(self, tool_id: str) -> RegistrationResult:
         """注销工具"""
-        return await self.tool_registry.unregister_tool(tool_id)
+        try:
+            success = await self.tool_registry.unregister_tool(tool_id)
+            
+            if success:
+                logger.info(f"✅ 工具已从注册表中注销: {tool_id}")
+                return RegistrationResult(success=True, tool_id=tool_id)
+            else:
+                logger.error(f"❌ 工具注销失败: {tool_id}")
+                return RegistrationResult(success=False, tool_id=tool_id, error="Tool not found or unregistration failed")
+                
+        except Exception as e:
+            logger.error(f"❌ 工具注销异常: {tool_id} - {e}")
+            return RegistrationResult(success=False, tool_id=tool_id, error=str(e))
     
     # ============ 动态MCP管理API ============
     
-    async def search_and_install_mcp_server(self, query: str, capability_tags: List[str] = None) -> Dict[str, Any]:
+    async def search_and_install_mcp_server(self, query: str, capability_tags: Optional[List[str]] = None) -> Dict[str, Any]:
         """搜索并安装MCP服务器"""
         if not self.dynamic_mcp_manager:
             return {
@@ -89,7 +153,7 @@ class UnifiedToolLibrary:
         
         try:
             # 搜索候选服务器
-            candidates = await self.dynamic_mcp_manager.search_mcp_servers(query, capability_tags)
+            candidates = await self.dynamic_mcp_manager.search_mcp_servers(query, capability_tags or [])
             
             if not candidates:
                 return {
@@ -301,6 +365,11 @@ class UnifiedToolLibrary:
             if self.dynamic_mcp_manager:
                 await self.dynamic_mcp_manager.cleanup()
                 logger.info("Dynamic MCP manager cleaned up")
+            
+            # 清理缓存管理器
+            if self.cache_manager:
+                await self.cache_manager.cleanup()
+                logger.info("Cache manager cleaned up")
             
             await self.dispatcher.cleanup_all_adapters()
             logger.info("Tool library cleanup completed")
