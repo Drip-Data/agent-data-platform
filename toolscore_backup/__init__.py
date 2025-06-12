@@ -1,5 +1,5 @@
 """
-ToolsCore - 精简版工具注册与调用系统
+ToolsCore - 新一代工具注册与调用系统
 
 设计理念：
 - 纯服务化：工具库仅提供工具管理服务，Agent负责智能决策
@@ -30,19 +30,14 @@ from .interfaces import (
 
 from .unified_tool_library import UnifiedToolLibrary
 from .tool_registry import ToolRegistry
-from .core_manager import CoreManager
-from .mcp_search_tool import MCPSearchTool
-from .tool_gap_detector import ToolGapDetector
+from .description_engine import DescriptionEngine
+from .unified_dispatcher import UnifiedDispatcher
+from .adapters import FunctionToolAdapter, MCPServerAdapter
 
 # 主要API入口
 __all__ = [
     # === 核心类 ===
     "UnifiedToolLibrary",
-    "CoreManager",
-    
-    # === 工具搜索和分析 ===
-    "MCPSearchTool",
-    "ToolGapDetector",
     
     # === 工具规范 ===
     "ToolSpec",
@@ -59,6 +54,10 @@ __all__ = [
     
     # === 内部组件（高级用户） ===
     "ToolRegistry",
+    "DescriptionEngine", 
+    "UnifiedDispatcher",
+    "FunctionToolAdapter",
+    "MCPServerAdapter",
     
     # === 接口定义 ===
     "BaseToolAdapter",
@@ -67,12 +66,12 @@ __all__ = [
 ]
 
 # 版本信息
-__version__ = "2.0.0"  # 精简版本
+__version__ = "1.0.0"
 
 # 快速使用指南
 __doc__ += """
 
-## 快速开始 - 精简版
+## 快速开始
 
 ```python
 from core.toolscore import UnifiedToolLibrary, FunctionToolSpec, ToolType
@@ -80,8 +79,9 @@ from core.toolscore import UnifiedToolLibrary, FunctionToolSpec, ToolType
 # 创建工具库
 async def main():
     async with UnifiedToolLibrary() as tool_library:
-        # 自动注册预定义工具（由CoreManager处理）
-        await tool_library.initialize()
+        # 快速注册预定义工具
+        await tool_library.quick_register_browser_tool()
+        await tool_library.quick_register_python_tool()
         
         # 获取所有工具描述（供Agent使用）
         description = await tool_library.get_all_tools_description_for_agent()
@@ -111,16 +111,6 @@ async def main():
 ### 工具执行
 - `execute_tool()` - 执行单个工具
 - `batch_execute_tools()` - 批量执行工具
-
-### 智能工具搜索（MCP）
-- `search_and_install_mcp_server()` - 智能搜索并安装MCP服务器
-
-## 精简版改进
-
-1. **架构简化**：从22个文件精简到11个核心文件
-2. **功能整合**：CoreManager整合了分散的管理功能
-3. **性能优化**：减少文件间依赖，提升加载速度
-4. **维护性**：统一的管理入口，降低复杂度
 
 ## 设计原则
 

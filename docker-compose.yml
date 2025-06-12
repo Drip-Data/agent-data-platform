@@ -140,7 +140,7 @@ services:
     restart: unless-stopped
 
   # 轻量代码执行运行时 (原 sandbox-runtime，现在其功能由 python-executor-server 提供)
-  # 暂时保留，如果不再需要，后续可以移除
+  # 已被 python-executor-server 替代，默认不启动
   sandbox-runtime:
     build:
       context: .
@@ -178,7 +178,7 @@ services:
     networks:
       - agent_network
     profiles:
-      - optional # 标记为可选服务，需要时手动启动
+      - excluded # 默认不启动，已被 python-executor-server 替代
 
   # Browser Navigator MCP Server
   browser-navigator-server:
@@ -203,7 +203,7 @@ services:
     shm_size: 2gb # For Playwright browser
 
   # Web导航运行时 (原 web-runtime，现在其功能由 browser-navigator-server 提供)
-  # 暂时保留，如果不再需要，后续可以移除
+  # 已被 browser-navigator-server 替代，默认不启动
   web-runtime:
     build:
       context: .
@@ -237,7 +237,7 @@ services:
     networks:
       - agent_network
     profiles:
-      - optional # 标记为可选服务，需要时手动启动
+      - excluded # 默认不启动，已被 browser-navigator-server 替代
 
   # 增强推理运行时服务 (使用新的MCP架构)
   enhanced-reasoning-runtime:

@@ -27,7 +27,7 @@ import zipfile
 
 from .interfaces import ToolSpec, MCPServerSpec, ToolCapability, ToolType, RegistrationResult, InstallationResult
 from .unified_tool_library import UnifiedToolLibrary
-# from .persistent_storage import PersistentStorage  # 已删除，使用core_manager的功能
+from .persistent_storage import PersistentStorage
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class DynamicMCPManager:
         self.next_port = 8100  # 动态分配端口起始号
         
         # 初始化持久化存储
-        # self.persistent_storage = PersistentStorage(redis_url)  # 已删除，使用core_manager
+        self.persistent_storage = PersistentStorage(redis_url)
         self._storage_initialized = False
         
         # 新增持久化组件
@@ -108,7 +108,7 @@ class DynamicMCPManager:
         
         if not self._storage_initialized:
             try:
-                # await self.persistent_storage.initialize()  # 已删除，使用core_manager
+                await self.persistent_storage.initialize()
                 self._storage_initialized = True
                 logger.info("Persistent storage initialized")
                 

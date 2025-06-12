@@ -5,7 +5,6 @@
 
 import logging
 import asyncio
-import time
 from typing import Dict, Any, List, Optional
 
 from .interfaces import (
@@ -13,8 +12,8 @@ from .interfaces import (
     ExecutionResult, RegistrationResult, ToolType
 )
 from .tool_registry import ToolRegistry
-# from .description_engine import DescriptionEngine  # 精简版本中已移除
-# from .unified_dispatcher import UnifiedDispatcher  # 精简版本中已移除
+from .description_engine import DescriptionEngine
+from .unified_dispatcher import UnifiedDispatcher
 from .core_manager import CoreManager
 
 logger = logging.getLogger(__name__)
@@ -36,8 +35,8 @@ class UnifiedToolLibrary:
         
         # 初始化核心组件
         self.tool_registry = ToolRegistry()
-        # self.description_engine = DescriptionEngine(self.tool_registry)  # 精简版本中已移除
-        # self.dispatcher = UnifiedDispatcher(self.tool_registry, mcp_client)  # 精简版本中已移除
+        self.description_engine = DescriptionEngine(self.tool_registry)
+        self.dispatcher = UnifiedDispatcher(self.tool_registry, mcp_client)
         self.mcp_client = mcp_client
         
         # 动态MCP管理器（延迟初始化）
@@ -65,8 +64,8 @@ class UnifiedToolLibrary:
             
             # 初始化各组件
             await self.tool_registry.initialize()
-            # await self.description_engine.initialize()  # 精简版本中已移除
-            # await self.dispatcher.initialize()  # 精简版本中已移除
+            await self.description_engine.initialize()
+            await self.dispatcher.initialize()
             
             # 初始化工具缺口检测器（简化版本）
             from .tool_gap_detector import SmartToolGapDetector
@@ -266,11 +265,7 @@ class UnifiedToolLibrary:
     
     async def get_tool_description_for_agent(self, tool_id: str) -> str:
         """获取Agent可理解的工具描述"""
-        # 精简版本：直接返回基本工具描述
-        tool = await self.get_tool_by_id(tool_id)
-        if tool:
-            return f"**{tool.name}**: {tool.description}"
-        return f"工具 {tool_id} 未找到"
+        return await self.description_engine.generate_tool_description_for_agent(tool_id)
     
     async def get_all_tools_description_for_agent(self) -> str:
         """获取所有工具的Agent可理解描述"""
@@ -309,29 +304,9 @@ class UnifiedToolLibrary:
                 logger.error(f"Failed to generate tools description from MCP: {e}")
                 return "生成工具描述失败"
         else:
-            # 精简版本：直接生成工具描述
-            return await self._generate_simple_tools_description()
+            # 没有MCP客户端，使用description_engine
+            return await self.description_engine.generate_all_tools_description_for_agent()
     
-    async def _generate_simple_tools_description(self) -> str:
-        """生成简单的工具描述（精简版本）"""
-        try:
-            tools = await self.get_all_tools()
-            if not tools:
-                return "当前没有可用工具"
-            
-            descriptions = []
-            for tool in tools:
-                if tool.enabled:
-                    descriptions.append(f"**{tool.name}** ({tool.tool_id}): {tool.description}")
-            
-            if not descriptions:
-                return "当前没有启用的工具"
-            
-            return f"可用工具列表:\n" + "\n".join(descriptions)
-        except Exception as e:
-            logger.error(f"生成工具描述失败: {e}")
-            return "工具描述生成失败"
-
     def _format_parameters(self, parameters: Dict[str, Any]) -> str:
         """格式化参数信息"""
         if not parameters:
@@ -350,83 +325,32 @@ class UnifiedToolLibrary:
     
     async def get_tool_usage_examples(self, tool_id: str) -> List[Dict[str, Any]]:
         """获取工具使用示例"""
-        # 精简版本：返回简单的示例说明
-        tool = await self.get_tool_by_id(tool_id)
-        if tool:
-            return f"请参考 {tool.name} 的文档说明"
-        return "未找到工具使用示例"
+        return await self.description_engine.get_tool_usage_examples(tool_id)
     
     # ============ 工具执行API ============
     
     async def execute_tool(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> ExecutionResult:
-        """执行单个工具（精简版本）"""
-        try:
-            # 获取工具规格
-            tool = await self.get_tool_by_id(tool_id)
-            if not tool:
-                return ExecutionResult(
-                    success=False,
-                    error_message=f"工具 {tool_id} 未找到",
-                    error_type=ErrorType.TOOL_NOT_FOUND
-                )
-            
-            # 根据工具类型执行
-            if tool.tool_type == ToolType.MCP_SERVER and self.mcp_client:
-                # MCP服务器工具通过MCP客户端执行
-                return await self.mcp_client.call_tool(tool_id, action, parameters)
-            else:
-                # Function工具直接执行（简化实现）
-                return ExecutionResult(
-                    success=False,
-                    error_message="精简版本暂不支持Function工具执行",
-                    error_type=ErrorType.EXECUTION_ERROR
-                )
-                
-        except Exception as e:
-            logger.error(f"工具执行失败: {e}")
-            return ExecutionResult(
-                success=False,
-                error_message=str(e),
-                error_type=ErrorType.EXECUTION_ERROR
-            )
+        """执行单个工具"""
+        return await self.dispatcher.execute_tool(tool_id, action, parameters)
     
     async def batch_execute_tools(self, tool_calls: List[Dict[str, Any]]) -> List[ExecutionResult]:
-        """批量执行工具（精简版本）"""
-        results = []
-        for call in tool_calls:
-            result = await self.execute_tool(
-                call.get("tool_id", ""),
-                call.get("action", ""),
-                call.get("parameters", {})
-            )
-            results.append(result)
-        return results
+        """批量执行工具"""
+        return await self.dispatcher.batch_execute_tools(tool_calls)
     
     async def get_tool_health_status(self, tool_id: str) -> Dict[str, Any]:
-        """获取工具健康状态（精简版本）"""
-        tool = await self.get_tool_by_id(tool_id)
-        if tool:
-            return {
-                "tool_id": tool_id,
-                "status": "healthy" if tool.enabled else "disabled",
-                "last_check": time.time()
-            }
-        return {
-            "tool_id": tool_id,
-            "status": "not_found",
-            "last_check": time.time()
-        }
+        """获取工具健康状态"""
+        return await self.dispatcher.get_tool_health_status(tool_id)
     
     # ============ 管理接口 ============
     
     async def get_library_stats(self) -> Dict[str, Any]:
         """获取工具库统计信息"""
         registry_stats = await self.tool_registry.get_registry_stats()
-        # dispatcher_stats = await self.dispatcher.get_dispatcher_stats()  # 精简版本中已移除
+        dispatcher_stats = await self.dispatcher.get_dispatcher_stats()
         
         stats = {
             "registry": registry_stats,
-            # "dispatcher": dispatcher_stats,  # 精简版本中已移除
+            "dispatcher": dispatcher_stats,
             "initialized": self._initialized
         }
         
@@ -449,7 +373,7 @@ class UnifiedToolLibrary:
                 await self.cache_manager.cleanup()
                 logger.info("Cache manager cleaned up")
             
-            # await self.dispatcher.cleanup_all_adapters()  # 精简版本中已移除
+            await self.dispatcher.cleanup_all_adapters()
             logger.info("Tool library cleanup completed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
