@@ -119,7 +119,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if required_cap.lower() in tool_cap.lower() or tool_cap.lower() in required_cap.lower():
                     return True
         
-            return False
+        return False
             
     async def _periodic_cleanup(self):
         """定期清理过期请求"""
@@ -127,19 +127,19 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             try:
                 await asyncio.sleep(60)  # 每分钟清理一次
                 await self.real_time_client.cleanup_expired_requests()
-                
+
                 # 清理本地的过期请求
                 current_time = time.time()
                 expired_requests = []
                 for task_id, request_info in self.pending_tool_requests.items():
                     if current_time - request_info.get("timestamp", 0) > 300:  # 5分钟过期
                         expired_requests.append(task_id)
-                
+
                 for task_id in expired_requests:
                     self.pending_tool_requests.pop(task_id, None)
                     logger.info(f"清理过期任务请求: {task_id}")
-                
-        except Exception as e:
+
+            except Exception as e:
                 logger.error(f"定期清理任务异常: {e}")
 
     @property
@@ -200,33 +200,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.info(f"   所需能力: {task_requirements.get('required_capabilities', [])}")
             logger.info(f"   推荐工具类型: {task_requirements.get('tools_needed', [])}")
             logger.info(f"   置信度: {task_requirements.get('confidence', 0.0)}")
-            
-            # 基于分析结果，检查是否需要新工具
-            if task_requirements.get('confidence', 0.0) > 0.7:
-                required_capabilities = task_requirements.get('required_capabilities', [])
-                
-                # 如果检测到明确的能力需求，主动检查工具充足性
-                if required_capabilities:
-                    logger.info(f"🔍 检测到明确能力需求，主动检查工具充足性...")
-                    gap_analysis = await self.toolscore_client.analyze_tool_gap(
-                        task_description=task.description,
-                        current_tools=[]  # 传入当前工具列表
-                    )
-                    
-                    if not gap_analysis.get('has_sufficient_tools', True):
-                        logger.info("⚡ 检测到工具缺口，尝试请求新工具...")
-                        capability_result = await self.toolscore_client.request_tool_capability(
-                            task_description=task.description,
-                            required_capabilities=required_capabilities,
-                            auto_install=True
-                        )
-                        
-                        if capability_result.get('success', False):
-                            logger.info("🎉 成功获取新工具，刷新工具列表...")
-                            # 刷新工具列表
-                            available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
-                                fallback_client=self.toolscore_client
-                            )
             
             # 将需求分析结果添加到执行上下文
             current_context["task_requirements"] = task_requirements
@@ -298,7 +271,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     break
                 
                 # 检查是否是工具能力请求
-                if action == 'request_tool_capability' or (tool_id and 'search' in tool_id.lower()):
+                elif action == 'request_tool_capability' or (tool_id and 'search' in tool_id.lower()):
                     logger.info("🔍 检测到工具能力请求，发起ToolScore API调用")
                     
                     # 从参数中提取任务描述和能力需求
@@ -347,11 +320,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             observation = "工具安装请求已处理，但未安装新工具。现有工具可能已满足需求。"
                         
                         tool_success = True
-                else:
+                    else:
                         # 工具安装失败
                         error_msg = capability_result.get("message", "未知错误")
                         observation = f"工具能力请求失败: {error_msg}"
-                    tool_success = False
+                        tool_success = False
                         current_attempt_err_type = ErrorType.TOOL_ERROR
                         current_attempt_err_msg = error_msg
 
@@ -382,7 +355,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                 if stdout:
                                     observation = f"Python代码执行成功。输出:\n{stdout[:200]}{'...' if len(stdout) > 200 else ''}"
                                     current_outputs.append(stdout)
-                        else:
+                                else:
                                     observation = "Python代码执行成功，无输出。"
                             elif 'browser' in actual_server_id.lower():
                                 if isinstance(result.data, dict):
@@ -390,16 +363,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                     title = result.data.get('title', 'N/A')
                                     observation = f"浏览器操作成功。当前页面: {url}, 标题: {title}"
                                     
-                            if action == 'browser_get_text':
-                                text = result.data.get('text', '')
-                                if text:
+                                    if action == 'browser_get_text':
+                                        text = result.data.get('text', '')
+                                        if text:
                                             preview = text[:300] + ('...' if len(text) > 300 else '')
                                             observation += f"\n页面内容预览:\n{preview}"
                                 else:
                                     observation = f"浏览器操作 '{action}' 执行成功。"
                             else:
                                 observation = f"工具 '{tool_id}' 执行成功。"
-                            else:
+                        else:
                             observation = f"工具 '{tool_id}' 执行成功。"
                         
                     except Exception as e:
@@ -439,8 +412,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         await asyncio.sleep(retry_delay_seconds)
                     else:
                         break
-                    else:
-                        break
+                else:
+                    break
             
             # 完成任务检查
             exec_code_dict = {}
@@ -552,7 +525,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         async def callback(tool_event: Dict[str, Any]):
             tool_name = tool_event.get("name", tool_event.get("tool_id", "unknown"))
             logger.info(f"🎉 任务 {trajectory_id} 步骤 {step_id}: 新工具 {tool_name} 现已可用")
-            # 这里可以添加额外的处理逻辑，如重新评估任务状态
         return callback
     
     def _map_tool_id_to_server(self, tool_id: str) -> str:

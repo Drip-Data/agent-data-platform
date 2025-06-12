@@ -54,7 +54,7 @@ class SmartToolGapDetector:
             # 2. 如果有LLM客户端，使用LLM分析
             if self.llm_client:
                 analysis_prompt = self._build_analysis_prompt(task_description, available_tools, previous_attempts)
-            response = await self.llm_client._call_api(analysis_prompt)
+                response = await self.llm_client._call_api(analysis_prompt)
                 analysis_result = self._parse_analysis_response(response)
             else:
                 # 3. 备用逻辑：基于规则的分析

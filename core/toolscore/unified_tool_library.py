@@ -14,6 +14,7 @@ from .interfaces import (
 from .tool_registry import ToolRegistry
 from .description_engine import DescriptionEngine
 from .unified_dispatcher import UnifiedDispatcher
+from .core_manager import CoreManager
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +29,29 @@ class UnifiedToolLibrary:
     - 无硬编码规则：不使用关键词匹配等硬编码逻辑
     """
     
-    def __init__(self, mcp_client: Optional[Any] = None): # 添加mcp_client参数
+    def __init__(self, mcp_client: Optional[Any] = None, redis_url: str = "redis://redis:6379"):
+        # 使用新的核心管理器整合分散功能
+        self.core_manager = CoreManager(redis_url)
+        
         # 初始化核心组件
         self.tool_registry = ToolRegistry()
         self.description_engine = DescriptionEngine(self.tool_registry)
-        self.dispatcher = UnifiedDispatcher(self.tool_registry, mcp_client) # 将mcp_client传递给UnifiedDispatcher
-        self.mcp_client = mcp_client  # 保存MCP客户端引用
+        self.dispatcher = UnifiedDispatcher(self.tool_registry, mcp_client)
+        self.mcp_client = mcp_client
         
         # 动态MCP管理器（延迟初始化）
         self.dynamic_mcp_manager = None
         
-        # 新增组件 - Step 1.7
-        self.cache_manager = None
+        # 新增组件 - 使用核心管理器的功能
+        self.cache_manager = self.core_manager  # 使用核心管理器的缓存功能
+        self.real_time_registry = self.core_manager  # 使用核心管理器的实时注册功能
+        
+        # 简化的工具组件
         self.tool_gap_detector = None
         self.mcp_search_tool = None
         
         self._initialized = False
-        logger.info("Unified Tool Library initialized - Pure service mode")
+        logger.info("Unified Tool Library initialized - 使用核心管理器整合模式")
     
     async def initialize(self):
         """初始化工具库"""
@@ -52,30 +59,25 @@ class UnifiedToolLibrary:
             return
         
         try:
+            # 初始化核心管理器（包含缓存、实时注册、容器管理等）
+            await self.core_manager.initialize()
+            
             # 初始化各组件
             await self.tool_registry.initialize()
             await self.description_engine.initialize()
             await self.dispatcher.initialize()
             
-            # 初始化缓存管理器
-            from .mcp_cache_manager import MCPCacheManager
-            self.cache_manager = MCPCacheManager()
-            await self.cache_manager.initialize()
-            
-            # 初始化工具缺口检测器
+            # 初始化工具缺口检测器（简化版本）
             from .tool_gap_detector import SmartToolGapDetector
             self.tool_gap_detector = SmartToolGapDetector(
                 llm_client=None,  # 解耦LLM客户端
-                cache_manager=self.cache_manager
+                cache_manager=self.cache_manager  # 使用核心管理器的缓存功能
             )
             
             # 初始化动态MCP管理器
             from .dynamic_mcp_manager import DynamicMCPManager
             self.dynamic_mcp_manager = DynamicMCPManager(self)
             await self.dynamic_mcp_manager.initialize()
-            
-            # 引用实时注册器 (为了API访问)
-            self.real_time_registry = self.dynamic_mcp_manager.real_time_registry
             
             # 初始化MCP搜索工具
             from .mcp_search_tool import MCPSearchTool
@@ -84,7 +86,7 @@ class UnifiedToolLibrary:
                 dynamic_mcp_manager=self.dynamic_mcp_manager
             )
             
-            logger.info("Tool library initialization completed")
+            logger.info("Tool library initialization completed - 核心管理器模式")
             self._initialized = True
         except Exception as e:
             logger.error(f"Failed to initialize tool library: {e}")
@@ -284,15 +286,15 @@ class UnifiedToolLibrary:
                     ])
                     
                     desc = f"""
-工具: {tool.name} (ID: {tool.tool_id})
-类型: {tool.tool_type.value}
-描述: {tool.description}
+                            工具: {tool.name} (ID: {tool.tool_id})
+                            类型: {tool.tool_type.value}
+                            描述: {tool.description}
 
-可用功能:
-{capabilities_desc}
+                            可用功能:
+                            {capabilities_desc}
 
-使用场景: 当需要{tool.description.lower()}时使用此工具
-"""
+                            使用场景: 当需要{tool.description.lower()}时使用此工具
+                            """
                     descriptions.append(desc)
                 
                 header = "\n" + "="*80 + "\n可用工具列表:\n" + "="*80
