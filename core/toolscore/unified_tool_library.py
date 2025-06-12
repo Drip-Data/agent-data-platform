@@ -69,8 +69,8 @@ class UnifiedToolLibrary:
             # await self.dispatcher.initialize()  # 精简版本中已移除
             
             # 初始化工具缺口检测器（简化版本）
-            from .tool_gap_detector import SmartToolGapDetector
-            self.tool_gap_detector = SmartToolGapDetector(
+            from .tool_gap_detector import ToolGapDetector
+            self.tool_gap_detector = ToolGapDetector(
                 llm_client=None,  # 解耦LLM客户端
                 cache_manager=self.cache_manager  # 使用核心管理器的缓存功能
             )
@@ -206,7 +206,7 @@ class UnifiedToolLibrary:
             installed_servers = await self.dynamic_mcp_manager.get_installed_servers()
             health_status = await self.dynamic_mcp_manager.health_check_installed_servers()
             
-                        if hasattr(self.dynamic_mcp_manager, 'core_manager') and self.dynamic_mcp_manager._storage_initialized:
+            if hasattr(self.dynamic_mcp_manager, 'core_manager') and self.dynamic_mcp_manager._storage_initialized:
                 storage_stats = {
                     "storage_type": "core_manager",
                     "initialized": True

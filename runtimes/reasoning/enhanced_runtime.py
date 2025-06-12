@@ -119,7 +119,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if required_cap.lower() in tool_cap.lower() or tool_cap.lower() in required_cap.lower():
                     return True
         
-            return False
+        return False
             
     async def _periodic_cleanup(self):
         """定期清理过期请求"""
@@ -139,7 +139,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     self.pending_tool_requests.pop(task_id, None)
                     logger.info(f"清理过期任务请求: {task_id}")
                 
-        except Exception as e:
+            except Exception as e:
                 logger.error(f"定期清理任务异常: {e}")
 
     @property
@@ -320,11 +320,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             observation = "工具安装请求已处理，但未安装新工具。现有工具可能已满足需求。"
                         
                         tool_success = True
-                else:
+                    else:
                         # 工具安装失败
                         error_msg = capability_result.get("message", "未知错误")
                         observation = f"工具能力请求失败: {error_msg}"
-                    tool_success = False
+                        tool_success = False
                         current_attempt_err_type = ErrorType.TOOL_ERROR
                         current_attempt_err_msg = error_msg
 
@@ -355,7 +355,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                 if stdout:
                                     observation = f"Python代码执行成功。输出:\n{stdout[:200]}{'...' if len(stdout) > 200 else ''}"
                                     current_outputs.append(stdout)
-                        else:
+                                else:
                                     observation = "Python代码执行成功，无输出。"
                             elif 'browser' in actual_server_id.lower():
                                 if isinstance(result.data, dict):
@@ -363,16 +363,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                     title = result.data.get('title', 'N/A')
                                     observation = f"浏览器操作成功。当前页面: {url}, 标题: {title}"
                                     
-                            if action == 'browser_get_text':
-                                text = result.data.get('text', '')
-                                if text:
+                                    if action == 'browser_get_text':
+                                        text = result.data.get('text', '')
+                                        if text:
                                             preview = text[:300] + ('...' if len(text) > 300 else '')
                                             observation += f"\n页面内容预览:\n{preview}"
                                 else:
                                     observation = f"浏览器操作 '{action}' 执行成功。"
                             else:
                                 observation = f"工具 '{tool_id}' 执行成功。"
-                            else:
+                        else:
                             observation = f"工具 '{tool_id}' 执行成功。"
                         
                     except Exception as e:
@@ -410,8 +410,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     if is_retryable and attempt < max_retries:
                         logger.info(f"Retrying action {action} after {retry_delay_seconds}s delay...")
                         await asyncio.sleep(retry_delay_seconds)
-                    else:
-                        break
                     else:
                         break
             

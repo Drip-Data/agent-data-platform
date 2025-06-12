@@ -201,6 +201,8 @@ services:
       - agent_network
     restart: unless-stopped
     shm_size: 2gb # For Playwright browser
+    profiles:
+      - excluded # 默认不启动
 
   # Web导航运行时 (原 web-runtime，现在其功能由 browser-navigator-server 提供)
   # 已被 browser-navigator-server 替代，默认不启动
