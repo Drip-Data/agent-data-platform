@@ -1,25 +1,3 @@
-redis
-prometheus-client
-aiohttp
+fastapi
+uvicorn
 pydantic
-httpx
-fastapi>=0.100.0
-uvicorn>=0.20.0
-watchdog>=2.1.0
-aiofiles>=0.8.0
-websockets>=10.0
-aiohttp_retry
-PyYAML>=6.0
-requests>=2.28.0
-
-# 工具相关 - 简化版本
-beautifulsoup4>=4.11.0
-
-# 可选的大型依赖 - 仅在需要时安装
-# selenium
-# webdriver-manager  
-# matplotlib>=3.5.0
-# pandas>=1.3.0
-# numpy>=1.21.0
-# playwright>=1.20.0
-# scikit-learn>=1.1.0

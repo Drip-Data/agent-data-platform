@@ -43,8 +43,12 @@ Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨�
 ```bash
 python3 -m venv venv
 source venv/bin/activate
+# 如果无法访问外网，可直接跳过安装，项目自带轻量级依赖桩
 pip install -r requirements.txt
 ```
+
+> 提示：离线环境下运行时，`core.stubs` 会提供 `redis`、`httpx` 等库的简易实现，
+> 便于快速测试。
 
 ### 2. 克隆与配置
 
