@@ -46,14 +46,23 @@ redis_client: Optional[redis.Redis] = None
 async def startup_event():
     global redis_client
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    redis_client = redis.from_url(redis_url)
-    logger.info(f"Connected to Redis: {redis_url}")
+    try:
+        redis_client = redis.from_url(redis_url)
+        # 测试连接
+        await redis_client.ping()
+        logger.info(f"Connected to Redis: {redis_url}")
+    except Exception as e:
+        logger.warning(f"Redis连接失败，Task API将运行在简化模式: {e}")
+        redis_client = None
 
 @app.on_event("shutdown")
 async def shutdown_event():
     global redis_client
     if redis_client:
-        await redis_client.aclose()
+        try:
+            await redis_client.aclose()
+        except Exception as e:
+            logger.warning(f"关闭Redis连接时出错: {e}")
 
 @app.get("/", summary="API信息")
 async def root():
@@ -80,10 +89,13 @@ async def root():
 async def health_check():
     """健康检查端点"""
     try:
-        await redis_client.ping()
-        return {"status": "healthy", "redis": "connected"}
+        if redis_client:
+            await redis_client.ping()
+            return {"status": "healthy", "redis": "connected"}
+        else:
+            return {"status": "healthy", "redis": "fallback_mode"}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Redis connection failed: {e}")
+        return {"status": "degraded", "redis": "disconnected", "error": str(e)}
 
 @app.get("/status", summary="系统状态")
 async def get_system_status():

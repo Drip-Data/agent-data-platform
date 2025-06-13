@@ -30,9 +30,9 @@ class UnifiedToolLibrary:
     - 无硬编码规则：不使用关键词匹配等硬编码逻辑
     """
     
-    def __init__(self, mcp_client: Optional[Any] = None, redis_url: str = "redis://redis:6379"):
+    def __init__(self, mcp_client: Optional[Any] = None, redis_url: str = "redis://redis:6379", redis_manager=None):
         # 使用新的核心管理器整合分散功能
-        self.core_manager = CoreManager(redis_url)
+        self.core_manager = CoreManager(redis_url, redis_manager=redis_manager)
         
         # 初始化核心组件
         self.tool_registry = ToolRegistry()

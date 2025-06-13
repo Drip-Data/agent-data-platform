@@ -12,11 +12,23 @@ logger = logging.getLogger(__name__)
 class TaskManager:
     """任务生命周期管理器"""
     
-    def __init__(self, redis_url: str):
-        self.redis = redis.from_url(redis_url)
+    def __init__(self, redis_url: str = None, redis_manager=None):
+        self.redis_manager = redis_manager
+        
+        if redis_manager and not redis_manager.is_fallback_mode():
+            # 使用真实Redis
+            import redis.asyncio as redis
+            self.redis = redis.from_url(redis_manager.get_redis_url())
+            self.fallback_mode = False
+        else:
+            # 使用内存存储
+            self.redis = None
+            self.fallback_mode = True
+            logger.warning("TaskManager 运行在内存模式")
+            
         self.metrics = EnhancedMetrics()
         self._active_tasks: Dict[str, Dict] = {}
-    
+
     async def submit_task(self, task: TaskSpec) -> str:
         """提交任务"""
         task_data = {
@@ -26,15 +38,23 @@ class TaskManager:
             "updated_at": time.time()
         }
         
-        # 存储任务状态
-        await self.redis.hset(
-            f"task:{task.task_id}",
-            mapping={k: json.dumps(v) if isinstance(v, (dict, list)) else str(v) 
-                    for k, v in task_data.items()}
-        )
-        
-        # 设置过期时间（24小时）
-        await self.redis.expire(f"task:{task.task_id}", 86400)
+        if not self.fallback_mode and self.redis:
+            # 存储任务状态到Redis
+            await self.redis.hset(
+                f"task:{task.task_id}",
+                mapping={k: json.dumps(v) if isinstance(v, (dict, list)) else str(v) 
+                        for k, v in task_data.items()}
+            )
+            
+            # 设置过期时间（24小时）
+            await self.redis.expire(f"task:{task.task_id}", 86400)
+        else:
+            # 内存模式：使用redis_manager的内存存储
+            if self.redis_manager:
+                await self.redis_manager.memory_set(
+                    f"task:{task.task_id}", 
+                    json.dumps(task_data)
+                )
         
         self._active_tasks[task.task_id] = task_data
         
@@ -210,17 +230,35 @@ async def _update_task_api_status(redis_client, task_id: str, status: str, resul
     except Exception as e:
         logger.error(f"Failed to update Task API status for {task_id}: {e}")
 
-async def start_runtime_service(runtime):
+async def start_runtime_service(runtime, redis_manager=None):
     """启动给定运行时的任务消费服务"""
     import os
     import asyncio
     import json
-    import redis.asyncio as redis_client
     from .interfaces import TaskSpec, ErrorType, TrajectoryResult
 
     async def _run_service():
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-        r = redis_client.from_url(redis_url)
+        # 使用传入的redis_manager，否则fallback到内存模式
+        if redis_manager and not redis_manager.is_fallback_mode():
+            import redis.asyncio as redis_client
+            redis_url = redis_manager.get_redis_url()
+            r = redis_client.from_url(redis_url)
+        else:
+            # 内存模式 - 创建虚拟队列服务
+            logger.warning(f"Runtime {runtime.runtime_id} 运行在内存模式，任务队列功能受限")
+            
+            # 在内存模式下，模拟任务处理
+            while True:
+                try:
+                    # 每30秒检查一次是否有模拟任务
+                    await asyncio.sleep(30)
+                    logger.debug(f"Runtime {runtime.runtime_id} 在内存模式下等待任务...")
+                except KeyboardInterrupt:
+                    break
+                except Exception as e:
+                    logger.error(f"Runtime {runtime.runtime_id} 内存模式出错: {e}")
+                    await asyncio.sleep(5)
+            return
         
         # 根据runtime的能力确定队列名
         queue_name = None

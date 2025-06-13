@@ -27,15 +27,14 @@ class CoreManager:
     
     整合功能：
     - MCP容器和镜像管理 (原persistent_container_manager + mcp_image_manager)
-    - 实时注册和缓存 (原real_time_registry + mcp_cache_manager)  
-    - 自动注册预置服务器 (原auto_register)
-    - 工具注册表管理 (原tool_registry)
+    - 实时注册和缓存 (原real_time_registry + mcp_cache_manager)    - 自动注册预置服务器 (原auto_register)    - 工具注册表管理 (原tool_registry)
     - 简化的持久化存储 (原persistent_storage)
     """
     
-    def __init__(self, redis_url: str = "redis://localhost:6379"):
+    def __init__(self, redis_url: str = "redis://localhost:6379", redis_manager=None):
         self.redis_url = redis_url
         self.redis_client: Optional[redis.Redis] = None
+        self.redis_manager = redis_manager  # 新增：Redis管理器实例
 
         # === Runner 选择 ===
         # 强制注入 ProcessRunner 实例
@@ -101,11 +100,19 @@ class CoreManager:
     async def initialize(self):
         """初始化核心管理器"""
         try:
-            # 连接Redis
-            self.redis_client = redis.from_url(self.redis_url)
-            if self.redis_client: # 添加 None 检查
-                if self.redis_client: # 添加 None 检查
-                    await self.redis_client.ping()
+            # 连接Redis - 支持fallback模式
+            if self.redis_manager and self.redis_manager.is_fallback_mode():
+                logger.info("使用内存存储模式，跳过Redis连接")
+                self.redis_client = None
+            else:
+                self.redis_client = redis.from_url(self.redis_url)
+                if self.redis_client:
+                    try:
+                        await self.redis_client.ping()
+                        logger.info("Redis连接成功")
+                    except Exception as e:
+                        logger.warning(f"Redis连接失败，使用内存模式: {e}")
+                        self.redis_client = None
             
             # 延迟导入避免循环依赖
             from core.toolscore.dynamic_mcp_manager import DynamicMCPManager

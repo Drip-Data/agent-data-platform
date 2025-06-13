@@ -9,68 +9,193 @@ import os
 import sys
 from pathlib import Path
 import subprocess, signal
+from dotenv import load_dotenv
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
+# 创建必要的目录
+os.makedirs(project_root / 'logs', exist_ok=True)
+os.makedirs(project_root / 'output' / 'trajectories', exist_ok=True)
+os.makedirs(project_root / 'config', exist_ok=True)
+os.makedirs(project_root / 'data', exist_ok=True)
+
+# 加载环境变量文件
+def load_environment():
+    """加载环境变量，优先级：.env > .env.local > 系统环境变量"""
+    env_files = ['.env', '.env.local']
+    loaded_any = False
+    
+    for env_file in env_files:
+        env_path = project_root / env_file
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
+            loaded_any = True
+            print(f"✅ 已加载环境变量文件: {env_file}")
+    
+    if not loaded_any:
+        print("⚠️  未找到 .env 文件，将使用系统环境变量")
+    
+    return loaded_any
+
+# 加载环境变量
+load_environment()
+
+# 检查并设置API密钥
+def check_and_setup_api_keys():
+    """检查并设置API密钥，按优先级自动选择可用的API"""
+    api_providers = [
+        ('GEMINI_API_KEY', 'Google Gemini'),
+        ('DEEPSEEK_API_KEY', 'DeepSeek'),
+        ('OPENAI_API_KEY', 'OpenAI'),
+    ]
+    
+    available_apis = []
+    for api_key, provider_name in api_providers:
+        if os.getenv(api_key):
+            available_apis.append(provider_name)
+            print(f"✅ 发现 {provider_name} API 密钥")
+    
+    if available_apis:
+        print(f"🚀 可用的API提供商: {', '.join(available_apis)}")
+        return True
+    else:
+        print("❌ 错误: 未找到任何API密钥！")
+        print("请设置以下任一API密钥：")
+        for api_key, provider_name in api_providers:
+            print(f"  - {api_key} ({provider_name})")
+        print("💡 您可以创建 .env 文件或设置系统环境变量")
+        print("💡 参考 .env.example 文件获取配置模板")
+        return False
+
+# 检查API密钥
+if not check_and_setup_api_keys():
+    print("⚠️  警告: 没有可用的LLM API密钥，某些功能可能无法正常工作")
+    print("系统将继续启动，但建议配置API密钥以获得完整功能")
+
 from core.toolscore.core_manager import CoreManager
 from mcp_servers.python_executor_server.main import PythonExecutorMCPServer
 
-# 配置日志
+# 配置日志 - 修复Windows控制台Unicode编码问题
+import sys
+import io
+
+# 为Windows控制台设置UTF-8编码，修复emoji显示问题
+if os.name == 'nt':
+    # 设置控制台代码页为UTF-8
+    try:
+        import subprocess
+        subprocess.run(['chcp', '65001'], shell=True, capture_output=True)
+    except:
+        pass
+    
+    # 重定向标准输出为UTF-8编码
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+# 配置日志，避免emoji字符导致的编码错误
+class SafeFormatter(logging.Formatter):
+    """安全的日志格式化器，处理Unicode字符"""
+    def format(self, record):
+        try:
+            return super().format(record)
+        except UnicodeEncodeError:
+            # 移除emoji字符，替换为文字描述
+            msg = record.getMessage()
+            msg = msg.replace('✅', '[OK]').replace('❌', '[ERROR]').replace('⚠️', '[WARN]').replace('🚀', '[START]').replace('🔧', '[FIX]').replace('⏳', '[WAIT]').replace('🔄', '[PROC]')
+            record.msg = msg
+            record.args = ()
+            return super().format(record)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('logs/toolscore.log', mode='a')
+        logging.FileHandler('logs/toolscore.log', mode='a', encoding='utf-8')
     ]
 )
+
+# 应用安全格式化器
+for handler in logging.root.handlers:
+    handler.setFormatter(SafeFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 logger = logging.getLogger(__name__)
 
 async def main():
     """主启动函数"""
     logger.info("启动 Agent Data Platform (无Docker版本)...")
-    import os
-    logger.info(f"GEMINI_API_KEY: {os.getenv('GEMINI_API_KEY')}")
     
-    # ==== 端口冲突检测与自动清理 ====
-    def _free_port(port: int):
-        """查找占用指定端口的进程并强制杀掉"""
-        try:
-            # mac / linux 通用 lsof
-            res = subprocess.check_output(["lsof", "-ti", f":{port}"]).decode().strip().splitlines()
-            for pid in res:
-                if pid:
-                    logger.warning(f"端口 {port} 被进程 {pid} 占用，尝试终止…")
-                    try:
-                        os.kill(int(pid), signal.SIGKILL)
-                        logger.info(f"已杀死进程 {pid} (端口 {port})")
-                    except Exception as e:
-                        logger.error(f"终止进程 {pid} 失败: {e}")
-        except subprocess.CalledProcessError:
-            # 没有进程占用
-            pass
-
-    # 清理常用端口，避免 "address already in use"
-    for _port in (8081, 8082, 8083, 8000):
-        _free_port(_port)
-
+    # 初始化变量，避免cleanup时的作用域错误
+    core_manager = None
+    toolscore_server = None
+    enhanced_runtime = None
+    redis_manager = None
+    
     try:
-        # 创建必要目录
-        os.makedirs('logs', exist_ok=True)
-        os.makedirs('output/trajectories', exist_ok=True)
-        os.makedirs('config', exist_ok=True)
-        os.makedirs('data', exist_ok=True)
+        # === Redis管理器初始化 ===
+        from core.redis_manager import RedisManager
+        redis_manager = RedisManager()
+        await redis_manager.ensure_redis_available()
         
-        # 初始化核心管理器
-        core_manager = CoreManager()
-        await core_manager.initialize()
+        if redis_manager.is_fallback_mode():
+            logger.warning("使用内存存储模式 - 数据将在重启后丢失")
+        else:
+            logger.info("Redis服务已就绪")
+          # 显示当前可用的API密钥状态
+        available_keys = []
+        for key_name in ['GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY']:
+            if os.getenv(key_name):
+                # 只显示前4位和后4位，中间用*号代替
+                key_value = os.getenv(key_name)
+                masked_key = f"{key_value[:4]}{'*' * (len(key_value) - 8)}{key_value[-4:]}" if len(key_value) > 8 else "****"
+                available_keys.append(f"{key_name}: {masked_key}")
         
-        # 创建并初始化工具库（避免循环依赖）
+        if available_keys:
+            logger.info(f"可用API密钥: {', '.join(available_keys)}")
+        else:
+            logger.warning("未发现任何API密钥，某些功能可能受限")        # ==== 端口冲突检测与自动清理 ====
+        def _free_port(port: int):
+            """查找占用指定端口的进程并强制杀掉"""
+            try:
+                # Windows使用netstat命令
+                if os.name == 'nt':
+                    import psutil
+                    for proc in psutil.process_iter(['pid', 'name']):
+                        try:
+                            for conn in proc.connections():
+                                if conn.laddr.port == port:
+                                    logger.warning(f"端口 {port} 被进程 {proc.pid} ({proc.name()}) 占用，尝试终止…")
+                                    proc.terminate()
+                                    logger.info(f"已终止进程 {proc.pid} (端口 {port})")
+                                    return
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+                else:
+                    # mac / linux 通用 lsof
+                    res = subprocess.check_output(["lsof", "-ti", f":{port}"]).decode().strip().splitlines()
+                    for pid in res:
+                        if pid:
+                            logger.warning(f"端口 {port} 被进程 {pid} 占用，尝试终止…")
+                            try:
+                                os.kill(int(pid), signal.SIGKILL)
+                                logger.info(f"已杀死进程 {pid} (端口 {port})")
+                            except Exception as e:
+                                logger.error(f"终止进程 {pid} 失败: {e}")
+            except (subprocess.CalledProcessError, ImportError):
+                # 没有进程占用或psutil未安装
+                pass
+
+        # 清理常用端口，避免 "address already in use"
+        for _port in (8081, 8082, 8083, 8000):
+            _free_port(_port)
+          # 初始化核心管理器
+        core_manager = CoreManager(redis_manager=redis_manager)
+        await core_manager.initialize()        # 创建并初始化工具库（避免循环依赖）
         from core.toolscore.unified_tool_library import UnifiedToolLibrary
-        tool_library = UnifiedToolLibrary(redis_url="redis://localhost:6379")
+        redis_url = redis_manager.get_redis_url()
+        tool_library = UnifiedToolLibrary(redis_url=redis_url, redis_manager=redis_manager)
         await tool_library.initialize()
         
         # 注入工具库到监控API
@@ -285,11 +410,10 @@ async def main():
         # 🔧 修复：将Python Executor实例传递给监控API，实现直接调用
         if hasattr(core_manager, 'monitoring_api') and core_manager.monitoring_api:
             core_manager.monitoring_api.python_executor_server = python_executor_server
-            logger.info("✅ Python Executor实例已传递给监控API")
-        
-        # ================= 启动 Enhanced Reasoning Runtime =================
+            logger.info("✅ Python Executor实例已传递给监控API")        # ================= 启动 Enhanced Reasoning Runtime =================
         async def start_enhanced_reasoning_runtime():
             """启动Enhanced Reasoning Runtime任务消费者（整合manual_start_consumer.py功能）"""
+            nonlocal enhanced_runtime  # 声明使用外层作用域的变量
             try:
                 logger.info("🚀 启动Enhanced Reasoning Runtime消费者...")
                 
@@ -316,8 +440,8 @@ async def main():
                 
                 logger.info("🔄 启动任务队列消费服务...")
                 
-                # 🔧 修复：使用稳定的启动方式，避免任务被销毁
-                await start_runtime_service(enhanced_runtime)
+                # 🔧 修复：使用稳定的启动方式，传递redis_manager参数
+                await start_runtime_service(enhanced_runtime, redis_manager=redis_manager)
                 
             except asyncio.TimeoutError:
                 logger.error("Enhanced Reasoning Runtime 初始化超时，将跳过启动，但其他服务正常运行")
@@ -334,28 +458,31 @@ async def main():
         logger.info("服务地址: http://localhost:8080")
         logger.info("WebSocket地址: ws://localhost:8081")
         logger.info("监控地址: http://localhost:8082")
-        logger.info("按 Ctrl+C 停止服务")
-        
-        # 保持服务运行
+        logger.info("按 Ctrl+C 停止服务")        # 保持服务运行
         try:
             while True:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
             logger.info("收到停止信号，正在关闭服务...")
-            
+    
     except Exception as e:
         logger.error(f"启动失败: {e}")
         sys.exit(1)
+    
     finally:
         # 清理资源
         try:
-            await core_manager.stop()
-            await toolscore_server.stop()
+            if core_manager:
+                await core_manager.stop()
+            if toolscore_server:
+                await toolscore_server.stop()
+            if redis_manager:
+                await redis_manager.stop()
             logger.info("Agent Data Platform 已停止")
 
             # 额外清理增强运行时
             try:
-                if 'enhanced_runtime' in locals():
+                if enhanced_runtime:
                     await enhanced_runtime.cleanup()
             except Exception as e:
                 logger.error(f"清理 Enhanced Reasoning Runtime 出错: {e}")
