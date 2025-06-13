@@ -21,13 +21,13 @@ Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨�
 
 ### 🔧 动态工具管理
 - **MCP工具注册机制**: 智能工具缺口检测和自动工具安装
-- **多源搜索**: 支持GitHub、Docker Hub等多个工具源的并行搜索
-- **安全评估**: 信任作者验证、安全性评分、Docker隔离运行
+- **多源搜索**: 支持GitHub等多个工具源的并行搜索
+- **安全评估**: 信任作者验证、安全性评分
 
 ### 🏗️ 可扩展架构
 - **模块化设计**: Core、Runtimes、ToolScore三大核心模块
 - **MCP协议支持**: 标准化的工具接口和跨进程通信
-- **Docker容器化**: 基于Docker Compose的服务编排
+- **可选Docker部署**: 可在需要时容器化运行
 
 ### 📊 完整的学习闭环
 - **轨迹追踪**: 详细记录每步执行的思考链、工具调用和结果
@@ -128,10 +128,6 @@ curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/js
 
 3. **ToolScore模块** - 工具管理平台
    - `UnifiedToolLibrary` - 统一工具库
-   - `DynamicMCPManager` - 动态MCP管理器
-   - `MCPSearchTool` - MCP搜索工具
-   - `ToolGapDetector` - 工具缺口检测器
-
 ### Runtime版本对比
 
 | 特性 | 基础版本 | 增强版本 |
@@ -152,8 +148,6 @@ agent-data-platform/
 │   ├── llm_client.py        # LLM客户端
 │   ├── toolscore/          # 工具管理模块
 │   │   ├── unified_tool_library.py
-│   │   ├── dynamic_mcp_manager.py
-│   │   ├── mcp_search_tool.py
 │   │   └── tool_gap_detector.py
 │   └── synthesiscore/      # 任务合成模块
 ├── runtimes/               # 运行时实现
@@ -255,7 +249,7 @@ curl http://localhost:8001/health
 ## 🙏 致谢
 
 - **MCP协议** - 标准化的工具通信协议
-- **Docker** - 容器化部署支持
+- **Docker (可选)** - 容器化部署支持
 - **Redis** - 高性能任务队列
 - **Playwright** - 现代Web自动化
 - **Prometheus & Grafana** - 监控和可视化
