@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # API模型
 class TaskRequest(BaseModel):
-    task_type: str = "general"
+    task_type: str = "reasoning"  # 修复：默认使用reasoning类型，避免"general"不存在的错误
     input: str
     priority: Optional[str] = "medium"
     context: Optional[Dict[str, Any]] = None
