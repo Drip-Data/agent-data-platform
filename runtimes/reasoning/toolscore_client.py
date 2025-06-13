@@ -224,4 +224,77 @@ class ToolScoreClient:
         """关闭HTTP会话"""
         if self.session:
             await self.session.close()
-            self.session = None 
+            self.session = None
+    
+    async def execute_tool(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """调用 ToolScore 执行指定工具动作。
+
+        Parameters
+        ----------
+        tool_id : str
+            工具唯一 ID。
+        action : str
+            需要执行的动作名称（可为空字符串，表示默认动作）。
+        parameters : Dict[str, Any]
+            传递给工具的参数。
+
+        Returns
+        -------
+        Dict[str, Any]
+            与 ToolScore `/api/v1/tools/execute` 相同结构的 JSON 响应。
+        """
+        await self._ensure_session()
+
+        payload = {
+            "tool_id": tool_id,
+            "action": action,
+            "parameters": parameters or {}
+        }
+
+        try:
+            async with self.session.post(f"{self.endpoint}/api/v1/tools/execute", json=payload) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    # 尝试解析错误信息
+                    try:
+                        err_text = await response.text()
+                    except Exception:
+                        err_text = "Unknown error"
+                    logger.error(f"执行工具失败: HTTP {response.status}, {err_text}")
+                    return {
+                        "success": False,
+                        "message": f"HTTP {response.status}: {err_text}",
+                        "status": response.status
+                    }
+        except Exception as e:
+            logger.error(f"执行工具请求异常: {e}")
+            return {
+                "success": False,
+                "message": str(e),
+                "status": 500
+            }
+    
+    async def register_external_mcp_server(self, server_spec: Dict[str, Any]) -> Dict[str, Any]:
+        """注册已有的 MCP Server 到 ToolScore（管理端点 /admin/mcp/register）。
+
+        server_spec 示例::
+            {
+              "tool_id": "my-server",
+              "name": "My Custom Server",
+              "description": "...",
+              "endpoint": "ws://host:port/mcp",
+              "capabilities": [{"name": "do", "description": "..."}],
+              "tags": ["custom"]
+            }
+        """
+        await self._ensure_session()
+        try:
+            async with self.session.post(f"{self.endpoint}/admin/mcp/register", json={"server_spec": server_spec}) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                else:
+                    txt = await resp.text()
+                    return {"success": False, "status": resp.status, "message": txt}
+        except Exception as e:
+            return {"success": False, "message": str(e)} 

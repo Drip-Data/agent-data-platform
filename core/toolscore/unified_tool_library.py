@@ -128,6 +128,13 @@ class UnifiedToolLibrary:
         
         if registration_result.success:
             logger.info(f"Successfully registered external MCP server: {server_spec.name}")
+
+            # 触发实时注册，确保 WebSocket / Redis 事件同步
+            try:
+                if self.core_manager:
+                    await self.core_manager.register_tool_immediately(server_spec)
+            except Exception as rt_err:
+                logger.warning(f"Real-time broadcast failed for {server_spec.tool_id}: {rt_err}")
         else:
             logger.error(f"Failed to register external MCP server {server_spec.name}: {registration_result.error}")
             

@@ -40,6 +40,9 @@ class ToolScoreMonitoringAPI:
         self.app.router.add_delete('/admin/tools/{tool_id}', self.unregister_tool_admin)
         self.app.router.add_get('/admin/tools/lifecycle', self.get_tool_lifecycle)
         
+        # 新增：直接注册已有 MCP Server（外部已运行）
+        self.app.router.add_post('/admin/mcp/register', self.register_mcp_server_admin)
+        
         # 新增API端点 - 支持Enhanced Reasoning Runtime
         self.app.router.add_get('/api/v1/tools/available', self.get_available_tools_for_llm)
         self.app.router.add_post('/api/v1/tools/request-capability', self.request_tool_capability)
@@ -1019,6 +1022,66 @@ class ToolScoreMonitoringAPI:
                 "success": False,
                 "error": str(e)
             }, status=500)
+
+    # === 新增：MCP Server 手动注册 ===
+    async def register_mcp_server_admin(self, request):
+        """管理员接口：注册已存在的 MCP Server（外部已运行）"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "message": "Tool library not initialized"
+            }, status=500)
+
+        try:
+            data = await request.json()
+            server_spec_data = data.get("server_spec")
+
+            if not server_spec_data:
+                return web.json_response({
+                    "success": False,
+                    "message": "Missing server_spec in request"
+                }, status=400)
+
+            # 构建 MCPServerSpec
+            from .interfaces import MCPServerSpec, ToolCapability, ToolType
+
+            capabilities = []
+            for cap_data in server_spec_data.get("capabilities", []):
+                if isinstance(cap_data, dict):
+                    capabilities.append(ToolCapability(**cap_data))
+
+            server_spec = MCPServerSpec(
+                tool_id=server_spec_data.get("tool_id"),
+                name=server_spec_data.get("name"),
+                description=server_spec_data.get("description"),
+                tool_type=ToolType.MCP_SERVER,
+                capabilities=capabilities,
+                tags=server_spec_data.get("tags", []),
+                endpoint=server_spec_data.get("endpoint"),
+                server_config=server_spec_data.get("server_config", {}),
+                connection_params=server_spec_data.get("connection_params", {}),
+                enabled=server_spec_data.get("enabled", True)
+            )
+
+            # 调用统一工具库注册外部 MCP Server
+            result = await self.tool_library.register_external_mcp_server(server_spec)
+
+            if result.success:
+                # 发布事件
+                await self._publish_tool_registration_event(server_spec_data, "register_mcp")
+
+            return web.json_response({
+                "success": result.success,
+                "tool_id": result.tool_id if result.success else None,
+                "message": result.error if not result.success else "MCP Server 注册成功"
+            })
+
+        except Exception as e:
+            logger.error(f"MCP Server registration failed: {e}")
+            return web.json_response({
+                "success": False,
+                "message": f"注册失败: {str(e)}"
+            }, status=400)
 
 async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8080):
     """启动监控API服务器的便捷函数"""

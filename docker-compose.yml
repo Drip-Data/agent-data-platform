@@ -82,6 +82,26 @@ services:
       retries: 3
       start_period: 30s
 
+  # Mock Image Generation MCP Server
+  mock-image-server:
+    build:
+      context: .
+      dockerfile: ./docker/mock-image-server.Dockerfile
+    environment:
+      - LOG_LEVEL=INFO
+      - MCP_SERVER_ENDPOINT=ws://mock-image-server:8080/mcp
+    ports:
+      - "8082:8080"  # Mock Image Generation MCP server port
+    networks:
+      - agent_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   # Toolscore MCP Server
   toolscore:
     build:
