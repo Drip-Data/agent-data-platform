@@ -35,11 +35,12 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         self.metrics = EnhancedMetrics(port=8003)
         
         # 简化的工具管理架构
-        self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://toolscore:8090')
+        self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
+        self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8082')
         
         # 轻量级客户端
         self.toolscore_client = ToolScoreClient(self.toolscore_endpoint)
-        self.real_time_client = RealTimeToolClient(self.toolscore_endpoint)
+        self.real_time_client = RealTimeToolClient(self.toolscore_websocket_endpoint)
         
         # 保留MCP客户端用于直接工具调用
         toolscore_url = os.getenv('TOOLSCORE_URL', 'ws://toolscore:8080/websocket')
@@ -54,11 +55,20 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 等待ToolScore服务就绪
         logger.info("⏳ 等待ToolScore服务就绪...")
-        if not await self.toolscore_client.wait_for_ready():
+        toolscore_ready = await self.toolscore_client.wait_for_ready()
+        if not toolscore_ready:
             logger.error("❌ ToolScore服务未就绪，将使用降级模式")
+        else:
+            logger.info("✅ ToolScore HTTP服务已就绪")
         
         # 连接实时更新
-        await self.real_time_client.connect_real_time_updates()
+        logger.info(f"🔌 正在连接WebSocket端点: {self.toolscore_websocket_endpoint}")
+        try:
+            await self.real_time_client.connect_real_time_updates()
+            logger.info("✅ WebSocket实时更新连接成功")
+        except Exception as e:
+            logger.error(f"❌ WebSocket连接失败，将继续运行但不会接收实时更新: {e}")
+            # 不阻止初始化继续进行
         
         # 注册工具更新回调
         await self.real_time_client.register_tool_update_callback(

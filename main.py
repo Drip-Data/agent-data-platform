@@ -182,6 +182,73 @@ async def main():
         else:
             logger.error(f"❌ Python Executor 注册失败: {registration_result.error}")
 
+        # 🔧 新增：通过HTTP API额外注册Python Executor（来自register_python_executor.py的功能）
+        async def register_python_executor_via_http():
+            """通过HTTP API注册Python执行器（整合register_python_executor.py功能）"""
+            server_spec_http = {
+                "tool_id": "python_executor_server",
+                "name": "Python 执行器",
+                "description": "执行 Python 代码、数据分析和可视化",
+                "endpoint": "ws://localhost:8083/mcp",
+                "capabilities": [
+                    {
+                        "name": "python_execute",
+                        "description": "执行Python代码",
+                        "parameters": {
+                            "code": {
+                                "type": "string",
+                                "description": "要执行的Python代码",
+                                "required": True
+                            },
+                            "timeout": {
+                                "type": "integer", 
+                                "description": "执行超时时间（秒），默认30秒",
+                                "required": False
+                            }
+                        },
+                        "examples": [
+                            {"code": "print('Hello, World!')"},
+                            {"code": "import math\nresult = math.sqrt(16)\nprint(f'平方根: {result}')"}
+                        ]
+                    }
+                ],
+                "tags": ["python", "code", "execution", "data-analysis", "visualization"],
+                "server_config": {},
+                "connection_params": {"timeout": 30},
+                "enabled": True
+            }
+            
+            registration_data = {"server_spec": server_spec_http}
+            
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        'http://localhost:8082/admin/mcp/register',
+                        json=registration_data,
+                        headers={'Content-Type': 'application/json'}
+                    ) as response:
+                        if response.status == 200:
+                            result = await response.json()
+                            if result.get('success'):
+                                logger.info("✅ Python 执行器已通过HTTP API额外注册成功!")
+                                return True
+                            else:
+                                logger.error(f"❌ HTTP API注册失败: {result.get('message', 'Unknown error')}")
+                        else:
+                            error_text = await response.text()
+                            logger.error(f"❌ HTTP API注册错误 {response.status}: {error_text}")
+            except Exception as e:
+                logger.error(f"❌ HTTP API注册时发生错误: {e}")
+            return False
+
+                    # 延迟执行HTTP注册，等待监控API完全启动
+            async def delayed_http_registration():
+                await asyncio.sleep(5)  # 增加等待时间，确保监控API完全就绪
+                await register_python_executor_via_http()
+            
+            asyncio.create_task(delayed_http_registration())
+
         # === 设置输出目录环境变量，避免只读文件系统问题 ===
         os.environ.setdefault('OUTPUT_DIR', str(Path.cwd() / 'output' / 'trajectories'))
 
@@ -215,28 +282,53 @@ async def main():
         # 启动服务
         await core_manager.start()
         
+        # 🔧 修复：将Python Executor实例传递给监控API，实现直接调用
+        if hasattr(core_manager, 'monitoring_api') and core_manager.monitoring_api:
+            core_manager.monitoring_api.python_executor_server = python_executor_server
+            logger.info("✅ Python Executor实例已传递给监控API")
+        
         # ================= 启动 Enhanced Reasoning Runtime =================
-        try:
-            # 配置环境变量，使增强运行时能够正确连接当前实例的 ToolScore
-            os.environ.setdefault('TOOLSCORE_HTTP_URL', 'http://localhost:8082')  # Monitoring / HTTP API
-            os.environ.setdefault('TOOLSCORE_URL', 'ws://localhost:8081/websocket')  # MCP WebSocket
+        async def start_enhanced_reasoning_runtime():
+            """启动Enhanced Reasoning Runtime任务消费者（整合manual_start_consumer.py功能）"""
+            try:
+                logger.info("🚀 启动Enhanced Reasoning Runtime消费者...")
+                
+                # 配置环境变量，使增强运行时能够正确连接当前实例的 ToolScore
+                os.environ.setdefault('TOOLSCORE_HTTP_URL', 'http://localhost:8082')  # Monitoring / HTTP API
+                os.environ.setdefault('TOOLSCORE_WS_URL', 'ws://localhost:8082')     # WebSocket for real-time updates
+                os.environ.setdefault('TOOLSCORE_URL', 'ws://localhost:8081/websocket')  # MCP WebSocket
 
-            from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
-            from core.task_manager import start_runtime_service
+                from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
+                from core.task_manager import start_runtime_service
 
-            enhanced_runtime = EnhancedReasoningRuntime()
-            
-            # 设置较短的初始化超时，避免卡住
-            await asyncio.wait_for(enhanced_runtime.initialize(), timeout=30.0)
-            
-            # 在后台消费 Redis 任务队列（tasks:reasoning）
-            asyncio.create_task(start_runtime_service(enhanced_runtime))
-            logger.info("Enhanced Reasoning Runtime 已启动并接入任务队列 (tasks:reasoning)")
-        except asyncio.TimeoutError:
-            logger.error("Enhanced Reasoning Runtime 初始化超时，将跳过启动，但其他服务正常运行")
-        except Exception as e:
-            logger.error(f"启动 Enhanced Reasoning Runtime 失败: {e}")
-            logger.warning("Enhanced Reasoning Runtime 启动失败，但核心服务（ToolScore、Task API）仍可正常使用")
+                enhanced_runtime = EnhancedReasoningRuntime()
+                
+                # 延迟启动Enhanced Runtime，确保所有服务都已就绪
+                await asyncio.sleep(8)  # 等待核心服务完全启动
+                
+                logger.info("⏳ 初始化Enhanced Reasoning Runtime...")
+                
+                # 设置更合理的初始化超时时间
+                await asyncio.wait_for(enhanced_runtime.initialize(), timeout=60.0)
+                
+                logger.info("✅ Enhanced Reasoning Runtime初始化完成")
+                logger.info(f"Runtime ID: {enhanced_runtime.runtime_id}")
+                
+                logger.info("🔄 启动任务队列消费服务...")
+                
+                # 🔧 修复：使用稳定的启动方式，避免任务被销毁
+                await start_runtime_service(enhanced_runtime)
+                
+            except asyncio.TimeoutError:
+                logger.error("Enhanced Reasoning Runtime 初始化超时，将跳过启动，但其他服务正常运行")
+            except Exception as e:
+                logger.error(f"启动 Enhanced Reasoning Runtime 失败: {e}")
+                logger.warning("Enhanced Reasoning Runtime 启动失败，但核心服务（ToolScore、Task API）仍可正常使用")
+                import traceback
+                traceback.print_exc()
+        
+        # 在后台启动Enhanced Reasoning Runtime
+        asyncio.create_task(start_enhanced_reasoning_runtime())
 
         logger.info("Agent Data Platform 启动成功！")
         logger.info("服务地址: http://localhost:8080")

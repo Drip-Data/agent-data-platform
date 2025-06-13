@@ -28,12 +28,27 @@ class RealTimeToolClient:
         
     async def connect_real_time_updates(self):
         """连接到ToolScore的实时更新流"""
-        websocket_url = self.endpoint.replace('http://', 'ws://').replace('https://', 'wss://')
-        websocket_url = f"{websocket_url}/api/v1/events/tools"
+        # 处理WebSocket端点
+        if self.endpoint.startswith('ws://') or self.endpoint.startswith('wss://'):
+            websocket_url = f"{self.endpoint}/api/v1/events/tools"
+        else:
+            # 将HTTP端点转换为WebSocket端点
+            websocket_url = self.endpoint.replace('http://', 'ws://').replace('https://', 'wss://')
+            websocket_url = f"{websocket_url}/api/v1/events/tools"
         
         try:
             logger.info(f"🔌 连接到ToolScore实时更新: {websocket_url}")
-            self.websocket = await websockets.connect(websocket_url)
+            # 创建WebSocket连接（兼容旧版本websockets）
+            try:
+                self.websocket = await websockets.connect(
+                    websocket_url,
+                    extra_headers={
+                        "User-Agent": "Enhanced-Reasoning-Runtime/1.0"
+                    }
+                )
+            except TypeError:
+                # 兼容旧版本websockets，不支持extra_headers
+                self.websocket = await websockets.connect(websocket_url)
             self.is_connected = True
             self.reconnect_attempts = 0
             

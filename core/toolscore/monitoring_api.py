@@ -999,6 +999,33 @@ class ToolScoreMonitoringAPI:
             
             start_time = time.time()
             
+            # 🔧 修复：对于Python执行器，尝试直接调用避免WebSocket连接问题
+            if tool_id == "python-executor-mcp-server" and hasattr(self, 'python_executor_server') and self.python_executor_server:
+                logger.info(f"🚀 直接调用同进程的Python Executor")
+                try:
+                    # 直接调用Python Executor的handle_tool_action方法
+                    action_result = await self.python_executor_server.handle_tool_action(action, parameters)
+                    processing_time_ms = int((time.time() - start_time) * 1000)
+                    
+                    if action_result.get("success", False):
+                        logger.info(f"✅ 直接调用工具执行成功: {tool_id}, 耗时: {processing_time_ms}ms")
+                        return web.json_response({
+                            "success": True,
+                            "result": action_result.get("data"),
+                            "output": action_result.get("data"),
+                            "processing_time_ms": processing_time_ms
+                        })
+                    else:
+                        logger.warning(f"⚠️ 直接调用工具执行失败: {tool_id} - {action_result.get('error_message')}")
+                        return web.json_response({
+                            "success": False,
+                            "error": action_result.get("error_message") or action_result.get("error"),
+                            "processing_time_ms": processing_time_ms
+                        })
+                except Exception as e:
+                    logger.error(f"❌ 直接调用Python Executor失败: {e}")
+                    # 如果直接调用失败，继续使用原有的工具库执行逻辑
+            
             # 执行工具
             result = await self.tool_library.execute_tool(
                 tool_id=tool_id,

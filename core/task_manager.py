@@ -336,5 +336,14 @@ async def start_runtime_service(runtime):
                     finally:
                         await r.xack(queue_name, group, msg_id)
 
-    # 运行异步服务
-    await _run_service()
+    # === 改进：自动重启消费协程，防止异常退出导致任务堆积 ===
+    while True:
+        try:
+            await _run_service()
+        except asyncio.CancelledError:
+            # 主程序取消时直接退出
+            raise
+        except Exception as fatal_err:
+            logger.exception(f"❌ Runtime {getattr(runtime, 'runtime_id', 'unknown')} crashed: {fatal_err}")
+            # 留出短暂冷却时间后自动重启
+            await asyncio.sleep(3)
