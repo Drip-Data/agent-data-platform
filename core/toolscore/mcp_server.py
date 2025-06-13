@@ -4,6 +4,7 @@ import logging
 import websockets
 from typing import Dict, Any, Callable, Optional, List # 导入 List
 from uuid import uuid4
+import os
 
 from .interfaces import ToolSpec, ToolType, RegistrationResult, ExecutionResult, ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType # 导入 ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType
 from .unified_tool_library import UnifiedToolLibrary # 导入UnifiedToolLibrary，用于注册工具
@@ -451,6 +452,8 @@ class MCPServer:
 async def main():
     """启动ToolScore MCP服务器和监控API"""
     import logging
+    import os
+    import json
     logging.basicConfig(level=logging.INFO)
     
     # 导入工具能力定义
@@ -507,6 +510,92 @@ async def main():
     
     # 初始化工具库（包括恢复持久化的MCP服务器）
     await tool_library.initialize()
+    
+    # 🔧 新增：从mcp_tools.json加载基础工具库
+    mcp_tools_file = '/app/mcp_tools.json'
+    if os.path.exists(mcp_tools_file):
+        try:
+            logger.info(f"📖 开始从 {mcp_tools_file} 加载基础工具库...")
+            with open(mcp_tools_file, 'r', encoding='utf-8') as f:
+                tools_data = json.load(f)
+            
+            # 🔧 修复：处理数组格式的JSON文件
+            if isinstance(tools_data, list):
+                logger.info(f"📋 检测到数组格式的工具文件，包含 {len(tools_data)} 个工具")
+                loaded_count = 0
+                for tool_info in tools_data:
+                    try:
+                        # 使用工具名称作为ID
+                        tool_id = tool_info.get('name', '').lower().replace(' ', '_').replace('-', '_')
+                        if not tool_id:
+                            continue
+                        
+                        # 创建工具规范对象
+                        from .interfaces import FunctionToolSpec
+                        
+                        # 构建工具能力
+                        capabilities_list = []
+                        if tool_info.get('tools'):
+                            for tool_def in tool_info['tools']:
+                                capability_params = {}
+                                if tool_def.get('parameter'):
+                                    # 转换parameter格式为标准格式
+                                    params = tool_def['parameter']
+                                    for param_name, param_desc in params.items():
+                                        capability_params[param_name] = {
+                                            "type": "string",
+                                            "description": param_desc if isinstance(param_desc, str) else str(param_desc),
+                                            "required": True
+                                        }
+                                
+                                capabilities_list.append(ToolCapability(
+                                    name=tool_def.get('name', 'unknown'),
+                                    description=tool_def.get('description', 'No description'),
+                                    parameters=capability_params,
+                                    examples=[]
+                                ))
+                        
+                        # 如果没有tools定义，创建一个通用能力
+                        if not capabilities_list:
+                            capabilities_list.append(ToolCapability(
+                                name='default_action',
+                                description=tool_info.get('description', 'General tool functionality'),
+                                parameters={},
+                                examples=[]
+                            ))
+                        
+                        # 创建工具规范
+                        tool_spec = FunctionToolSpec(
+                            tool_id=tool_id,
+                            name=tool_info.get('name', tool_id),
+                            description=tool_info.get('description', 'Tool from mcp_tools.json'),
+                            tool_type=ToolType.FUNCTION,
+                            capabilities=capabilities_list,
+                            module_path='',
+                            class_name='',
+                            enabled=True,
+                            tags=[]
+                        )
+                        
+                        # 注册工具到工具库
+                        result = await tool_library.register_function_tool(tool_spec)
+                        if result.success:
+                            loaded_count += 1
+                        else:
+                            logger.warning(f"⚠️ 工具注册失败 {tool_id}: {result.error}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ 处理工具 {tool_info.get('name', 'unknown')} 时出错: {e}")
+                
+                logger.info(f"✅ 从 mcp_tools.json 成功加载了 {loaded_count} 个工具")
+                
+            else:
+                logger.error("❌ mcp_tools.json 格式不正确：期望数组格式")
+                
+        except Exception as e:
+            logger.error(f"❌ 加载 mcp_tools.json 失败: {e}")
+    else:
+        logger.warning(f"⚠️ 未找到 mcp_tools.json 文件: {mcp_tools_file}")
     
     # 使用核心管理器进行自动注册 - 精简版本
     logger.info("🚀 开始自动注册预置MCP服务器...")

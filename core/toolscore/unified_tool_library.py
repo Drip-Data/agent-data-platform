@@ -70,8 +70,13 @@ class UnifiedToolLibrary:
             
             # 初始化工具缺口检测器（简化版本）
             from .tool_gap_detector import ToolGapDetector
+            from core.llm_client import LLMClient
+            
+            # 创建LLM客户端实例，强制使用gemini提供商
+            llm_client = LLMClient({"provider": "gemini"})
+            
             self.tool_gap_detector = ToolGapDetector(
-                llm_client=None,  # 解耦LLM客户端
+                llm_client=llm_client,  # 提供LLM客户端实例
                 cache_manager=self.cache_manager  # 使用核心管理器的缓存功能
             )
             

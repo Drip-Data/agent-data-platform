@@ -45,6 +45,11 @@ class ToolScoreMonitoringAPI:
         self.app.router.add_post('/api/v1/tools/request-capability', self.request_tool_capability)
         self.app.router.add_post('/api/v1/tools/analyze-gap', self.analyze_tool_gap)
         
+        # 🎯 新增缺失的API端点 - 支持mcp-search-tool调用
+        self.app.router.add_post('/api/v1/tools/analyze', self.analyze_tool_needs)
+        self.app.router.add_post('/api/v1/tools/search-and-install', self.search_and_install_tools)
+        self.app.router.add_post('/api/v1/tools/execute', self.execute_tool)
+        
         # WebSocket实时事件端点 (Step 4.1)
         self.app.router.add_get('/api/v1/events/tools', self.websocket_tools_events)
     
@@ -800,7 +805,223 @@ class ToolScoreMonitoringAPI:
         else:
             logger.warning(f"未知的WebSocket消息类型: {message_type}")
 
+    async def analyze_tool_needs(self, request):
+        """分析任务所需的工具类型和能力 - 对应enhanced_runtime中的analyze_tool_needs调用"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            analysis_type = data.get('analysis_type', 'tool_needs')
+            
+            if not task_description:
+                return web.json_response({
+                    "success": False,
+                    "error": "task_description is required"
+                }, status=400)
+            
+            logger.info(f"🔍 分析工具需求: {task_description}")
+            
+            # 获取MCP搜索工具
+            mcp_search_tool = getattr(self.tool_library, 'mcp_search_tool', None)
+            if not mcp_search_tool:
+                return web.json_response({
+                    "success": False,
+                    "error": "MCP search tool not available"
+                }, status=500)
+            
+            start_time = time.time()
+            
+            # 分析任务需求
+            current_tools = await self.tool_library.get_all_tools()
+            # 转换为字典格式供tool_gap_detector使用
+            current_tools_dict = [
+                {
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type.value if hasattr(tool.tool_type, 'value') else str(tool.tool_type),
+                    "capabilities": [cap.name for cap in getattr(tool, 'capabilities', [])]
+                }
+                for tool in current_tools
+            ]
+            
+            analysis_result = await mcp_search_tool.analyze_tool_needs(
+                task_description=task_description,
+                current_available_tools=current_tools_dict  # 传递字典列表而不是字符串列表
+            )
+            
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            logger.info(f"✅ 工具需求分析完成，耗时: {processing_time_ms}ms")
+            
+            return web.json_response({
+                "success": True,
+                "analysis": {
+                    "task_type": getattr(analysis_result, 'task_type', 'unknown'),
+                    "required_capabilities": getattr(analysis_result, 'required_capabilities', []),
+                    "recommended_tools": getattr(analysis_result, 'recommended_tools', []),
+                    "confidence_score": getattr(analysis_result, 'confidence_score', 0.8),
+                    "reasoning": getattr(analysis_result, 'reasoning', ''),
+                    "tools_needed": getattr(analysis_result, 'tools_needed', [])
+                },
+                "current_tools_count": len(current_tools),
+                "processing_time_ms": processing_time_ms
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ 分析工具需求失败: {e}")
+            return web.json_response({
+                "success": False,
+                "error": str(e)
+            }, status=500)
+    
+    async def search_and_install_tools(self, request):
+        """搜索并安装工具 - 对应enhanced_runtime中的search_and_install_tools调用"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            required_capabilities = data.get('required_capabilities', [])
+            reason = data.get('reason', '')
+            
+            if not task_description:
+                return web.json_response({
+                    "success": False,
+                    "error": "task_description is required"
+                }, status=400)
+            
+            logger.info(f"🔍 搜索并安装工具: {task_description}")
+            
+            # 获取MCP搜索工具
+            mcp_search_tool = getattr(self.tool_library, 'mcp_search_tool', None)
+            if not mcp_search_tool:
+                return web.json_response({
+                    "success": False,
+                    "error": "MCP search tool not available"
+                }, status=500)
+            
+            start_time = time.time()
+            
+            # 获取当前可用工具
+            current_tools = await self.tool_library.get_all_tools()
+            # 转换为字典格式供mcp_search_tool使用
+            current_tools_dict = [
+                {
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type.value if hasattr(tool.tool_type, 'value') else str(tool.tool_type),
+                    "capabilities": [cap.name for cap in getattr(tool, 'capabilities', [])]
+                }
+                for tool in current_tools
+            ]
+            
+            # 搜索并安装工具
+            install_result = await mcp_search_tool.search_and_install_tools(
+                task_description=task_description,
+                current_available_tools=current_tools_dict,  # 传递字典列表
+                reason=reason or f"API request for task: {task_description}"
+            )
+            
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            if install_result.success:
+                logger.info(f"✅ 工具安装成功: {install_result.installed_tools}, 耗时: {processing_time_ms}ms")
+                
+                # 获取更新后的工具列表
+                updated_tools = await self.tool_library.get_all_tools()
+                
+                return web.json_response({
+                    "success": True,
+                    "installed_tools": install_result.installed_tools,
+                    "installation_count": len(install_result.installed_tools),
+                    "total_tools_now": len(updated_tools),
+                    "message": install_result.message,
+                    "processing_time_ms": processing_time_ms
+                })
+            else:
+                logger.warning(f"⚠️ 工具安装失败: {install_result.message}")
+                return web.json_response({
+                    "success": False,
+                    "error": install_result.message,
+                    "processing_time_ms": processing_time_ms
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ 搜索安装工具失败: {e}")
+            return web.json_response({
+                "success": False,
+                "error": str(e)
+            }, status=500)
+    
+    async def execute_tool(self, request):
+        """执行工具 - 对应enhanced_runtime中的execute_tool调用"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            tool_id = data.get('tool_id', '')
+            action = data.get('action', '')
+            parameters = data.get('parameters', {})
+            
+            if not tool_id:
+                return web.json_response({
+                    "success": False,
+                    "error": "tool_id is required"
+                }, status=400)
+            
+            logger.info(f"🚀 执行工具: {tool_id}, 动作: {action}")
+            
+            start_time = time.time()
+            
+            # 执行工具
+            result = await self.tool_library.execute_tool(
+                tool_id=tool_id,
+                action=action,
+                parameters=parameters
+            )
+            
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            if result.success:
+                logger.info(f"✅ 工具执行成功: {tool_id}, 耗时: {processing_time_ms}ms")
+                return web.json_response({
+                    "success": True,
+                    "result": result.result,
+                    "output": result.output,
+                    "processing_time_ms": processing_time_ms
+                })
+            else:
+                logger.warning(f"⚠️ 工具执行失败: {tool_id} - {result.error}")
+                return web.json_response({
+                    "success": False,
+                    "error": result.error,
+                    "processing_time_ms": processing_time_ms
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ 工具执行失败: {e}")
+            return web.json_response({
+                "success": False,
+                "error": str(e)
+            }, status=500)
+
 async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8080):
-    """启动监控API的便捷函数"""
+    """启动监控API服务器的便捷函数"""
     api = ToolScoreMonitoringAPI(tool_library, port)
-    return await api.start() 
+    runner = await api.start()
+    return api, runner 

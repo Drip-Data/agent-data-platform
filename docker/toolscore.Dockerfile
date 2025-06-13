@@ -28,6 +28,9 @@ COPY core/router.py /app/core/router.py
 COPY core/task_manager.py /app/core/task_manager.py
 COPY core/__init__.py /app/core/__init__.py
 
+# Copy the mcp_tools.json file (critical for tool discovery)
+COPY mcp_tools.json /app/mcp_tools.json
+
 # Expose the port the MCP server will run on
 EXPOSE 8080
 

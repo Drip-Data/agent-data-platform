@@ -1245,37 +1245,24 @@ class DynamicMCPManager:
             raise
     
     async def _install_with_caching(self, candidate: MCPServerCandidate) -> InstallationResult:
-        """执行安装并缓存镜像"""
-        # 先执行原有的安装逻辑
-        if candidate.install_method == "docker_local":
-            logger.warning(f"docker_local安装方法被阻止: {candidate.name}")
-            return await self._mock_install_server_enhanced(candidate)
-        elif candidate.install_method == "docker_hub":
-            install_result = await self._install_docker_hub_server_enhanced(candidate)
-        elif candidate.install_method == "docker":
-            install_result = await self._install_docker_server_enhanced(candidate)
-        elif candidate.install_method == "npm":
-            install_result = await self._install_npm_server_enhanced(candidate)
-        elif candidate.install_method == "python":
-            install_result = await self._install_python_server_enhanced(candidate)
-        else:
-            logger.warning(f"不支持的安装方法: {candidate.install_method}")
-            return await self._mock_install_server_enhanced(candidate)
-        
-        # 如果安装成功，缓存镜像
-        if install_result.success and install_result.container_id:
-            try:
-                # 获取容器使用的镜像
-                container = self.docker_client.containers.get(install_result.container_id)
-                image_id = container.image.id
-                
-                # 缓存镜像（异步执行，不阻塞返回）
-                asyncio.create_task(self._cache_container_image(candidate, image_id))
-                
-            except Exception as e:
-                logger.warning(f"缓存镜像失败，但不影响安装结果: {e}")
-        
-        return install_result
+        """使用缓存的安装方法"""
+        try:
+            # 使用core_manager的check_cached_image方法
+            image_name = f"mcp-{candidate.name.lower().replace(' ', '-')}"
+            is_cached = await self.core_manager.check_cached_image(image_name)
+            
+            if is_cached:
+                logger.info(f"使用缓存的镜像: {image_name}")
+                return await self._install_from_cached_image(candidate, image_name)
+            
+            # 如果没有缓存，执行正常安装
+            logger.info(f"没有找到缓存的镜像，执行正常安装: {candidate.name}")
+            return await self._install_docker_server_enhanced(candidate)
+            
+        except Exception as e:
+            logger.error(f"缓存安装失败: {e}")
+            # 降级到正常安装
+            return await self._install_docker_server_enhanced(candidate)
     
     async def _cache_container_image(self, candidate: MCPServerCandidate, image_id: str):
         """缓存容器镜像"""
@@ -1839,7 +1826,7 @@ class DynamicMCPManager:
             # 从持久化存储中删除
             if self._storage_initialized:
                 try:
-                    # await self.persistent_storage.remove_mcp_server(server_id)  # 简化：暂不实现删除
+                    # await self.persistent_storage.remove_mcp_server(server_id)  # 简化：暂不实现删除功能
                     logger.info(f"Removed MCP server {server_id} from persistent storage")
                 except Exception as e:
                     logger.error(f"Failed to remove MCP server {server_id} from storage: {e}")
@@ -2443,8 +2430,24 @@ if __name__ == "__main__":
             import websockets
             import json
             
-            # 连接到MCP服务器
-            uri = endpoint.replace('localhost', '127.0.0.1')  # Docker网络兼容性
+            # 修复URL格式
+            if endpoint.startswith('mock://'):
+                # 对于mock服务器，直接使用回退能力
+                logger.info("Mock server detected, using fallback capabilities")
+                return self._infer_capabilities_from_candidate(fallback_capabilities)
+            
+            # 确保URL格式正确
+            if not endpoint.startswith(('ws://', 'wss://')):
+                endpoint = f"ws://{endpoint}"
+            
+            # 替换localhost为127.0.0.1（Docker网络兼容性）
+            uri = endpoint.replace('localhost', '127.0.0.1')
+            
+            # 添加WebSocket路径
+            if not uri.endswith('/websocket'):
+                uri = f"{uri}/websocket"
+            
+            logger.info(f"Connecting to MCP server at: {uri}")
             
             async with websockets.connect(uri, timeout=10) as websocket:
                 # 发送MCP协议的tools/list请求

@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -r runtimes/reasoning/requirements.txt
 COPY core/ ./core/
 COPY runtimes/ ./runtimes/
 
+# 🔧 新增：复制工具数据库文件
+COPY mcp_tools.json /app/mcp_tools.json
+
 # 设置环境变量
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1

@@ -99,14 +99,20 @@ class RealTimeToolClient:
         
         logger.info(f"🎉 新工具已安装: {tool_name} ({tool_id})")
         
-        # 立即更新本地缓存
-        self.available_tools_cache[tool_id] = event
+        # 立即更新本地缓存，确保包含所有必要字段
+        self.available_tools_cache[tool_id] = {
+            "tool_id": tool_id,
+            "name": tool_name,
+            "description": event.get("description", f"Tool {tool_name}"),
+            "capabilities": event.get("capabilities", []),
+            "tool_type": event.get("tool_type", "function")
+        }
         
         # 通知所有注册的回调
-        await self._notify_tool_available(event)
+        await self._notify_tool_available(self.available_tools_cache[tool_id])
         
         # 检查是否有等待这个工具的任务
-        await self._check_pending_requests(event)
+        await self._check_pending_requests(self.available_tools_cache[tool_id])
     
     async def _handle_tool_uninstalled(self, event: Dict[str, Any]):
         """处理工具卸载事件"""
@@ -206,17 +212,47 @@ class RealTimeToolClient:
     
     async def get_fresh_tools_for_llm(self, fallback_client=None) -> str:
         """获取最新的工具列表，包括刚刚安装的"""
-        # 如果有缓存的工具，优先使用
+        tool_descriptions = []
+        
+        # 获取已注册的工具
+        if fallback_client:
+            try:
+                registered_tools = await fallback_client.get_available_tools()
+                if registered_tools and registered_tools.get("available_tools"):
+                    tool_descriptions.append("# 已注册的工具")
+                    for tool in registered_tools["available_tools"]:
+                        tool_id = tool.get("tool_id", "unknown")
+                        name = tool.get("name", tool_id)
+                        tool_type = tool.get("tool_type", "unknown")
+                        description = tool.get("description", f"Tool {name}")
+                        capabilities = tool.get("capabilities", [])
+                        
+                        desc = f"- {tool_id} ({name}): {description}"
+                        if capabilities:
+                            cap_names = []
+                            for cap in capabilities:
+                                if isinstance(cap, dict):
+                                    cap_names.append(cap.get("name", ""))
+                                elif isinstance(cap, str):
+                                    cap_names.append(cap)
+                            if cap_names:
+                                desc += f" (能力: {', '.join(cap_names)})"
+                        desc += f" [{tool_type}类型]"
+                        tool_descriptions.append(desc)
+            except Exception as e:
+                logger.error(f"获取已注册工具列表失败: {e}")
+        
+        # 如果有缓存的工具，添加实时安装的工具
         if self.available_tools_cache:
-            tool_descriptions = []
+            cached_tools = []
             
             for tool_id, tool_info in self.available_tools_cache.items():
                 name = tool_info.get("name", tool_id)
-                description = tool_info.get("description", "No description")
+                description = tool_info.get("description", f"Tool {name}")
                 capabilities = tool_info.get("capabilities", [])
+                tool_type = tool_info.get("tool_type", "function")
                 
-                desc = f"- {tool_id}: {description}"
-                
+                desc = f"- {tool_id} ({name}): {description}"
                 if capabilities:
                     cap_names = []
                     for cap in capabilities:
@@ -224,29 +260,81 @@ class RealTimeToolClient:
                             cap_names.append(cap.get("name", ""))
                         elif isinstance(cap, str):
                             cap_names.append(cap)
-                    
                     if cap_names:
                         desc += f" (能力: {', '.join(cap_names)})"
+                desc += f" [{tool_type}类型]"
+                cached_tools.append(desc)
+            
+            if cached_tools:
+                tool_descriptions.append("# 实时安装的工具")
+                tool_descriptions.extend(cached_tools)
+            
+            logger.debug(f"使用缓存的工具列表，包含 {len(self.available_tools_cache)} 个工具")
+        
+        final_description = "\n".join(tool_descriptions) if tool_descriptions else "暂无可用工具"
+        
+        # 🔍 新增：记录工具信息获取情况
+        tool_count = len([line for line in final_description.split('\n') if line.strip().startswith('-')])
+        logger.info(f"📋 工具信息获取完成: {tool_count} 个工具, 描述长度: {len(final_description)} 字符")
+        
+        return final_description
+    
+    async def _load_base_tools_from_json(self) -> str:
+        """从mcp_tools.json加载基础工具信息"""
+        try:
+            import json
+            import os
+            
+            # 尝试多个可能的路径
+            possible_paths = [
+                "/app/mcp_tools.json",
+                "mcp_tools.json", 
+                "../mcp_tools.json",
+                "../../mcp_tools.json"
+            ]
+            
+            tools_data = None
+            used_path = None
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        tools_data = json.load(f)
+                    used_path = path
+                    break
+            
+            if not tools_data:
+                logger.warning("未找到mcp_tools.json文件")
+                return ""
+            
+            logger.info(f"📖 从 {used_path} 加载了 {len(tools_data)} 个基础工具")
+            
+            # 格式化工具信息供LLM使用
+            tool_descriptions = []
+            for tool in tools_data[:50]:  # 限制数量避免prompt过长
+                tool_id = tool.get("tool_id", tool.get("id", "unknown"))
+                name = tool.get("name", tool_id)
+                description = tool.get("description", "")
+                capabilities = tool.get("capabilities", [])
+                
+                desc = f"- {tool_id}: {description}"
+                
+                if capabilities:
+                    cap_str = ", ".join(capabilities) if isinstance(capabilities, list) else str(capabilities)
+                    desc += f" (能力: {cap_str})"
                 
                 tool_descriptions.append(desc)
             
-            cached_description = "\n".join(tool_descriptions)
-            logger.debug(f"使用缓存的工具列表，包含 {len(self.available_tools_cache)} 个工具")
-        else:
-            cached_description = ""
-        
-        # 如果有fallback客户端，获取服务器端工具并合并
-        if fallback_client:
-            try:
-                server_description = await fallback_client.get_available_tools_for_llm()
-                if server_description and cached_description:
-                    return f"{cached_description}\n{server_description}"
-                elif server_description:
-                    return server_description
-            except Exception as e:
-                logger.error(f"获取服务器端工具列表失败: {e}")
-        
-        return cached_description or "暂无可用工具"
+            result = "\n".join(tool_descriptions)
+            
+            if len(tools_data) > 50:
+                result += f"\n... 还有 {len(tools_data) - 50} 个工具可通过mcp-search-tool查询"
+                
+            return result
+            
+        except Exception as e:
+            logger.error(f"加载mcp_tools.json失败: {e}")
+            return ""
     
     async def cleanup_expired_requests(self, max_age_seconds: int = 300):
         """清理过期的等待请求"""

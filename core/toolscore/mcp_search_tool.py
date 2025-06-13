@@ -88,9 +88,9 @@ class MCPSearchTool:
                             success=True,
                             message=f"成功安装工具: {candidate.name}",
                             installed_tools=[{
-                                "name": candidate.name,
-                                "description": candidate.description,
-                                "capabilities": candidate.capabilities,
+                            "name": candidate.name,
+                            "description": candidate.description,
+                            "capabilities": candidate.capabilities,
                                 "server_id": install_result.server_id,
                                 "selection_reason": tool_info.get('reason', 'LLM推荐')
                             }]
@@ -100,11 +100,11 @@ class MCPSearchTool:
                 else:
                     logger.warning(f"❌ 工具安装失败: {tool_info.get('name')} - {install_result.error_message}")
             
-            return MCPSearchResult(
-                success=False,
+                return MCPSearchResult(
+                    success=False,
                 message="所有推荐工具安装均失败",
-                installed_tools=[]
-            )
+                    installed_tools=[]
+                )
         
         except Exception as e:
             logger.error(f"❌ MCP搜索安装过程异常: {e}")
@@ -125,11 +125,11 @@ class MCPSearchTool:
             )
             
             # 格式化分析结果
-            has_sufficient = getattr(analysis, 'has_sufficient_tools', analysis.get('has_sufficient_tools', False))
+            has_sufficient = getattr(analysis, 'has_sufficient_tools', False)
             
             result = {
                 "has_sufficient_tools": has_sufficient,
-                "overall_assessment": getattr(analysis, 'overall_assessment', analysis.get('overall_assessment', '分析完成')),
+                "overall_assessment": getattr(analysis, 'overall_assessment', '分析完成'),
                 "recommended_action": "continue_with_existing_tools" if has_sufficient else "search_for_new_tools"
             }
             
@@ -173,26 +173,49 @@ class MCPSearchTool:
             
             # 构造优化的LLM选择prompt
             prompt = self._build_tool_selection_prompt(task_description, truncated_tools)
+            
+            # 🔍 新增：记录发送给LLM的完整prompt
+            logger.info("📤 发送给LLM的prompt:")
+            logger.info(f"   任务描述: {task_description}")
+            logger.info(f"   可选工具数量: {len(truncated_tools)}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"   完整prompt (前500字符): {prompt[:500]}...")
+                logger.debug(f"   工具列表示例: {[tool.get('name', 'Unknown') for tool in truncated_tools[:5]]}")
 
-            # 调用LLM进行选择
+            # 调用LLM进行选择（明确指定gemini提供商）
             from core.llm_client import LLMClient
-            llm_client = LLMClient({})
+            llm_client = LLMClient({"provider": "gemini"})
             llm_response = await llm_client._call_api(prompt)
-
+            
+            # 🔍 新增：记录LLM的原始响应
+            logger.info("📥 LLM响应接收:")
+            logger.info(f"   响应长度: {len(llm_response)} 字符")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"   原始响应 (前300字符): {llm_response[:300]}...")
+            
             # 解析LLM返回的JSON
             selected_tools = self._parse_llm_tool_selection(llm_response)
             
+            # 🔍 新增：记录解析结果详情
             if selected_tools:
                 logger.info(f"✅ LLM成功选择了 {len(selected_tools)} 个工具")
-                for tool in selected_tools:
-                    logger.debug(f"  - {tool.get('name', 'Unknown')}: {tool.get('reason', 'No reason')}")
+                for i, tool in enumerate(selected_tools, 1):
+                    tool_name = tool.get('name', 'Unknown')
+                    tool_reason = tool.get('reason', 'No reason')
+                    logger.info(f"   {i}. {tool_name}: {tool_reason}")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"      完整工具信息: {tool}")
             else:
                 logger.warning("⚠️ LLM未返回有效的工具选择")
+                logger.warning(f"   原始响应: {llm_response}")
             
             return selected_tools
 
         except Exception as e:
             logger.error(f"❌ LLM工具选择失败: {e}")
+            logger.error(f"   异常类型: {type(e).__name__}")
+            if hasattr(e, 'response'):
+                logger.error(f"   API响应: {getattr(e, 'response', 'No response')}")
             return []
 
     def _build_tool_selection_prompt(self, task_description: str, tools_data: List[Dict[str, Any]]) -> str:
@@ -252,18 +275,20 @@ Return format:
     async def _create_candidate_from_tool_info(self, tool_info: Dict[str, Any]):
         """从工具信息创建MCP候选者对象"""
         try:
-            # 这里需要根据实际的MCPServerCandidate类结构来构建
-            # 简化版本，假设tool_info包含足够的安装信息
+            # 根据实际的MCPServerCandidate类结构来构建
             from .dynamic_mcp_manager import MCPServerCandidate
             
             return MCPServerCandidate(
                 name=tool_info.get('name', 'Unknown Tool'),
                 description=tool_info.get('description', ''),
-                repository_url=tool_info.get('repository_url', ''),
+                github_url=tool_info.get('github_url', tool_info.get('repository_url', '')),
+                author=tool_info.get('author', 'Unknown'),
+                tags=tool_info.get('tags', []),
                 install_method=tool_info.get('install_method', 'pip'),
                 capabilities=tool_info.get('capabilities', []),
-                tags=tool_info.get('tags', []),
-                requirements=tool_info.get('requirements', [])
+                verified=tool_info.get('verified', False),
+                security_score=tool_info.get('security_score', 0.0),
+                popularity_score=tool_info.get('popularity_score', 0.0)
             )
         except Exception as e:
             logger.error(f"创建工具候选者失败: {e}")

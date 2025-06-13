@@ -89,16 +89,23 @@ services:
       dockerfile: ./docker/toolscore.Dockerfile
     environment:
       - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # LLM配置
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      # Docker配置
       - DOCKER_NETWORK=agent-data-platform_agent_network
       - DOCKER_PORT_RANGE=8100-8200
       - MCP_IMAGE_CACHE_PATH=/app/mcp_images
       - MCP_CONTAINER_DATA_PATH=/app/mcp_containers
       - MCP_AUTO_RECOVERY=true
     ports:
-      - "8080:8080" # MCP WebSocket server port
-      - "8090:8090" # HTTP monitoring API port
-      - "8091:8091" # WebSocket实时通知端口
+      - "8080:8080"  # WebSocket服务
+      - "8090-8091:8090-8091"  # HTTP API服务
     depends_on:
       redis:
         condition: service_healthy
@@ -106,17 +113,24 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # 允许访问Docker socket
       - mcp_images:/app/mcp_images              # MCP镜像缓存
       - mcp_containers:/app/mcp_containers      # MCP容器数据
-    networks:
-      - agent_network
-    dns: 8.8.8.8 # Add this line
+      - ./mcp_tools.json:/app/mcp_tools.json
     restart: unless-stopped
     privileged: true  # 需要特权模式来使用Docker
+    # 🔧 添加DNS配置，解决DNS解析问题
+    dns:
+      - 8.8.8.8      # Google DNS
+      - 1.1.1.1      # Cloudflare DNS
+    # 🔧 添加网络配置，允许外部访问
+    extra_hosts:
+      - "generativelanguage.googleapis.com:142.250.191.202"  # 固定Google API IP
+    networks:
+      - agent_network
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(1); s.connect((\"localhost\", 8080)); s.close(); print(\"healthy\")'"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: ["CMD-SHELL", "curl -f http://localhost:8090/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # Python Executor MCP Server
   python-executor-server:

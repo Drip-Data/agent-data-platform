@@ -119,7 +119,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if required_cap.lower() in tool_cap.lower() or tool_cap.lower() in required_cap.lower():
                     return True
         
-        return False
+            return False
             
     async def _periodic_cleanup(self):
         """定期清理过期请求"""
@@ -140,7 +140,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     logger.info(f"清理过期任务请求: {task_id}")
                 
             except Exception as e:
-                logger.error(f"定期清理任务异常: {e}")
+                    logger.error(f"定期清理任务异常: {e}")
 
     @property
     def runtime_id(self) -> str:
@@ -164,91 +164,192 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return False
 
     async def execute(self, task: TaskSpec) -> TrajectoryResult:
-        """执行推理任务 - 简化版本，使用ToolScore API"""
+        """执行任务"""
+        logger.info(f"🧠 开始执行任务: {task.description}")
         start_time = time.time()
-        trajectory_id = str(uuid.uuid4())
-        steps: List[ExecutionStep] = []
-        current_outputs: List[str] = []
+        trajectory_id = task.task_id
         success = False
-        final_trajectory_error_type: Optional[ErrorType] = None
-        final_trajectory_error_message: Optional[str] = None
+        final_trajectory_error_type = None
+        final_trajectory_error_message = None
         
-        # 统一的上下文，用于存储跨步骤的状态
-        current_context: Dict[str, Any] = {
-            "browser_state": None
-        }
+        steps: List[ExecutionStep] = []
+        max_steps = 10
+        max_retries = 1
+        retry_delay_seconds = 2
+        current_outputs = []  # 用于存储每步的输出
         
-        # 从ToolScore获取可用工具
+        # 🔍 新增：收集LLM交互信息
+        current_step_llm_interactions = []
+        
+        # 获取可用工具描述
         logger.info("📋 从ToolScore获取可用工具...")
         available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
             fallback_client=self.toolscore_client
         )
-        
-        if not available_tools_description:
-            logger.warning("⚠️ 未获取到可用工具，将尝试直接执行")
-            available_tools_description = "暂无可用工具"
-        
         logger.info(f"📋 获取到工具描述长度: {len(available_tools_description)} 字符")
 
-        # 💡 新增: 智能任务需求分析
+        # 智能任务需求分析
         logger.info("🧠 开始智能任务需求分析...")
+                
+        # 🔍 新增：记录任务需求分析的LLM交互
+        task_analysis_interactions = []
+        original_call_api = self.client._call_api
+        async def wrapped_call_api_for_analysis(prompt: str) -> str:
+            interaction_start = time.time()
+            response = await original_call_api(prompt)
+            
+            from core.interfaces import LLMInteraction
+            interaction = LLMInteraction(
+                provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
+                model=getattr(self.client, 'model', 'unknown'),
+                context="task_requirements_analysis",
+                prompt=prompt,
+                prompt_length=len(prompt),
+                prompt_type="task_analysis",
+                response=response,
+                response_length=len(response),
+                response_time=time.time() - interaction_start
+            )
+            task_analysis_interactions.append(interaction)
+            return response
+        
+        # 临时替换方法进行任务分析
+        self.client._call_api = wrapped_call_api_for_analysis
         try:
             task_requirements = await self.client.analyze_task_requirements(task.description)
-            
-            logger.info("✅ 任务需求分析完成:")
-            logger.info(f"   任务类型: {task_requirements.get('task_type', 'unknown')}")
-            logger.info(f"   所需能力: {task_requirements.get('required_capabilities', [])}")
-            logger.info(f"   推荐工具类型: {task_requirements.get('tools_needed', [])}")
-            logger.info(f"   置信度: {task_requirements.get('confidence', 0.0)}")
-            
-            # 将需求分析结果添加到执行上下文
-            current_context["task_requirements"] = task_requirements
-            
-        except Exception as e:
-            logger.warning(f"⚠️ 任务需求分析失败: {e}，继续正常执行")
-            current_context["task_requirements"] = None
+        finally:
+            self.client._call_api = original_call_api
+        
+        logger.info("✅ 任务需求分析完成:")
+        logger.info(f"   任务类型: {task_requirements.get('task_type')}")
+        logger.info(f"   所需能力: {task_requirements.get('required_capabilities', [])}")
+        logger.info(f"   推荐工具类型: {task_requirements.get('tools_needed', [])}")
+        logger.info(f"   置信度: {task_requirements.get('confidence')}")
+        
+        # 保存任务分析的LLM交互到第一步的预备阶段
+        current_step_llm_interactions.extend(task_analysis_interactions)
 
-        for step_id in range(1, task.max_steps + 1):
-            # 生成推理决策
-            serializable_steps = [s.to_dict() if hasattr(s, 'to_dict') else s.__dict__ for s in steps]
+        for step_id in range(1, max_steps + 1):
+            # 🔍 重置当前步骤的LLM交互记录
+            current_step_llm_interactions = []
             
-            decision = await self.client.generate_enhanced_reasoning(
-                task_description=task.description,
-                available_tools=[],  # 工具ID列表（如果需要）
-                tool_descriptions=available_tools_description,  # 详细工具描述
-                previous_steps=serializable_steps,
-                execution_context=current_context
-            )
+            logger.info(f"🔄 执行步骤 {step_id}/{max_steps}")
             
-            thinking = decision.get('thinking', f"Step {step_id}: Analyzing task and deciding next action")
-            action = decision.get('action')
-            tool_id = decision.get('tool_id') or decision.get('tool')
-            params = decision.get('parameters', {})
-            confidence = decision.get('confidence', 0.0)
-
-            max_retries = 1
-            retry_delay_seconds = 3
+            tool_start = time.time()
+            observation = ""
+            current_attempt_err_type = None
+            current_attempt_err_msg = None
+            tool_success = False
             action_type = ActionType.TOOL_CALL
-
-            for attempt in range(max_retries + 1):
-                tool_start = time.time()
-                observation = ''
-                tool_success = False
-                current_attempt_err_type: Optional[ErrorType] = None
-                current_attempt_err_msg: Optional[str] = None
-                result = None
+            thinking = ""
+            execution_code = ""
+            
+            # 🔍 新增：包装LLM客户端以收集交互信息
+            original_call_api = self.client._call_api
+            async def wrapped_call_api(prompt: str) -> str:
+                # 记录LLM交互开始
+                interaction_start = time.time()
+                
+                # 调用原始方法
+                response = await original_call_api(prompt)
+                
+                # 记录LLM交互
+                from core.interfaces import LLMInteraction
+                interaction = LLMInteraction(
+                    provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
+                    model=getattr(self.client, 'model', 'unknown'),
+                    context=f"step_{step_id}_reasoning",
+                    prompt=prompt,
+                    prompt_length=len(prompt),
+                    prompt_type="task_execution",
+                    response=response,
+                    response_length=len(response),
+                    response_time=time.time() - interaction_start
+                )
+                current_step_llm_interactions.append(interaction)
+                return response
+            
+            # 临时替换方法
+            self.client._call_api = wrapped_call_api
+            
+            try:
+                # 获取下一个动作
+                serializable_steps = [s.to_dict() if hasattr(s, 'to_dict') else s.__dict__ for s in steps]
+                
+                # 获取已注册工具ID列表和描述
+                registered_tools = await self.toolscore_client.get_available_tools()
+                available_tool_ids = [tool.get('tool_id') for tool in registered_tools.get('available_tools', [])]
+                available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
+                    fallback_client=self.toolscore_client
+                )
+                
+                action_result = await self.client.generate_enhanced_reasoning(
+                    task_description=task.description,
+                    available_tools=available_tool_ids,  # 添加已注册工具ID列表
+                    tool_descriptions=available_tools_description,  # 详细工具描述
+                    previous_steps=serializable_steps,
+                    execution_context={}
+                )
+                
+                thinking = action_result.get('thinking', f"Step {step_id}: Analyzing task and deciding next action")
+                action = action_result.get('action')
+                tool_id = action_result.get('tool_id') or action_result.get('tool')
+                params = action_result.get('parameters', {})
+                
+                # 添加action和tool_id到params中以保持兼容性
+                if action:
+                    params['action'] = action
+                if tool_id:
+                    params['tool_id'] = tool_id
 
                 execution_code = json.dumps({
                     'action': action,
                     'tool_id': tool_id,
                     'parameters': params
                 }, ensure_ascii=False)
+            finally:
+                # 恢复原始方法
+                self.client._call_api = original_call_api
 
-                # 特殊处理complete_task
+            # 尝试执行工具调用，包含重试机制
+            for attempt in range(max_retries + 1):
+                
+                # 特殊处理：检查是否完成任务
                 if action == 'complete_task':
-                    summary = await self.client.generate_task_summary(
-                        task.description, [s.__dict__ for s in steps], current_outputs
-                    )
+                    logger.info("🎯 LLM认为任务已完成")
+                    
+                    # 🔍 新增：记录完成任务的总结生成LLM交互
+                    complete_summary_interactions = []
+                    original_call_api_complete = self.client._call_api
+                    async def wrapped_call_api_for_complete_summary(prompt: str) -> str:
+                        interaction_start = time.time()
+                        response = await original_call_api_complete(prompt)
+                        
+                        from core.interfaces import LLMInteraction
+                        interaction = LLMInteraction(
+                            provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
+                            model=getattr(self.client, 'model', 'unknown'),
+                            context=f"step_{step_id}_complete_task_summary",
+                            prompt=prompt,
+                            prompt_length=len(prompt),
+                            prompt_type="complete_task_summary",
+                            response=response,
+                            response_length=len(response),
+                            response_time=time.time() - interaction_start
+                        )
+                        complete_summary_interactions.append(interaction)
+                        return response
+                    
+                    self.client._call_api = wrapped_call_api_for_complete_summary
+                    try:
+                        summary = await self.client.generate_task_summary(
+                            task.description, [s.__dict__ for s in steps], current_outputs
+                        )
+                    finally:
+                        self.client._call_api = original_call_api_complete
+                    
+                    # 将完成任务的总结LLM交互添加到当前步骤
+                    current_step_llm_interactions.extend(complete_summary_interactions)
                     success = True
                     observation = summary
                     tool_success = True
@@ -266,7 +367,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         error_type=None,
                         error_message=None,
                         timestamp=time.time(),
-                        duration=duration
+                        duration=duration,
+                        llm_interactions=current_step_llm_interactions  # 🔍 新增
                     ))
                     break
                 
@@ -313,6 +415,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             )
                             
                             # 更新工具列表
+                            registered_tools = await self.toolscore_client.get_available_tools()
+                            available_tool_ids = [tool.get('tool_id') for tool in registered_tools.get('available_tools', [])]
                             available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
                                 fallback_client=self.toolscore_client
                             )
@@ -327,54 +431,190 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         tool_success = False
                         current_attempt_err_type = ErrorType.TOOL_ERROR
                         current_attempt_err_msg = error_msg
+                
+                # 🔍 新增：处理mcp-search-tool的调用
+                elif tool_id == 'mcp-search-tool' or action in ['search_and_install_tools', 'analyze_tool_needs']:
+                    logger.info(f"🛠️ 检测到mcp-search-tool调用: action={action}")
+                    
+                    try:
+                        # 🔍 通过ToolScore API调用mcp-search-tool
+                        if action == 'analyze_tool_needs':
+                            # 分析工具需求
+                            task_desc = params.get('task_description', task.description)
+                            
+                            # 调用ToolScore的工具分析API
+                            analysis_result = await self.toolscore_client.analyze_tool_needs(
+                                task_description=task_desc
+                            )
+                            
+                            if analysis_result.get("success"):
+                                analysis = analysis_result.get("analysis", {})
+                                needed_tools = analysis.get("needed_tools", [])
+                                recommendations = analysis.get("recommendations", "")
+                                
+                                observation = f"工具需求分析完成。需要的工具类型: {', '.join(needed_tools)}。建议: {recommendations}"
+                                tool_success = True
+                            else:
+                                error_msg = analysis_result.get("message", "分析失败")
+                                observation = f"工具需求分析失败: {error_msg}"
+                                tool_success = False
+                                
+                        elif action == 'search_and_install_tools':
+                            # 搜索并安装工具
+                            task_desc = params.get('task_description', task.description)
+                            reason = params.get('reason', '')
+                            
+                            # 调用ToolScore的工具搜索和安装API
+                            search_result = await self.toolscore_client.search_and_install_tools(
+                                task_description=task_desc,
+                                reason=reason
+                            )
+                            
+                            if search_result.get("success"):
+                                installed_tools = search_result.get("installed_tools", [])
+                                
+                                if installed_tools:
+                                    tool_names = [tool.get("name", tool.get("tool_id", "unknown")) for tool in installed_tools]
+                                    observation = f"成功搜索并安装了 {len(installed_tools)} 个新工具: {', '.join(tool_names)}。"
+                                    
+                                    # 更新可用工具描述
+                                    try:
+                                        available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
+                                            fallback_client=self.toolscore_client
+                                        )
+                                        logger.info("✅ 已更新可用工具列表")
+                                    except Exception as e:
+                                        logger.warning(f"更新工具列表失败: {e}")
+                                else:
+                                    observation = "搜索完成，但未找到合适的新工具。"
+                                
+                                tool_success = True
+                            else:
+                                error_msg = search_result.get("message", "搜索失败")
+                                observation = f"工具搜索失败: {error_msg}"
+                                tool_success = False
+                        else:
+                            # 未知的mcp-search-tool动作
+                            observation = f"不支持的mcp-search-tool动作: {action}"
+                            tool_success = False
+                            
+                    except Exception as e:
+                        logger.error(f"mcp-search-tool调用异常: {e}")
+                        observation = f"mcp-search-tool调用失败: {str(e)}"
+                        tool_success = False
+                        current_attempt_err_type = ErrorType.TOOL_ERROR
+                        current_attempt_err_msg = str(e)
 
                 # 常规工具调用
                 elif tool_id and action:
+                    logger.info(f"🔧 执行工具调用: tool_id={tool_id}, action={action}")
                     logger.debug(f"Attempt {attempt + 1}: Executing action '{action}' with tool_id '{tool_id}'")
                     
-                    # 直接通过MCP客户端执行工具
+                    # 🔍 首先尝试通过ToolScore API执行工具
                     try:
                         # 清理参数
                         cleaned_params = {k: v for k, v in params.items() 
                                         if k not in ['action', 'tool_id', 'tool']}
                         
-                        # 映射工具ID到实际的MCP服务器ID
-                        actual_server_id = self._map_tool_id_to_server(tool_id)
+                        logger.info(f"🌐 通过ToolScore API执行工具: {tool_id}/{action}")
                         
-                        logger.info(f"🔧 调用MCP服务器: {actual_server_id}, 动作: {action}")
+                        # 调用ToolScore的工具执行API
+                        execution_result = await self.toolscore_client.execute_tool(
+                            tool_id=tool_id,
+                            action=action,
+                            parameters=cleaned_params
+                        )
                         
-                        # 调用MCP客户端
-                        result = await self.mcp_client.execute_tool(actual_server_id, action, cleaned_params)
-                        tool_success = result.success
-                        
-                        # 处理结果
-                        if tool_success and result.data:
-                            # 根据工具类型生成简化的观察结果
-                            if 'python' in actual_server_id.lower():
-                                stdout = result.data.get('stdout', '').strip() if isinstance(result.data, dict) else str(result.data)
-                                if stdout:
-                                    observation = f"Python代码执行成功。输出:\n{stdout[:200]}{'...' if len(stdout) > 200 else ''}"
-                                    current_outputs.append(stdout)
+                        if execution_result.get("success"):
+                            tool_success = True
+                            result_data = execution_result.get("result", {})
+                            
+                            # 处理执行结果
+                            if isinstance(result_data, dict):
+                                if result_data.get("stdout"):
+                                    output = result_data["stdout"].strip()
+                                    observation = f"工具 '{tool_id}/{action}' 执行成功。输出: {output[:300]}{'...' if len(output) > 300 else ''}"
+                                    current_outputs.append(output)
                                 else:
-                                    observation = "Python代码执行成功，无输出。"
-                            elif 'browser' in actual_server_id.lower():
-                                if isinstance(result.data, dict):
-                                    url = result.data.get('url', 'N/A')
-                                    title = result.data.get('title', 'N/A')
-                                    observation = f"浏览器操作成功。当前页面: {url}, 标题: {title}"
-                                    
-                                    if action == 'browser_get_text':
-                                        text = result.data.get('text', '')
-                                        if text:
-                                            preview = text[:300] + ('...' if len(text) > 300 else '')
-                                            observation += f"\n页面内容预览:\n{preview}"
-                                else:
-                                    observation = f"浏览器操作 '{action}' 执行成功。"
+                                    observation = f"工具 '{tool_id}/{action}' 执行成功。"
                             else:
-                                observation = f"工具 '{tool_id}' 执行成功。"
+                                output_str = str(result_data)
+                                observation = f"工具 '{tool_id}/{action}' 执行成功。结果: {output_str[:300]}{'...' if len(output_str) > 300 else ''}"
+                                current_outputs.append(output_str)
+                                
+                            logger.info(f"✅ 工具执行成功: {tool_id}")
+                            
                         else:
-                            observation = f"工具 '{tool_id}' 执行成功。"
-                        
+                            # ToolScore执行失败，尝试直接MCP调用
+                            error_msg = execution_result.get("message", "执行失败")
+                            logger.warning(f"ToolScore执行失败: {error_msg}，尝试直接MCP调用")
+                            
+                            # 映射工具ID到实际的MCP服务器ID
+                            actual_server_id = self._map_tool_id_to_server(tool_id)
+                            
+                            logger.info(f"🔧 直接调用MCP服务器: {actual_server_id}, 动作: {action}")
+                            
+                            # 调用MCP客户端
+                            result = await self.mcp_client.execute_tool(actual_server_id, action, cleaned_params)
+                            tool_success = result.success
+                            
+                            # 处理结果 - 修复数据截断问题
+                            if tool_success and result.data:
+                                # 安全处理响应数据，避免截断
+                                try:
+                                    if isinstance(result.data, dict):
+                                        # 对于字典类型，生成简化但完整的观察结果
+                                        data_summary = {}
+                                        for key, value in result.data.items():
+                                            if isinstance(value, (str, int, float, bool)):
+                                                data_summary[key] = value
+                                            elif isinstance(value, dict):
+                                                # 嵌套字典，只保留关键字段
+                                                data_summary[key] = {k: v for k, v in list(value.items())[:3]}
+                                            elif isinstance(value, list):
+                                                # 列表，只保留长度信息
+                                                data_summary[key] = f"List[{len(value)} items]"
+                                            else:
+                                                data_summary[key] = str(type(value).__name__)
+                                        
+                                        observation = f"Tool '{tool_id}/{action}' executed successfully. Summary: {json.dumps(data_summary, ensure_ascii=False)}"
+                                    else:
+                                        # 对于非字典类型，转换为字符串并限制长度
+                                        data_str = str(result.data)
+                                        if len(data_str) > 500:
+                                            data_str = data_str[:500] + "...[truncated]"
+                                        observation = f"Tool '{tool_id}/{action}' executed successfully. Data: {data_str}"
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Error processing tool result: {e}")
+                                    observation = f"Tool '{tool_id}/{action}' executed successfully, but response processing failed: {str(e)}"
+                                
+                                # 根据工具类型生成特定的观察结果
+                                if 'python' in actual_server_id.lower():
+                                    if isinstance(result.data, dict):
+                                        stdout = result.data.get('stdout', '').strip()
+                                        if stdout:
+                                            observation = f"Python代码执行成功。输出:\n{stdout[:200]}{'...' if len(stdout) > 200 else ''}"
+                                            current_outputs.append(stdout)
+                                        else:
+                                            observation = "Python代码执行成功，无输出。"
+                                    elif 'browser' in actual_server_id.lower():
+                                        if isinstance(result.data, dict):
+                                            url = result.data.get('url', 'N/A')
+                                            title = result.data.get('title', 'N/A')
+                                            observation = f"浏览器操作成功。当前页面: {url}, 标题: {title}"
+                                            
+                                            if action == 'browser_get_text':
+                                                text = result.data.get('text', '')
+                                                if text:
+                                                    preview = text[:300] + ('...' if len(text) > 300 else '')
+                                                    observation += f"\n页面内容预览:\n{preview}"
+                            else:
+                                if tool_success:
+                                    observation = f"Tool '{tool_id}/{action}' executed successfully."
+                                else:
+                                    observation = f"Tool '{tool_id}/{action}' execution failed: {result.error_message or 'Unknown error'}"
+
                     except Exception as e:
                         logger.error(f"工具执行异常: {e}")
                         tool_success = False
@@ -437,15 +677,46 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 thinking=thinking,
                 execution_code=execution_code,
                 timestamp=time.time(),
-                duration=duration
+                duration=duration,
+                llm_interactions=current_step_llm_interactions  # 🔍 新增
             ))
 
-            # 检查是否完成
-            completion = await self.client.check_task_completion(
-                task.description,
-                [s.__dict__ for s in steps],
-                current_outputs
-            )
+            # 检查是否完成 - 也需要记录LLM交互
+            completion_interactions = []
+            original_call_api = self.client._call_api
+            async def wrapped_call_api_for_completion(prompt: str) -> str:
+                interaction_start = time.time()
+                response = await original_call_api(prompt)
+                
+                from core.interfaces import LLMInteraction
+                interaction = LLMInteraction(
+                    provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
+                    model=getattr(self.client, 'model', 'unknown'),
+                    context=f"step_{step_id}_completion_check",
+                    prompt=prompt,
+                    prompt_length=len(prompt),
+                    prompt_type="completion_check",
+                    response=response,
+                    response_length=len(response),
+                    response_time=time.time() - interaction_start
+                )
+                completion_interactions.append(interaction)
+                return response
+            
+            self.client._call_api = wrapped_call_api_for_completion
+            try:
+                completion = await self.client.check_task_completion(
+                    task.description,
+                    [s.__dict__ for s in steps],
+                    current_outputs
+                )
+            finally:
+                self.client._call_api = original_call_api
+            
+            # 将完成检查的LLM交互添加到当前步骤
+            if completion_interactions:
+                steps[-1].llm_interactions.extend(completion_interactions)
+            
             if completion.get('completed'):
                 success = True
                 break
@@ -492,15 +763,48 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 elif current_outputs:
                     final_result = f"任务完成。生成结果：\n{chr(10).join(current_outputs[-2:])}"
                 else:
-                    final_result = await self.client.generate_task_summary(
-                        task.description, [s.__dict__ for s in steps], current_outputs
-                    )
+                    # 🔍 新增：记录任务总结生成的LLM交互
+                    summary_interactions = []
+                    original_call_api = self.client._call_api
+                    async def wrapped_call_api_for_summary(prompt: str) -> str:
+                        interaction_start = time.time()
+                        response = await original_call_api(prompt)
+                        
+                        from core.interfaces import LLMInteraction
+                        interaction = LLMInteraction(
+                            provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
+                            model=getattr(self.client, 'model', 'unknown'),
+                            context="final_task_summary",
+                            prompt=prompt,
+                            prompt_length=len(prompt),
+                            prompt_type="task_summary",
+                            response=response,
+                            response_length=len(response),
+                            response_time=time.time() - interaction_start
+                        )
+                        summary_interactions.append(interaction)
+                        return response
+                    
+                    self.client._call_api = wrapped_call_api_for_summary
+                    try:
+                        final_result = await self.client.generate_task_summary(
+                            task.description, [s.__dict__ for s in steps], current_outputs
+                        )
+                    finally:
+                        self.client._call_api = original_call_api
+                    
+                    # 将总结生成的LLM交互添加到最后一步
+                    if summary_interactions and steps:
+                        steps[-1].llm_interactions.extend(summary_interactions)
         else:
             final_result = final_trajectory_error_message or "Task execution failed"
 
         # 创建轨迹结果
         trajectory = TrajectoryResult(
+            task_name=task.task_id,  # 使用task_id作为task_name
             task_id=task.task_id,
+            task_description=task.description,
+            runtime_id=self.runtime_id,
             steps=steps,
             success=success,
             final_result=final_result,

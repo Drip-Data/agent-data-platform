@@ -385,4 +385,20 @@ class CoreManager:
         if self.redis_client:
             await self.redis_client.close()
             
-        logger.info("核心管理器资源已清理") 
+        logger.info("核心管理器资源已清理")
+    
+    async def check_cached_image(self, image_name: str) -> bool:
+        """检查镜像是否已经缓存
+        
+        Args:
+            image_name: 镜像名称
+            
+        Returns:
+            bool: 如果镜像已缓存返回True，否则返回False
+        """
+        try:
+            images = self.docker_client.images.list(name=image_name)
+            return len(images) > 0
+        except Exception as e:
+            logger.error(f"检查镜像缓存失败: {e}")
+            return False 
