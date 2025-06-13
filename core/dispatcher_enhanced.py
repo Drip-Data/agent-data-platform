@@ -187,12 +187,15 @@ class EnhancedTaskDispatcher:
                                 
                                 # 记录工具推荐统计
                                 tool_metadata = task.constraints.get("tool_metadata", {})
-                                logger.debug(f"工具推荐日志: {json.dumps({
+                                log_entry = {
                                     'task_id': task.task_id,
                                     'recommended_tools': task.expected_tools,
                                     'confidence': tool_metadata.get('recommendation_confidence', 0.0),
-                                    'strategy': tool_metadata.get('recommendation_strategy', 'unknown')
-                                })}")
+                                    'strategy': tool_metadata.get('recommendation_strategy', 'unknown'),
+                                }
+                                logger.debug(
+                                    "工具推荐日志: %s", json.dumps(log_entry, ensure_ascii=False)
+                                )
                                 
                             else:
                                 logger.error(f"未找到任务类型 {task.task_type} 对应的队列")
