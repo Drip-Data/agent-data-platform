@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, Union, Awaitable
 from enum import Enum
 import time
 import json
@@ -295,3 +295,88 @@ class LLMInteraction:
                 "available_tools_count": available_tools_count
             }
         )
+
+@dataclass
+class LocalToolSpec:
+    """本地工具规范"""
+    tool_id: str
+    name: str
+    description: str
+    version: str = "1.0.0"
+    actions: List[Dict[str, Any]] = field(default_factory=list)
+    type: str = "function"  # function, http, websocket
+    entry_point: Optional[str] = None  # 对于非function类型，提供服务入口点
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'LocalToolSpec':
+        return cls(**data)
+    
+    def json(self) -> str:
+        return json.dumps(self.to_dict())
+
+class LocalToolInterface(ABC):
+    """本地工具接口"""
+    
+    @property
+    @abstractmethod
+    def tool_spec(self) -> LocalToolSpec:
+        """获取工具规范"""
+        pass
+    
+    @abstractmethod
+    async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """执行工具动作"""
+        pass
+    
+    @abstractmethod
+    async def shutdown(self):
+        """关闭工具"""
+        pass
+
+class ToolRegistryInterface(ABC):
+    """工具注册表接口"""
+    
+    @abstractmethod
+    async def register_tool(self, tool: Union[LocalToolInterface, LocalToolSpec]) -> bool:
+        """注册工具"""
+        pass
+    
+    @abstractmethod
+    async def unregister_tool(self, tool_id: str) -> bool:
+        """注销工具"""
+        pass
+    
+    @abstractmethod
+    async def get_tool(self, tool_id: str) -> Optional[LocalToolSpec]:
+        """获取工具规范"""
+        pass
+    
+    @abstractmethod
+    async def list_tools(self) -> List[LocalToolSpec]:
+        """列出所有可用工具"""
+        pass
+    
+    @abstractmethod
+    async def execute_tool(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """执行工具动作"""
+        pass
+
+# 工具执行器类型定义
+ToolExecutorFunc = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
+
+class LocalToolExecutorInterface(ABC):
+    """本地工具执行器接口"""
+    
+    @abstractmethod
+    async def execute(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """执行工具"""
+        pass
+    
+    @abstractmethod
+    async def register_executor(self, tool_type: str, executor: ToolExecutorFunc):
+        """注册执行器"""
+        pass
