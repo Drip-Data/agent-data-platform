@@ -23,7 +23,7 @@ class PythonExecutorMCPServer:
         self.python_tool = PythonExecutorTool()
         self.server_name = "python_executor_server"
         self.server_id = "python-executor-mcp-server"
-        self.endpoint = "ws://0.0.0.0:8081/mcp"
+        self.endpoint = "ws://0.0.0.0:8083/mcp"
         self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://toolscore:8080/websocket')
         
     def get_capabilities(self) -> List[ToolCapability]:

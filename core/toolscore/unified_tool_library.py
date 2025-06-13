@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 
 from .interfaces import (
     ToolSpec, FunctionToolSpec, MCPServerSpec,
-    ExecutionResult, RegistrationResult, ToolType
+    ExecutionResult, RegistrationResult, ToolType, ErrorType
 )
 from .tool_registry import ToolRegistry
 # from .description_engine import DescriptionEngine  # 精简版本中已移除
@@ -82,8 +82,8 @@ class UnifiedToolLibrary:
             
             # 初始化动态MCP管理器
             from .dynamic_mcp_manager import DynamicMCPManager
-            self.dynamic_mcp_manager = DynamicMCPManager(self)
-            await self.dynamic_mcp_manager.initialize()
+            self.dynamic_mcp_manager = DynamicMCPManager(self.core_manager.runner)
+            await self.dynamic_mcp_manager.start()
             
             # 初始化MCP搜索工具
             from .mcp_search_tool import MCPSearchTool
@@ -382,7 +382,7 @@ class UnifiedToolLibrary:
                 return ExecutionResult(
                     success=False,
                     error_message=f"工具 {tool_id} 未找到",
-                    error_type=ErrorType.TOOL_NOT_FOUND
+                    error_type=ErrorType.TOOL_ERROR
                 )
             
             # 根据工具类型执行
@@ -394,7 +394,7 @@ class UnifiedToolLibrary:
                 return ExecutionResult(
                     success=False,
                     error_message="精简版本暂不支持Function工具执行",
-                    error_type=ErrorType.EXECUTION_ERROR
+                    error_type=ErrorType.SYSTEM_ERROR
                 )
                 
         except Exception as e:
@@ -402,7 +402,7 @@ class UnifiedToolLibrary:
             return ExecutionResult(
                 success=False,
                 error_message=str(e),
-                error_type=ErrorType.EXECUTION_ERROR
+                error_type=ErrorType.SYSTEM_ERROR
             )
     
     async def batch_execute_tools(self, tool_calls: List[Dict[str, Any]]) -> List[ExecutionResult]:

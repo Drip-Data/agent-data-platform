@@ -7,13 +7,17 @@ import asyncio
 import json
 import logging
 import time
-import docker
 import redis.asyncio as redis
 from typing import Dict, Any, List, Optional, Set
 from pathlib import Path
 import websockets
 
 from .interfaces import ToolSpec, MCPServerSpec, ToolCapability, ToolType, RegistrationResult
+
+# Runner 抽象：只使用 ProcessRunner
+from core.toolscore.runners import ProcessRunner, BaseRunner
+from core.toolscore.websocket_manager import WebSocketManager
+from core.toolscore.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +33,14 @@ class CoreManager:
     - 简化的持久化存储 (原persistent_storage)
     """
     
-    def __init__(self, redis_url: str = "redis://redis:6379"):
+    def __init__(self, redis_url: str = "redis://localhost:6379"):
         self.redis_url = redis_url
         self.redis_client: Optional[redis.Redis] = None
-        self.docker_client = docker.from_env()
+
+        # === Runner 选择 ===
+        # 强制注入 ProcessRunner 实例
+        self.runner: BaseRunner = ProcessRunner()
+        logger.info("CoreManager 强制使用 ProcessRunner")
         
         # 内存缓存
         self._tool_cache: Dict[str, Dict[str, Any]] = {}
@@ -77,6 +85,17 @@ class CoreManager:
             }
         ]
         
+        # 初始化各个管理器
+        # 延迟导入避免循环依赖
+        self.dynamic_mcp_manager = None
+        self.websocket_manager = WebSocketManager()
+        self.monitoring_api = None
+        self.cache_manager = CacheManager()
+        
+        # 服务状态
+        self.is_running = False
+        self.persistent_servers: Dict[str, Dict[str, Any]] = {}
+        
         logger.info("✅ 核心管理器初始化完成")
     
     async def initialize(self):
@@ -85,6 +104,14 @@ class CoreManager:
             # 连接Redis
             self.redis_client = redis.from_url(self.redis_url)
             await self.redis_client.ping()
+            
+            # 延迟导入避免循环依赖
+            from core.toolscore.dynamic_mcp_manager import DynamicMCPManager
+            from core.toolscore.monitoring_api import ToolScoreMonitoringAPI
+            
+            self.dynamic_mcp_manager = DynamicMCPManager(runner=self.runner)
+            # 暂时不传入工具库，稍后通过设置方法注入
+            self.monitoring_api = ToolScoreMonitoringAPI()
             
             # 恢复容器
             await self._recover_all_containers()
@@ -103,10 +130,12 @@ class CoreManager:
     async def _recover_all_containers(self):
         """恢复所有MCP容器"""
         try:
-            containers = self.docker_client.containers.list(
-                all=True,
-                filters={"label": "mcp.auto-recover=true"}
-            )
+            # 仅 ProcessRunner 才恢复容器
+            if not isinstance(self.runner, ProcessRunner):
+                logger.info("当前 Runner 非 ProcessRunner，跳过容器恢复")
+                return 0
+
+            containers = self.runner.list_running_containers()
             
             recovered_count = 0
             for container in containers:
@@ -147,8 +176,13 @@ class CoreManager:
             }
         }
         
+        # 当使用 ProcessRunner 时直接返回 None
+        if not isinstance(self.runner, ProcessRunner):
+            logger.debug("ProcessRunner 模式下不创建 Docker 容器")
+            return "process-runner-no-container"
+
         try:
-            container = self.docker_client.containers.run(detach=True, **container_config)
+            container = self.runner.run_container(detach=True, **container_config)
             logger.info(f"创建持久化容器: {container.name}")
             return container.id
             
@@ -397,8 +431,311 @@ class CoreManager:
             bool: 如果镜像已缓存返回True，否则返回False
         """
         try:
-            images = self.docker_client.images.list(name=image_name)
+            images = self.runner.list_images(name=image_name)
             return len(images) > 0
         except Exception as e:
             logger.error(f"检查镜像缓存失败: {e}")
-            return False 
+            return False
+
+    async def start(self):
+        """启动 ToolScore 核心服务"""
+        if self.is_running:
+            logger.warning("CoreManager 已在运行中")
+            return
+
+        try:
+            logger.info("正在启动 ToolScore 核心服务...")
+            
+            # 启动各个组件
+            await self.cache_manager.start()
+            await self.websocket_manager.start()
+            await self.monitoring_api.start()
+            await self.dynamic_mcp_manager.start()
+            
+            # 恢复持久化服务器
+            await self._restore_persistent_servers()
+            
+            self.is_running = True
+            logger.info("ToolScore 核心服务启动完成")
+            
+        except Exception as e:
+            logger.error(f"启动 ToolScore 核心服务失败: {e}")
+            await self.stop()
+            raise
+
+    async def stop(self):
+        """停止 ToolScore 核心服务"""
+        if not self.is_running:
+            return
+
+        try:
+            logger.info("正在停止 ToolScore 核心服务...")
+            
+            # 保存持久化服务器状态
+            await self._save_persistent_servers()
+            
+            # 停止各个组件
+            await self.dynamic_mcp_manager.stop()
+            await self.monitoring_api.stop()
+            await self.websocket_manager.stop()
+            await self.cache_manager.stop()
+            
+            # 清理所有运行的服务器
+            if hasattr(self.runner, 'cleanup_all'):
+                await self.runner.cleanup_all()
+            
+            self.is_running = False
+            logger.info("ToolScore 核心服务已停止")
+            
+        except Exception as e:
+            logger.error(f"停止 ToolScore 核心服务时出错: {e}")
+
+    async def _restore_persistent_servers(self):
+        """恢复持久化的 MCP 服务器"""
+        logger.info("正在恢复持久化的 MCP 服务器...")
+        
+        try:
+            # 从配置文件加载持久化服务器
+            config_path = Path("config/persistent_servers.json")
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    persistent_config = json.load(f)
+                
+                for server_name, server_config in persistent_config.items():
+                    try:
+                        logger.info(f"正在恢复服务器: {server_name}")
+                        result = await self.runner.install_server(server_config)
+                        
+                        if result.get("success"):
+                            self.persistent_servers[server_name] = {
+                                "server_id": result["server_id"],
+                                "endpoint": result["endpoint"],
+                                "config": server_config,
+                                "status": "running"
+                            }
+                            logger.info(f"服务器 {server_name} 恢复成功")
+                        else:
+                            logger.error(f"恢复服务器 {server_name} 失败: {result.get('error_msg')}")
+                            
+                    except Exception as e:
+                        logger.error(f"恢复服务器 {server_name} 时出错: {e}")
+            
+            logger.info(f"持久化服务器恢复完成，成功恢复 {len(self.persistent_servers)} 个服务器")
+            
+        except Exception as e:
+            logger.error(f"恢复持久化服务器时出错: {e}")
+
+    async def _save_persistent_servers(self):
+        """保存持久化服务器状态"""
+        try:
+            config_path = Path("config/persistent_servers.json")
+            config_path.parent.mkdir(exist_ok=True)
+            
+            # 保存配置信息（不包含运行时状态）
+            persistent_config = {}
+            for server_name, server_info in self.persistent_servers.items():
+                if server_info.get("config"):
+                    persistent_config[server_name] = server_info["config"]
+            
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(persistent_config, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"持久化服务器配置已保存到 {config_path}")
+            
+        except Exception as e:
+            logger.error(f"保存持久化服务器配置时出错: {e}")
+
+    async def create_persistent_service(self, service_name: str, image_name: str, 
+                                      port: int, env_vars: Dict[str, str] = None,
+                                      **kwargs) -> Dict[str, Any]:
+        """创建持久化服务 (ProcessRunner 模式)"""
+        logger.info(f"创建持久化服务: {service_name}")
+        
+        try:
+            # 构建服务器配置
+            server_config = {
+                "name": service_name,
+                "repo_url": kwargs.get("repo_url"),
+                "project_type": kwargs.get("project_type", "python"),
+                "entry_point": kwargs.get("entry_point"),
+                "port": port,
+                "env_vars": env_vars or {}
+            }
+            
+            # 启动服务器
+            result = await self.runner.install_server(server_config)
+            
+            if result.get("success"):
+                self.persistent_servers[service_name] = {
+                    "server_id": result["server_id"],
+                    "endpoint": result["endpoint"],
+                    "config": server_config,
+                    "status": "running"
+                }
+                
+                # 保存配置
+                await self._save_persistent_servers()
+                
+                logger.info(f"持久化服务 {service_name} 创建成功")
+                return {
+                    "success": True,
+                    "service_name": service_name,
+                    "endpoint": result["endpoint"],
+                    "server_id": result["server_id"]
+                }
+            else:
+                logger.error(f"创建持久化服务 {service_name} 失败: {result.get('error_msg')}")
+                return {
+                    "success": False,
+                    "error_msg": result.get("error_msg")
+                }
+                
+        except Exception as e:
+            logger.error(f"创建持久化服务 {service_name} 时出错: {e}")
+            return {
+                "success": False,
+                "error_msg": str(e)
+            }
+
+    async def get_service_status(self, service_name: str) -> Dict[str, Any]:
+        """获取服务状态"""
+        if service_name in self.persistent_servers:
+            server_info = self.persistent_servers[service_name]
+            server_id = server_info.get("server_id")
+            endpoint = server_info.get("endpoint")
+            
+            # 检查服务健康状态
+            is_healthy = await self.runner.health_check(endpoint) if endpoint else False
+            
+            return {
+                "service_name": service_name,
+                "server_id": server_id,
+                "endpoint": endpoint,
+                "status": "running" if is_healthy else "unhealthy",
+                "is_healthy": is_healthy
+            }
+        else:
+            return {
+                "service_name": service_name,
+                "status": "not_found",
+                "is_healthy": False
+            }
+
+    async def list_services(self) -> List[Dict[str, Any]]:
+        """列出所有服务"""
+        services = []
+        
+        # 持久化服务
+        for service_name in self.persistent_servers:
+            status = await self.get_service_status(service_name)
+            services.append(status)
+        
+        # 动态 MCP 服务器
+        if hasattr(self.runner, 'list_running_servers'):
+            running_servers = self.runner.list_running_servers()
+            for server_id, server_info in running_servers.items():
+                if server_id not in [s.get("server_id") for s in services]:
+                    services.append({
+                        "service_name": server_info.get("name", server_id),
+                        "server_id": server_id,
+                        "endpoint": server_info.get("endpoint"),
+                        "status": "running",
+                        "is_dynamic": True
+                    })
+        
+        return services
+
+    async def remove_service(self, service_name: str) -> bool:
+        """移除服务"""
+        if service_name not in self.persistent_servers:
+            logger.warning(f"服务 {service_name} 不存在")
+            return False
+        
+        try:
+            server_info = self.persistent_servers[service_name]
+            server_id = server_info.get("server_id")
+            
+            # 停止服务器
+            if server_id:
+                success = await self.runner.stop_server(server_id)
+                if not success:
+                    logger.warning(f"停止服务器 {server_id} 失败，但仍将从配置中移除")
+            
+            # 从持久化配置中移除
+            del self.persistent_servers[service_name]
+            await self._save_persistent_servers()
+            
+            logger.info(f"服务 {service_name} 已移除")
+            return True
+            
+        except Exception as e:
+            logger.error(f"移除服务 {service_name} 时出错: {e}")
+            return False
+
+    def get_stats(self) -> Dict[str, Any]:
+        """获取系统统计信息"""
+        running_servers = getattr(self.runner, 'list_running_servers', lambda: {})()
+        
+        return {
+            "is_running": self.is_running,
+            "persistent_servers": len(self.persistent_servers),
+            "dynamic_servers": len(running_servers),
+            "total_servers": len(self.persistent_servers) + len(running_servers),
+            "runner_type": "ProcessRunner",
+            "cache_stats": self.cache_manager.get_stats() if self.cache_manager else {},
+            "websocket_connections": len(self.websocket_manager.connections) if self.websocket_manager else 0
+        }
+
+    async def health_check(self) -> Dict[str, Any]:
+        """系统健康检查"""
+        health_status = {
+            "overall": "healthy",
+            "components": {},
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+        try:
+            # 检查各个组件
+            components = [
+                ("cache_manager", self.cache_manager),
+                ("websocket_manager", self.websocket_manager),
+                ("monitoring_api", self.monitoring_api),
+                ("dynamic_mcp_manager", self.dynamic_mcp_manager)
+            ]
+            
+            for name, component in components:
+                try:
+                    if hasattr(component, 'health_check'):
+                        component_health = await component.health_check()
+                    else:
+                        component_health = {"status": "running" if getattr(component, 'is_running', True) else "stopped"}
+                    
+                    health_status["components"][name] = component_health
+                    
+                    if component_health.get("status") != "running":
+                        health_status["overall"] = "degraded"
+                        
+                except Exception as e:
+                    health_status["components"][name] = {"status": "error", "error": str(e)}
+                    health_status["overall"] = "unhealthy"
+            
+            # 检查持久化服务
+            unhealthy_services = 0
+            for service_name in self.persistent_servers:
+                status = await self.get_service_status(service_name)
+                if not status.get("is_healthy"):
+                    unhealthy_services += 1
+            
+            if unhealthy_services > 0:
+                health_status["unhealthy_services"] = unhealthy_services
+                if unhealthy_services == len(self.persistent_servers):
+                    health_status["overall"] = "unhealthy"
+                else:
+                    health_status["overall"] = "degraded"
+            
+        except Exception as e:
+            logger.error(f"健康检查时出错: {e}")
+            health_status["overall"] = "error"
+            health_status["error"] = str(e)
+        
+        return health_status 

@@ -1,5 +1,0 @@
-{
-  "task_type": "reasoning",
-  "input": "使用浏览器访问 google.com，搜索 \"Datapresso\"，然后告诉我第一个搜索结果的标题和链接摘要。",
-  "priority": "high"
-} 

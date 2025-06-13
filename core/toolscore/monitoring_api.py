@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ToolScoreMonitoringAPI:
     """ToolScore监控API服务器"""
     
-    def __init__(self, tool_library: Optional[UnifiedToolLibrary] = None, port: int = 8080):
+    def __init__(self, tool_library: Optional[UnifiedToolLibrary] = None, port: int = 8082):
         self.tool_library = tool_library
         self.port = port
         self.app = web.Application()
@@ -1004,15 +1004,15 @@ class ToolScoreMonitoringAPI:
                 logger.info(f"✅ 工具执行成功: {tool_id}, 耗时: {processing_time_ms}ms")
                 return web.json_response({
                     "success": True,
-                    "result": result.result,
-                    "output": result.output,
+                    "result": result.data,
+                    "output": result.data,
                     "processing_time_ms": processing_time_ms
                 })
             else:
-                logger.warning(f"⚠️ 工具执行失败: {tool_id} - {result.error}")
+                logger.warning(f"⚠️ 工具执行失败: {tool_id} - {result.error_message}")
                 return web.json_response({
                     "success": False,
-                    "error": result.error,
+                    "error": result.error_message,
                     "processing_time_ms": processing_time_ms
                 })
                 

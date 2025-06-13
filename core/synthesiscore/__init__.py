@@ -17,11 +17,6 @@ try:
 except ImportError:
     SynthesisManager = None
 
-try:
-    from .docker_manager import DockerManager
-except ImportError:
-    DockerManager = None
-
 # JSON存储版本不需要数据库初始化
 # 注释掉数据库相关导入
 # from .init_synthesis_db import init_synthesis_database as init_database
@@ -30,7 +25,6 @@ __all__ = [
     'SimpleSynthesizer',
     'TaskEssence',
     'synthesis_api',
-    'SynthesisManager',
-    'DockerManager'
+    'SynthesisManager'
     # 'init_database'  # JSON版本不需要
 ] 

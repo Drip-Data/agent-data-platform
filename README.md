@@ -10,7 +10,7 @@
 
 Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨迹而设计的集成系统。平台的**核心创新**在于 AI Agent 能够**主动发现工具缺口、搜索并安装新的MCP服务器工具**，实现真正的自我进化能力。
 
-系统支持多种强大的工具（代码执行、浏览器导航、动态工具安装），通过健壮的、基于消息队列的架构来处理复杂的、多步骤的任务，并自动生成高质量的 Agent 轨迹数据用于评估、微调和研究。
+系统支持多种强大的工具（代码执行、浏览器导航、动态工具安装），通过健壮的、基于进程的架构来处理复杂的、多步骤的任务，并自动生成高质量的 Agent 轨迹数据用于评估、微调和研究。
 
 ## ✨ 核心特性
 
@@ -21,13 +21,13 @@ Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨�
 
 ### 🔧 动态工具管理
 - **MCP工具注册机制**: 智能工具缺口检测和自动工具安装
-- **多源搜索**: 支持GitHub、Docker Hub等多个工具源的并行搜索
-- **安全评估**: 信任作者验证、安全性评分、Docker隔离运行
+- **多源搜索**: 支持GitHub等多个工具源的并行搜索
+- **安全评估**: 信任作者验证、安全性评分、进程隔离运行
 
 ### 🏗️ 可扩展架构
 - **模块化设计**: Core、Runtimes、ToolScore三大核心模块
 - **MCP协议支持**: 标准化的工具接口和跨进程通信
-- **Docker容器化**: 基于Docker Compose的服务编排
+- **进程管理**: 基于ProcessRunner的轻量级进程管理
 
 ### 📊 完整的学习闭环
 - **轨迹追踪**: 详细记录每步执行的思考链、工具调用和结果
@@ -38,7 +38,7 @@ Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨�
 
 ### 1. 环境准备
 
-确保您的机器上安装了 [Docker](https://www.docker.com/products/docker-desktop/) 和 [Docker Compose](https://docs.docker.com/compose/install/)。
+确保您的机器上安装了 Python 3.10+ 和 pip。
 
 ### 2. 克隆与配置
 
@@ -47,8 +47,16 @@ Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨�
 git clone https://github.com/Drip-Data/agent-data-platform.git
 cd agent-data-platform
 
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 或 venv\Scripts\activate  # Windows
+
+# 安装依赖
+pip install -r requirements.txt
+
 # 从模板创建环境变量文件
-cp .env.example .env
+cp env.example .env
 ```
 
 编辑 `.env` 文件，填入您的API密钥：
@@ -66,11 +74,11 @@ SAVE_INDIVIDUAL_TRAJECTORIES=false
 ### 3. 启动服务
 
 ```bash
-# 构建并启动所有服务
-docker-compose up -d --build
+# 启动Redis (如果需要)
+redis-server
 
-# 检查服务状态
-docker-compose ps
+# 启动主服务
+python main.py
 ```
 
 ## 🧪 测试您的Agent
@@ -78,7 +86,7 @@ docker-compose ps
 ### 基础推理任务
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{
+curl -X POST http://localhost:8080/api/v1/tasks -H "Content-Type: application/json" -d '{
   "task_type": "reasoning",
   "input": "使用Python计算第10个斐波那契数并返回结果",
   "priority": "high"
@@ -88,7 +96,7 @@ curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/js
 ### 浏览器导航任务
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{
+curl -X POST http://localhost:8080/api/v1/tasks -H "Content-Type: application/json" -d '{
   "task_type": "reasoning", 
   "input": "访问 https://datapresso.ai/，并告诉我网站的标题",
   "priority": "high"
@@ -98,7 +106,7 @@ curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/js
 ### 复杂多步骤任务
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{
+curl -X POST http://localhost:8080/api/v1/tasks -H "Content-Type: application/json" -d '{
   "task_type": "reasoning",
   "input": "搜索新加坡国立大学IORA研究所的教授信息，并生成研究领域分析图表",
   "priority": "high"
@@ -109,10 +117,10 @@ curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/js
 
 ```bash
 # 查看最新轨迹
-docker exec -it agent-data-platform-reasoning-runtime-1 cat /app/output/trajectories/trajectories_collection.json | jq .[-1]
+cat output/trajectories/trajectories_collection.json | jq .[-1]
 
 # 查看服务日志
-docker-compose logs -f reasoning-runtime
+tail -f logs/toolscore.log
 ```
 
 ## 🏗️ 系统架构
@@ -158,6 +166,10 @@ agent-data-platform/
 │   │   ├── unified_tool_library.py
 │   │   ├── dynamic_mcp_manager.py
 │   │   ├── mcp_search_tool.py
+│   │   ├── runners/        # 进程运行器
+│   │   │   ├── base.py
+│   │   │   ├── process_runner.py
+│   │   │   └── docker_runner.py (已移除)
 │   │   └── tool_gap_detector.py
 │   └── synthesiscore/      # 任务合成模块
 ├── runtimes/               # 运行时实现
@@ -173,7 +185,8 @@ agent-data-platform/
 ├── docs/                   # 文档目录
 ├── scripts/                # 部署脚本
 ├── config/                 # 配置文件
-├── docker-compose.yml      # 服务编排
+├── requirements.txt        # Python依赖
+├── main.py                # 主启动文件
 └── tasks.jsonl            # 任务定义文件
 ```
 
@@ -191,92 +204,91 @@ agent-data-platform/
 
 ```bash
 # Redis配置
-REDIS_URL=redis://redis:6379
-REDIS_MAX_CONNECTIONS=20
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# 进程配置
+PROCESS_PORT_RANGE_START=8100
+PROCESS_PORT_RANGE_END=8200
+PROCESS_TIMEOUT=300
 
 # 任务配置
 MAX_CONCURRENT_TASKS=10
 TASK_TIMEOUT=300
-
-# 监控配置
-METRICS_PORT=8001
-HEALTH_CHECK_INTERVAL=30
 ```
 
-### 性能调优
+### 扩展配置
 
 ```bash
-# 扩展运行时实例
-docker-compose up -d --scale reasoning-runtime=4
+# 启用多实例
+python main.py --workers 4
 
-# 调整并发限制
-export MAX_CONCURRENT_TASKS=20
+# 启用调试模式
+python main.py --debug
 
-# 优化内存使用
-export MEMORY_LIMIT=4g
+# 指定配置文件
+python main.py --config config/production.yaml
 ```
 
-## 📊 监控和运维
+## 🔍 监控和调试
 
-### 监控面板
-
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3000 (admin/admin)
-- **Runtime Metrics**: http://localhost:8001/metrics
-
-### 关键指标
-
-- 任务完成率和失败率
-- 平均处理时间
-- 队列大小
-- 缓存命中率
-- 动态工具安装统计
-
-## 🔍 故障排查
-
-### 常见问题
-
-1. **服务启动失败** - 检查端口占用和磁盘空间
-2. **任务执行卡住** - 检查Redis队列和重启运行时
-3. **工具调用失败** - 验证工具服务器状态
-4. **内存溢出** - 限制内存使用或增加资源
-
-### 调试命令
+### 日志查看
 
 ```bash
-# 查看服务状态
-docker-compose ps
-
 # 查看实时日志
-docker-compose logs -f reasoning-runtime
+tail -f logs/toolscore.log
 
-# 检查队列状态
-docker exec $(docker-compose ps -q redis) redis-cli xlen tasks:reasoning
+# 查看错误日志
+grep ERROR logs/toolscore.log
 
-# 健康检查
-curl http://localhost:8001/health
+# 查看特定组件日志
+grep "DynamicMCPManager" logs/toolscore.log
+```
+
+### 健康检查
+
+```bash
+# 检查服务状态
+curl http://localhost:8080/health
+
+# 检查MCP服务器状态
+curl http://localhost:8080/api/v1/mcp/servers
+
+# 查看系统统计
+curl http://localhost:8080/api/v1/stats
 ```
 
 ## 🤝 贡献指南
 
-1. Fork 项目
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+我们欢迎社区贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何参与项目开发。
+
+### 开发环境设置
+
+```bash
+# 克隆开发分支
+git clone -b develop https://github.com/Drip-Data/agent-data-platform.git
+
+# 安装开发依赖
+pip install -r requirements-dev.txt
+
+# 运行测试
+python -m pytest tests/
+
+# 代码格式化
+black .
+isort .
+```
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 查看 LICENSE 文件了解详情。
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
 ## 🙏 致谢
 
-- **MCP协议** - 标准化的工具通信协议
-- **Docker** - 容器化部署支持
-- **Redis** - 高性能任务队列
-- **Playwright** - 现代Web自动化
-- **Prometheus & Grafana** - 监控和可视化
+- **MCP协议** - 感谢 Anthropic 提供的模型上下文协议
+- **开源社区** - 感谢所有贡献者和维护者
+- **Python生态** - 基于优秀的Python工具链构建
 
 ---
 
-**一句话总结**：Agent Data Platform是一个支持动态工具扩展的智能Agent系统，AI可以根据任务需求主动搜索安装新工具，实现真正的自我进化！🚀
+**Agent Data Platform** - 让AI Agent更智能，让数据构建更简单 🚀

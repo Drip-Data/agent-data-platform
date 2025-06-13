@@ -48,7 +48,9 @@ class PythonExecutorTool:
     """Python执行器工具"""
     
     def __init__(self):
-        self.output_dir = "/app/output"
+        # 使用项目相对路径替代硬编码的Docker路径
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        self.output_dir = os.path.join(project_root, "output", "python_execution")
         # 确保输出目录存在
         os.makedirs(self.output_dir, exist_ok=True)
         self.temp_dir = tempfile.mkdtemp()
