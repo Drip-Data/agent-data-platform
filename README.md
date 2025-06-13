@@ -1,294 +1,415 @@
 # Agent Data Platform
 
-![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-active-brightgreen)
+🚀 **智能代理数据平台** - 基于MCP协议的多模态AI任务执行框架
 
-一个生产级的、可扩展的、支持动态工具扩展的 AI Agent 数据构建平台。
+## 📖 项目简介
 
-## 📖 概述
+Agent Data Platform是一个先进的智能代理系统，旨在构建可扩展的AI任务执行和数据处理平台。该系统采用**模块化微服务架构**，结合**大语言模型推理**和**工具调用能力**，为复杂任务的自动化执行提供完整解决方案。
 
-Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨迹而设计的集成系统。平台的**核心创新**在于 AI Agent 能够**主动发现工具缺口、搜索并安装新的MCP服务器工具**，实现真正的自我进化能力。
+### 🎯 核心特性
 
-系统支持多种强大的工具（代码执行、浏览器导航、动态工具安装），通过健壮的、基于进程的架构来处理复杂的、多步骤的任务，并自动生成高质量的 Agent 轨迹数据用于评估、微调和研究。
-
-## ✨ 核心特性
-
-### 🧠 智能决策系统
-- **双版本Runtime**: 基础版本 + 增强版本（支持动态MCP工具管理）
-- **LLM驱动决策**: 使用先进的LLM（Gemini）进行任务分解、工具选择和智能推理
-- **上下文感知**: 维护执行上下文，从失败中学习，避免重复错误
-
-### 🔧 动态工具管理
-- **MCP工具注册机制**: 智能工具缺口检测和自动工具安装
-- **多源搜索**: 支持GitHub等多个工具源的并行搜索
-- **安全评估**: 信任作者验证、安全性评分、进程隔离运行
-
-### 🏗️ 可扩展架构
-- **模块化设计**: Core、Runtimes、ToolScore三大核心模块
-- **MCP协议支持**: 标准化的工具接口和跨进程通信
-- **进程管理**: 基于ProcessRunner的轻量级进程管理
-
-### 📊 完整的学习闭环
-- **轨迹追踪**: 详细记录每步执行的思考链、工具调用和结果
-- **任务合成**: 从轨迹中提取任务本质，生成新的训练数据
-- **监控指标**: Prometheus + Grafana 监控体系
-
-## 🚀 快速开始
-
-### 1. 环境准备
-
-确保您的机器上安装了 Python 3.10+ 和 pip。
-
-### 2. 克隆与配置
-
-```bash
-# 克隆仓库
-git clone https://github.com/Drip-Data/agent-data-platform.git
-cd agent-data-platform
-
-# 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 从模板创建环境变量文件
-cp env.example .env
-```
-
-编辑 `.env` 文件，填入您的API密钥：
-
-```env
-# LLM API配置
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_API_URL=your_gemini_api_url
-
-# 功能开关
-DISABLE_CACHE=false
-SAVE_INDIVIDUAL_TRAJECTORIES=false
-```
-
-### 3. 启动服务
-
-```bash
-# 启动Redis (如果需要)
-redis-server
-
-# 启动主服务
-python main.py
-```
-
-## 🧪 测试您的Agent
-
-### 基础推理任务
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tasks -H "Content-Type: application/json" -d '{
-  "task_type": "reasoning",
-  "input": "使用Python计算第10个斐波那契数并返回结果",
-  "priority": "high"
-}'
-```
-
-### 浏览器导航任务
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tasks -H "Content-Type: application/json" -d '{
-  "task_type": "reasoning", 
-  "input": "访问 https://datapresso.ai/，并告诉我网站的标题",
-  "priority": "high"
-}'
-```
-
-### 复杂多步骤任务
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tasks -H "Content-Type: application/json" -d '{
-  "task_type": "reasoning",
-  "input": "搜索新加坡国立大学IORA研究所的教授信息，并生成研究领域分析图表",
-  "priority": "high"
-}'
-```
-
-### 查看执行结果
-
-```bash
-# 查看最新轨迹
-cat output/trajectories/trajectories_collection.json | jq .[-1]
-
-# 查看服务日志
-tail -f logs/toolscore.log
-```
+- **🧠 智能推理引擎**: 基于Gemini LLM的Enhanced Reasoning Runtime
+- **🔧 动态工具调用**: MCP协议驱动的工具管理和执行系统
+- **⚡ 高性能调度**: Redis支持的异步任务队列处理
+- **🌐 RESTful API**: 标准化的任务提交和状态查询接口
+- **🔒 安全代码执行**: 沙箱化Python代码执行环境
+- **📊 实时监控**: 完整的任务执行轨迹追踪和分析
 
 ## 🏗️ 系统架构
 
-### 核心模块
-
-1. **Core模块** - 任务分发和基础服务
-   - `TaskDispatcher` - 任务分发器
-   - `LLMClient` - LLM集成客户端
-   - `Interfaces` - 核心接口定义
-
-2. **Runtimes模块** - 智能执行引擎
-   - `ReasoningRuntime` - 基础推理运行时
-   - `EnhancedReasoningRuntime` - 增强版本（支持动态工具管理）
-   - `SandboxRuntime` - 代码执行沙盒
-   - `WebRuntime` - Web导航运行时
-
-3. **ToolScore模块** - 工具管理平台
-   - `UnifiedToolLibrary` - 统一工具库
-   - `DynamicMCPManager` - 动态MCP管理器
-   - `MCPSearchTool` - MCP搜索工具
-   - `ToolGapDetector` - 工具缺口检测器
-
-### Runtime版本对比
-
-| 特性 | 基础版本 | 增强版本 |
-|------|----------|----------|
-| 内置工具 | ✅ browser, python_executor | ✅ 全部基础工具 |
-| 动态工具安装 | ❌ | ✅ MCP服务器搜索安装 |
-| 智能工具检测 | ❌ | ✅ LLM驱动的工具缺口分析 |
-| 上下文感知 | ❌ | ✅ 执行上下文管理 |
-| 适用场景 | 简单推理任务 | 复杂自适应任务 |
-
-## 📁 项目结构
-
 ```
-agent-data-platform/
-├── core/                    # 核心调度逻辑
-│   ├── interfaces.py        # 接口定义
-│   ├── dispatcher.py        # 任务分发器
-│   ├── llm_client.py        # LLM客户端
-│   ├── toolscore/          # 工具管理模块
-│   │   ├── unified_tool_library.py
-│   │   ├── dynamic_mcp_manager.py
-│   │   ├── mcp_search_tool.py
-│   │   ├── runners/        # 进程运行器
-│   │   │   ├── base.py
-│   │   │   ├── process_runner.py
-│   │   │   └── docker_runner.py (已移除)
-│   │   └── tool_gap_detector.py
-│   └── synthesiscore/      # 任务合成模块
-├── runtimes/               # 运行时实现
-│   ├── reasoning/          # 推理运行时
-│   │   ├── runtime.py      # 基础版本
-│   │   ├── enhanced_runtime.py  # 增强版本
-│   │   └── tools/          # 内置工具
-│   ├── sandbox/            # 代码执行沙盒
-│   └── web_navigator/      # Web导航运行时
-├── mcp_servers/            # MCP工具服务器
-│   ├── browser_navigator_server/
-│   └── python_executor_server/
-├── docs/                   # 文档目录
-├── scripts/                # 部署脚本
-├── config/                 # 配置文件
-├── requirements.txt        # Python依赖
-├── main.py                # 主启动文件
-└── tasks.jsonl            # 任务定义文件
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   用户/客户端    │───▶│    Task API      │───▶│   Redis队列      │
+│                 │    │    (端口:8000)    │    │   (端口:6379)    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                         │
+                                                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              Enhanced Reasoning Runtime                          │
+│                     (推理引擎)                                   │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  ToolScore      │◀───│   HTTP调度接口    │───▶│  Python执行器   │
+│  MCP Server     │    │   (端口:8082)     │    │  MCP Server     │
+│  (端口:8081)     │    │                  │    │  (端口:8083)     │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
-## 📚 详细文档
+## 🔄 执行流程
 
-- **[完整任务执行流程详解](MCP任务执行流程详解.md)** - 深入了解Agent执行机制
-- **[MCP主动选择机制使用指南](MCP_主动选择机制使用指南.md)** - 动态工具管理指南
-- **[系统架构分析](ARCHITECTURE_ANALYSIS.md)** - 架构设计和实现状况
-- **[快速开始指南](QUICK_START.md)** - 详细的部署和使用说明
-- **[外部API配置指南](docs/外部API配置指南.md)** - LLM API配置说明
+### 1. 任务提交流程
+```
+用户请求 → Task API → Redis任务队列 → Enhanced Reasoning Runtime
+```
 
-## 🔧 高级配置
+### 2. 智能推理流程
+```
+任务分析 → LLM推理 → 代码生成 → 工具选择 → 执行计划
+```
 
-### 环境变量
+### 3. 工具执行流程
+```
+ToolScore调度 → MCP Server → Python执行器 → 结果返回 → 状态更新
+```
+
+### 4. 完整示例流程
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant API as Task API
+    participant Redis as Redis队列
+    participant Runtime as Reasoning Runtime
+    participant LLM as Gemini LLM
+    participant ToolScore as ToolScore
+    participant Executor as Python执行器
+
+    User->>API: 提交任务
+    API->>Redis: 加入队列
+    Redis->>Runtime: 消费任务
+    Runtime->>LLM: 任务分析
+    LLM->>Runtime: 生成代码
+    Runtime->>ToolScore: 工具调用
+    ToolScore->>Executor: 执行代码
+    Executor->>ToolScore: 返回结果
+    ToolScore->>Runtime: 执行结果
+    Runtime->>API: 更新状态
+    API->>User: 返回结果
+```
+
+## 🛠️ 技术栈
+
+| 组件 | 技术 | 版本 | 用途 |
+|------|------|------|------|
+| **后端框架** | FastAPI | 最新 | HTTP API服务 |
+| **任务队列** | Redis | 6+ | 异步任务调度 |
+| **AI模型** | Google Gemini | 2.5-flash | 智能推理引擎 |
+| **工具协议** | MCP | 1.0 | 工具管理和调用 |
+| **运行时** | Python | 3.12+ | 代码执行环境 |
+| **网络通信** | WebSocket/HTTP | - | 服务间通信 |
+
+## 📦 安装指南
+
+### 环境要求
+
+- **Python**: 3.12+
+- **Conda**: 推荐使用conda环境管理
+- **Redis**: 6.0+
+- **内存**: 建议4GB+
+- **操作系统**: macOS/Linux/Windows
+
+### 1. 克隆项目
 
 ```bash
+git clone <your-repo-url>
+cd agent-data-platform
+```
+
+### 2. 创建Conda环境
+
+```bash
+# 创建专用环境
+conda create -n dpresso python=3.12 -y
+conda activate dpresso
+```
+
+### 3. 安装依赖
+
+```bash
+# 安装核心依赖
+pip install -r requirements.txt
+
+# 安装额外的MCP和AI依赖
+pip install fastapi uvicorn aiohttp websockets redis asyncio-mqtt
+pip install google-generativeai pandas matplotlib numpy
+```
+
+### 4. 配置Redis
+
+```bash
+# macOS (使用Homebrew)
+brew install redis
+brew services start redis
+
+# Ubuntu/Debian
+sudo apt-get install redis-server
+sudo systemctl start redis
+
+# 验证Redis运行
+redis-cli ping  # 应返回 PONG
+```
+
+### 5. 环境配置
+
+创建 `.env` 文件（可选）：
+
+```bash
+# AI配置
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# 服务端口配置
+TASK_API_PORT=8000
+TOOLSCORE_MCP_PORT=8081
+TOOLSCORE_HTTP_PORT=8082
+PYTHON_EXECUTOR_PORT=8083
+
 # Redis配置
-REDIS_HOST=localhost
-REDIS_PORT=6379
+REDIS_URL=redis://localhost:6379
 
-# 进程配置
-PROCESS_PORT_RANGE_START=8100
-PROCESS_PORT_RANGE_END=8200
-PROCESS_TIMEOUT=300
-
-# 任务配置
-MAX_CONCURRENT_TASKS=10
-TASK_TIMEOUT=300
+# 工具服务URL配置
+TOOLSCORE_HTTP_URL=http://localhost:8082
+TOOLSCORE_WS_URL=ws://localhost:8082
+TOOLSCORE_URL=ws://localhost:8081/websocket
 ```
 
-### 扩展配置
+## 🚀 快速启动
+
+### 一键启动（推荐）
 
 ```bash
-# 启用多实例
-python main.py --workers 4
-
-# 启用调试模式
-python main.py --debug
-
-# 指定配置文件
-python main.py --config config/production.yaml
+# 激活环境并启动完整系统
+conda activate dpresso
+GEMINI_API_KEY=your_api_key_here python main.py
 ```
 
-## 🔍 监控和调试
+启动成功后，您将看到以下输出：
+```
+Agent Data Platform 启动成功！
+✅ Redis连接正常
+✅ ToolScore MCP Server启动 (端口: 8081)  
+✅ ToolScore Monitoring API启动 (端口: 8082)
+✅ Python Executor启动 (端口: 8083)
+✅ Task API启动 (端口: 8000)
+🚀 Enhanced Reasoning Runtime消费者启动
+```
 
-### 日志查看
+### 验证服务状态
+
+```bash
+# 检查核心服务
+curl http://localhost:8082/health  # ToolScore监控API
+curl http://localhost:8000/health  # Task API
+
+# 检查Redis连接
+redis-cli ping
+```
+
+## 🧪 测试指南
+
+### 1. 基础功能测试
+
+**测试简单计算任务：**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "请用Python计算1+2+3+...+100的和", 
+    "description": "数列求和测试"
+  }'
+```
+
+**预期响应：**
+```json
+{
+  "task_id": "uuid-string",
+  "status": "queued",
+  "message": "Task submitted successfully"
+}
+```
+
+### 2. 查询任务状态
+
+```bash
+# 替换为实际的task_id
+curl http://localhost:8000/api/v1/tasks/{task_id}
+```
+
+**完成后的响应：**
+```json
+{
+  "task_id": "uuid-string",
+  "status": "completed",
+  "result": {
+    "success": true,
+    "final_result": "任务完成。生成结果：\n5050",
+    "total_duration": 25.3
+  }
+}
+```
+
+### 3. 复杂任务测试
+
+**数据分析任务：**
+```bash
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "生成1-10的随机数列表，计算平均值、最大值和最小值",
+    "description": "数据分析测试"
+  }'
+```
+
+**数学计算任务：**
+```bash
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "计算圆周率π的前10位小数，使用莱布尼茨公式",
+    "description": "数学计算测试"
+  }'
+```
+
+### 4. 性能测试脚本
+
+使用内置测试脚本：
+
+```bash
+# 简单任务提交测试
+python scripts/test_submit_task_simple.py
+
+# 复杂任务测试
+python scripts/test_submit_task.py "计算斐波那契数列前20项"
+```
+
+## 📊 监控和调试
+
+### 日志文件
+
+系统日志保存在 `logs/` 目录：
 
 ```bash
 # 查看实时日志
 tail -f logs/toolscore.log
 
-# 查看错误日志
-grep ERROR logs/toolscore.log
+# 查看Enhanced Runtime日志
+grep "Enhanced" logs/toolscore.log
 
-# 查看特定组件日志
-grep "DynamicMCPManager" logs/toolscore.log
+# 查看工具执行日志
+grep "python_execute" logs/toolscore.log
 ```
 
-### 健康检查
+### 队列监控
 
 ```bash
-# 检查服务状态
-curl http://localhost:8080/health
+# 查看任务队列长度
+redis-cli xlen tasks:reasoning
 
-# 检查MCP服务器状态
-curl http://localhost:8080/api/v1/mcp/servers
+# 查看队列中的任务
+redis-cli xrange tasks:reasoning - +
+```
 
-# 查看系统统计
-curl http://localhost:8080/api/v1/stats
+### 执行轨迹
+
+完整的任务执行轨迹保存在：
+```
+output/trajectories/trajectories_collection.json
+```
+
+## ⚙️ 配置选项
+
+### 端口配置
+
+如需修改默认端口，编辑相应配置：
+
+```python
+# main.py 中的端口配置
+TOOLSCORE_MCP_PORT = 8081
+TOOLSCORE_HTTP_PORT = 8082  
+PYTHON_EXECUTOR_PORT = 8083
+TASK_API_PORT = 8000
+```
+
+### LLM配置
+
+支持切换不同的AI模型：
+
+```python
+# core/llm_client.py
+self.providers = {
+    "gemini": GeminiProvider(),
+    # 可添加其他提供商
+}
+```
+
+## 🔧 故障排除
+
+### 常见问题
+
+**1. Redis连接失败**
+```bash
+# 检查Redis是否运行
+redis-cli ping
+# 重启Redis服务
+brew services restart redis  # macOS
+sudo systemctl restart redis # Linux
+```
+
+**2. 端口冲突**
+```bash
+# 检查端口占用
+lsof -i :8000
+lsof -i :8081
+lsof -i :8082
+lsof -i :8083
+```
+
+**3. Gemini API问题**
+- 确认API密钥有效
+- 检查网络连接
+- 验证API配额
+
+**4. 任务停留在队列**
+```bash
+# 检查Enhanced Runtime是否启动
+grep "Enhanced Reasoning Runtime" logs/toolscore.log
+```
+
+### 完全重启
+
+```bash
+# 停止所有相关进程
+pkill -f "python main.py"
+
+# 清理Redis队列（可选）
+redis-cli flushall
+
+# 重新启动
+conda activate dpresso
+GEMINI_API_KEY=your_key python main.py
 ```
 
 ## 🤝 贡献指南
 
-我们欢迎社区贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何参与项目开发。
+欢迎提交Issues和Pull Requests！
 
-### 开发环境设置
+### 开发流程
 
-```bash
-# 克隆开发分支
-git clone -b develop https://github.com/Drip-Data/agent-data-platform.git
+1. Fork项目
+2. 创建特性分支
+3. 提交更改
+4. 推送到分支
+5. 创建Pull Request
 
-# 安装开发依赖
-pip install -r requirements-dev.txt
+### 代码风格
 
-# 运行测试
-python -m pytest tests/
-
-# 代码格式化
-black .
-isort .
-```
+- 使用Python类型注解
+- 遵循PEP 8代码风格
+- 添加适当的日志记录
+- 编写单元测试
 
 ## 📄 许可证
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
-## 🙏 致谢
+## 🔗 相关链接
 
-- **MCP协议** - 感谢 Anthropic 提供的模型上下文协议
-- **开源社区** - 感谢所有贡献者和维护者
-- **Python生态** - 基于优秀的Python工具链构建
+- [MCP协议文档](https://modelcontextprotocol.io/)
+- [FastAPI文档](https://fastapi.tiangolo.com/)
+- [Redis文档](https://redis.io/documentation)
+- [Google Gemini API](https://ai.google.dev/)
 
 ---
 
-**Agent Data Platform** - 让AI Agent更智能，让数据构建更简单 🚀
+**⭐ 如果这个项目对您有帮助，请给它一个Star！**

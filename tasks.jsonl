@@ -1,7 +1,4 @@
 {"task_id": "fibonacci_10", "task_type": "reasoning", "description": "Calculate the 10th Fibonacci number using recursion", "max_steps": 5}
 {"task_id": "demo_gcd_task", "task_type": "reasoning", "description": "创建一个函数计算两个数的最大公约数", "max_steps": 3}
-{"task_id": "nus_iora_professors", "task_type": "web", "description": "搜索新加坡国立大学(NUS) IORA研究所有哪些教授，获取教授姓名和研究领域信息", "max_steps": 10}
 {"task_id": "ai_education_impact_analysis", "task_type": "reasoning", "description": "使用Python计算1到100之间所有偶数的和", "max_steps": 5}
 {"task_id": "test_reasoning_new_task", "task_type": "reasoning", "description": "使用Python将字符串'hello'反转为'olleh'", "max_steps": 3}
-{"task_id": "calculate_factorial", "task_type": "reasoning", "description": "使用Python计算5的阶乘", "max_steps": 3}{"task_id": "test-math-001", "description": "使用Python计算 100 + 200 的结果", "type": "REASONING", "max_steps": 5, "priority": 1}
-{"task_id": "test-math-002", "description": "使用Python计算 500 + 500 的结果", "type": "REASONING", "max_steps": 5, "priority": 1}
