@@ -38,7 +38,13 @@ Agent Data Platform 是一个专为运行 AI Agent 并捕获其完整决策轨�
 
 ### 1. 环境准备
 
-确保您的机器上安装了 [Docker](https://www.docker.com/products/docker-desktop/) 和 [Docker Compose](https://docs.docker.com/compose/install/)。
+创建并激活 Python 虚拟环境，然后安装依赖：
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
 ### 2. 克隆与配置
 
@@ -66,11 +72,7 @@ SAVE_INDIVIDUAL_TRAJECTORIES=false
 ### 3. 启动服务
 
 ```bash
-# 构建并启动所有服务
-docker-compose up -d --build
-
-# 检查服务状态
-docker-compose ps
+python main.py
 ```
 
 ## 🧪 测试您的Agent
@@ -107,13 +109,7 @@ curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/js
 
 ### 查看执行结果
 
-```bash
-# 查看最新轨迹
-docker exec -it agent-data-platform-reasoning-runtime-1 cat /app/output/trajectories/trajectories_collection.json | jq .[-1]
-
-# 查看服务日志
-docker-compose logs -f reasoning-runtime
-```
+执行后生成的轨迹数据保存在 `output/trajectories/` 目录，可直接查看对应的 JSON 文件。
 
 ## 🏗️ 系统架构
 
@@ -173,7 +169,6 @@ agent-data-platform/
 ├── docs/                   # 文档目录
 ├── scripts/                # 部署脚本
 ├── config/                 # 配置文件
-├── docker-compose.yml      # 服务编排
 └── tasks.jsonl            # 任务定义文件
 ```
 
@@ -206,9 +201,6 @@ HEALTH_CHECK_INTERVAL=30
 ### 性能调优
 
 ```bash
-# 扩展运行时实例
-docker-compose up -d --scale reasoning-runtime=4
-
 # 调整并发限制
 export MAX_CONCURRENT_TASKS=20
 
@@ -244,15 +236,6 @@ export MEMORY_LIMIT=4g
 ### 调试命令
 
 ```bash
-# 查看服务状态
-docker-compose ps
-
-# 查看实时日志
-docker-compose logs -f reasoning-runtime
-
-# 检查队列状态
-docker exec $(docker-compose ps -q redis) redis-cli xlen tasks:reasoning
-
 # 健康检查
 curl http://localhost:8001/health
 ```
