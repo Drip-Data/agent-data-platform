@@ -229,6 +229,59 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 保存任务分析的LLM交互到第一步的预备阶段
         current_step_llm_interactions.extend(task_analysis_interactions)
 
+        """### 自动缺口检测 & 修复 ###"""
+        try:
+            # 拉取当前已注册工具（字典列表形式）
+            tools_resp = await self.toolscore_client.get_available_tools()
+            current_tools_meta = tools_resp.get("available_tools", [])
+
+            gap_result = await self.toolscore_client.analyze_tool_gap(
+                task_description=task.description,
+                current_tools=current_tools_meta
+            )
+
+            if gap_result and not gap_result.get("has_sufficient_tools", True):
+                missing_caps = gap_result.get("gap_analysis", {}).get("missing_capabilities", [])
+
+                logger.info(
+                    f"⚠ 检测到能力缺口，缺少: {missing_caps or '未知'}. 正在请求 ToolScore 自动安装…")
+
+                cap_req_res = await self.toolscore_client.request_tool_capability(
+                    task_description=task.description,
+                    required_capabilities=missing_caps,
+                    auto_install=True
+                )
+
+                if cap_req_res.get("success") and cap_req_res.get("installed_tools"):
+                    logger.info(
+                        f"🛠 已触发安装 {len(cap_req_res['installed_tools'])} 个工具，注册等待事件…")
+
+                    # 通过 RealTimeToolClient 等待新工具；注册回调但同时轮询，最多 60s
+                    await self.real_time_client.register_pending_request(
+                        request_id=f"{task.task_id}-auto-gap-fix", 
+                        required_capabilities=missing_caps
+                    )
+
+                    wait_start = time.time()
+                    WAIT_TIMEOUT = 60
+                    while time.time() - wait_start < WAIT_TIMEOUT:
+                        # 判断是否已满足能力
+                        fresh_tools = await self.toolscore_client.get_available_tools()
+                        fresh_caps_ok = False
+                        for tool in fresh_tools.get("available_tools", []):
+                            caps = [c.get("name") if isinstance(c, dict) else c for c in tool.get("capabilities", [])]
+                            if any(any(mc.lower() in (cap or "").lower() for cap in caps) for mc in missing_caps):
+                                fresh_caps_ok = True
+                                break
+                        if fresh_caps_ok:
+                            logger.info("✅ 缺口工具已就位，继续任务执行")
+                            break
+                        await asyncio.sleep(2)
+                else:
+                    logger.warning("ToolScore 未能自动安装所需工具，后续可能依赖 LLM 自行检索。")
+        except Exception as auto_gap_err:
+            logger.error(f"自动缺口检测/修复过程异常: {auto_gap_err}")
+
         for step_id in range(1, max_steps + 1):
             # 🔍 重置当前步骤的LLM交互记录
             current_step_llm_interactions = []
