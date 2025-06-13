@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+import subprocess, signal
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
@@ -31,7 +32,31 @@ logger = logging.getLogger(__name__)
 async def main():
     """主启动函数"""
     logger.info("启动 Agent Data Platform (无Docker版本)...")
+    import os
+    logger.info(f"GEMINI_API_KEY: {os.getenv('GEMINI_API_KEY')}")
     
+    # ==== 端口冲突检测与自动清理 ====
+    def _free_port(port: int):
+        """查找占用指定端口的进程并强制杀掉"""
+        try:
+            # mac / linux 通用 lsof
+            res = subprocess.check_output(["lsof", "-ti", f":{port}"]).decode().strip().splitlines()
+            for pid in res:
+                if pid:
+                    logger.warning(f"端口 {port} 被进程 {pid} 占用，尝试终止…")
+                    try:
+                        os.kill(int(pid), signal.SIGKILL)
+                        logger.info(f"已杀死进程 {pid} (端口 {port})")
+                    except Exception as e:
+                        logger.error(f"终止进程 {pid} 失败: {e}")
+        except subprocess.CalledProcessError:
+            # 没有进程占用
+            pass
+
+    # 清理常用端口，避免 "address already in use"
+    for _port in (8081, 8082, 8083, 8000):
+        _free_port(_port)
+
     try:
         # 创建必要目录
         os.makedirs('logs', exist_ok=True)
@@ -152,8 +177,13 @@ async def main():
         registration_result = await tool_library.register_mcp_server(python_executor_spec)
         if registration_result.success:
             logger.info("✅ Python Executor 已直接注册到工具库")
+            # 同步在MCP连接注册表中登记，确保execute_tool时可用
+            tool_library.mcp_server_registry.register_server(python_executor_spec.tool_id, python_executor_spec.endpoint)
         else:
             logger.error(f"❌ Python Executor 注册失败: {registration_result.error}")
+
+        # === 设置输出目录环境变量，避免只读文件系统问题 ===
+        os.environ.setdefault('OUTPUT_DIR', str(Path.cwd() / 'output' / 'trajectories'))
 
         # 启动 Python Executor MCP Server (禁用自动注册)
         python_executor_server = PythonExecutorMCPServer()
@@ -195,12 +225,18 @@ async def main():
             from core.task_manager import start_runtime_service
 
             enhanced_runtime = EnhancedReasoningRuntime()
-            await enhanced_runtime.initialize()
+            
+            # 设置较短的初始化超时，避免卡住
+            await asyncio.wait_for(enhanced_runtime.initialize(), timeout=30.0)
+            
             # 在后台消费 Redis 任务队列（tasks:reasoning）
             asyncio.create_task(start_runtime_service(enhanced_runtime))
             logger.info("Enhanced Reasoning Runtime 已启动并接入任务队列 (tasks:reasoning)")
+        except asyncio.TimeoutError:
+            logger.error("Enhanced Reasoning Runtime 初始化超时，将跳过启动，但其他服务正常运行")
         except Exception as e:
             logger.error(f"启动 Enhanced Reasoning Runtime 失败: {e}")
+            logger.warning("Enhanced Reasoning Runtime 启动失败，但核心服务（ToolScore、Task API）仍可正常使用")
 
         logger.info("Agent Data Platform 启动成功！")
         logger.info("服务地址: http://localhost:8080")
