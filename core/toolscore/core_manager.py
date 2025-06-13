@@ -265,7 +265,13 @@ class CoreManager:
         disconnected_clients = set()
         for websocket in self.websocket_connections:
             try:
-                await websocket.send(json.dumps(notification))
+                payload = json.dumps(notification)
+                if hasattr(websocket, "send_str"):
+                    # aiohttp.web.WebSocketResponse
+                    await websocket.send_str(payload)
+                else:
+                    # websockets.client.ServerConnection / WebSocketCommonProtocol
+                    await websocket.send(payload)
             except Exception as e:
                 logger.warning(f"WebSocket通知失败: {e}")
                 disconnected_clients.add(websocket)

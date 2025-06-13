@@ -1,0 +1,72 @@
+# Agent Data Platform 端口配置
+# 统一管理所有服务端口，避免冲突
+
+# 🚀 核心服务端口
+core_services:
+  task_api:
+    port: 8000
+    description: "任务提交和查询API"
+    health_endpoint: "/health"
+    
+  redis:
+    port: 6379
+    description: "Redis任务队列和缓存"
+    
+# 🔧 MCP服务器端口  
+mcp_servers:
+  toolscore_mcp:
+    port: 8081
+    description: "ToolScore MCP协议服务器"
+    protocol: "websocket"
+    endpoint: "/websocket"
+    
+  toolscore_http:
+    port: 8082  
+    description: "ToolScore HTTP监控API"
+    protocol: "http"
+    health_endpoint: "/health"
+    
+  python_executor:
+    port: 8083
+    description: "Python代码执行器"
+    protocol: "websocket" 
+    health_endpoint: "/health"
+
+# 🆕 未来扩展端口预留
+future_mcp_servers:
+  web_scraper:
+    port: 8084
+    description: "网页抓取工具服务器"
+    auto_start: false
+    
+  file_manager:
+    port: 8085
+    description: "文件管理工具服务器"
+    auto_start: false
+    
+  database_connector:
+    port: 8086
+    description: "数据库连接工具服务器" 
+    auto_start: false
+    
+  image_processor:
+    port: 8087
+    description: "图像处理工具服务器"
+    auto_start: false
+
+# 🔧 端口管理配置
+port_management:
+  auto_detect: true          # 自动检测端口冲突
+  port_range_start: 8088     # 动态分配起始端口
+  port_range_end: 8200       # 动态分配结束端口
+  check_interval: 30         # 健康检查间隔(秒)
+  
+# 🌐 反向代理配置 (可选)
+reverse_proxy:
+  enabled: false
+  port: 80
+  ssl_port: 443
+  routes:
+    "/api/v1/tasks": "http://localhost:8000"
+    "/api/v1/tools": "http://localhost:8082" 
+    "/ws/mcp": "ws://localhost:8081" 

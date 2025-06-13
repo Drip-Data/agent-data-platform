@@ -40,15 +40,26 @@ class RealTimeToolClient:
             logger.info(f"🔌 连接到ToolScore实时更新: {websocket_url}")
             # 创建WebSocket连接（兼容旧版本websockets）
             try:
-                self.websocket = await websockets.connect(
-                    websocket_url,
-                    extra_headers={
-                        "User-Agent": "Enhanced-Reasoning-Runtime/1.0"
-                    }
-                )
-            except TypeError:
-                # 兼容旧版本websockets，不支持extra_headers
-                self.websocket = await websockets.connect(websocket_url)
+                # 首选 websockets 库客户端
+                try:
+                    self.websocket = await websockets.connect(
+                        websocket_url,
+                        extra_headers={
+                            "User-Agent": "Enhanced-Reasoning-Runtime/1.0"
+                        }
+                    )
+                except TypeError:
+                    # 兼容旧版本websockets，不支持 extra_headers
+                    self.websocket = await websockets.connect(websocket_url)
+            except Exception as ws_err:
+                logger.warning(f"websockets.connect 失败: {ws_err}，尝试使用 aiohttp ClientSession 作为后备方案")
+                try:
+                    import aiohttp
+                    session = aiohttp.ClientSession()
+                    self.websocket = await session.ws_connect(websocket_url, headers={"User-Agent": "Enhanced-Reasoning-Runtime/1.0"})
+                except Exception as aio_err:
+                    logger.error(f"aiohttp ws_connect 同样失败: {aio_err}")
+                    raise aio_err
             self.is_connected = True
             self.reconnect_attempts = 0
             
@@ -75,9 +86,27 @@ class RealTimeToolClient:
     async def _listen_for_updates(self):
         """监听工具更新事件"""
         try:
+            import aiohttp
             async for message in self.websocket:
                 try:
-                    event = json.loads(message)
+                    # websockets 库 -> str / bytes
+                    # aiohttp        -> WSMessage 对象
+                    if isinstance(message, aiohttp.WSMessage):
+                        if message.type == aiohttp.WSMsgType.TEXT:
+                            payload = message.data
+                        elif message.type == aiohttp.WSMsgType.BINARY:
+                            payload = message.data.decode()
+                        elif message.type == aiohttp.WSMsgType.ERROR:
+                            logger.error(f"WebSocket错误消息: {message.data}")
+                            continue
+                        else:
+                            # ping/pong/close 等
+                            continue
+                    else:
+                        # websockets 返回的 str/bytes
+                        payload = message
+
+                    event = json.loads(payload)
                     await self._handle_tool_event(event)
                 except json.JSONDecodeError as e:
                     logger.error(f"解析WebSocket消息失败: {e}")

@@ -23,7 +23,22 @@ class PythonExecutorMCPServer:
         self.python_tool = PythonExecutorTool()
         self.server_name = "python_executor_server"
         self.server_id = "python-executor-mcp-server"
-        self.endpoint = "ws://0.0.0.0:8083/mcp"
+        
+        # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的
+        # 0.0.0.0 仅在服务端语义正确，客户端连接会失败。因此这里拆分：
+        #   • listen_host: 服务端绑定地址（默认 0.0.0.0）
+        #   • public_host: 向外暴露的可连接地址（默认 localhost，可通过 PYTHON_EXECUTOR_HOST 覆盖）
+
+        listen_host = os.getenv("PYTHON_EXECUTOR_LISTEN_HOST", "0.0.0.0")
+        public_host = os.getenv("PYTHON_EXECUTOR_HOST", "localhost")
+        port = int(os.getenv("PYTHON_EXECUTOR_PORT", "8083"))
+
+        # MCPServer 需要完整 ws://host:port 路径
+        self.endpoint = f"ws://{public_host}:{port}"
+
+        # 保存监听信息供 MCPServer 使用
+        self._listen_host = listen_host
+        self._listen_port = port
         self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://localhost:8081/websocket')
         
     def get_capabilities(self) -> List[ToolCapability]:
@@ -186,7 +201,9 @@ class PythonExecutorMCPServer:
         # 注册工具动作处理器
         mcp_server.register_tool_action_handler(self.handle_tool_action)
         
-        # 启动服务器
+        # 在启动之前，覆盖其监听地址，防止绑定到不可用端口
+        # MCPServer.start() 会解析 endpoint 字符串，只关心端口；因此额外在环境变量中覆盖端口足够。
+        os.environ["PYTHON_EXECUTOR_BIND_HOST"] = self._listen_host
         await mcp_server.start()
 
 async def main():

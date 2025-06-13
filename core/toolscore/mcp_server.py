@@ -469,9 +469,17 @@ class MCPServer:
                 await self.unified_tool_library.initialize()
                 logger.info("UnifiedToolLibrary initialized for toolscore server.")
 
-            port = int(self.endpoint.split(':')[-1].split('/')[0])
-            logger.info(f"Attempting to start {self.server_name} MCP Server on 0.0.0.0:{port}")
-            self.websocket_server = await websockets.serve(self.websocket_handler, "0.0.0.0", port)
+            # 解析监听地址和端口
+            # endpoint 示例: ws://localhost:8083
+            _endpoint_without_scheme = self.endpoint.split('://', 1)[-1]
+            host_part, port_part = _endpoint_without_scheme.split(':', 1)
+            port = int(port_part.split('/')[0])
+
+            # 对于 Python Executor 等特殊服务器，可通过环境变量覆盖绑定地址
+            bind_host = os.getenv("PYTHON_EXECUTOR_BIND_HOST", host_part or "0.0.0.0")
+
+            logger.info(f"Attempting to start {self.server_name} MCP Server on {bind_host}:{port}")
+            self.websocket_server = await websockets.serve(self.websocket_handler, bind_host, port)
             logger.info(f"{self.server_name} MCP Server started successfully on {self.endpoint}")
 
             if self.toolscore_endpoint and self.server_name != "toolscore":

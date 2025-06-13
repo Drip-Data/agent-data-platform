@@ -48,6 +48,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 等待工具安装的任务
         self.pending_tool_requests = {}
+        # 📌 缓存实时工具事件，便于写入轨迹
+        self._tool_event_buffer = []
         
     async def initialize(self):
         """初始化运行时 - 简化为纯工具消费者"""
@@ -86,6 +88,14 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         tool_name = tool_event.get("name", tool_id)
         
         logger.info(f"🎉 检测到新工具: {tool_name} ({tool_id})")
+        
+        # 写入事件缓冲区，供当前执行中的任务记录
+        self._tool_event_buffer.append({
+            "tool_id": tool_id,
+            "name": tool_name,
+            "event": tool_event,
+            "timestamp": time.time()
+        })
         
         # 检查是否有等待这个工具的任务
         completed_requests = []
@@ -197,6 +207,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             fallback_client=self.toolscore_client
         )
         logger.info(f"📋 获取到工具描述长度: {len(available_tools_description)} 字符")
+
+        # === 记录首次暴露给 LLM 的工具集合 ===
+        expose_step = ExecutionStep(
+            step_id=len(steps)+1,
+            action_type=ActionType.TOOL_CALL,
+            action_params={"tools_snapshot": available_tools_description},
+            observation="Tools exposed to LLM for planning",
+            success=True
+        )
+        steps.append(expose_step)
 
         # 智能任务需求分析
         logger.info("🧠 开始智能任务需求分析...")
@@ -882,6 +902,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 保存轨迹
         await self._save_trajectory(trajectory)
+        
+        # === 将运行期间捕获的新工具事件追加到轨迹 ===
+        if self._tool_event_buffer:
+            for ev in self._tool_event_buffer:
+                steps.append(ExecutionStep(
+                    step_id=len(steps)+1,
+                    action_type=ActionType.TOOL_CALL,
+                    action_params=ev,
+                    observation=f"New tool available during execution: {ev.get('name')}",
+                    success=True
+                ))
+            self._tool_event_buffer.clear()
         
         return trajectory
     
