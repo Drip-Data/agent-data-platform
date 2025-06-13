@@ -14,6 +14,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from core.toolscore.core_manager import CoreManager
+from mcp_servers.python_executor_server.main import PythonExecutorMCPServer
 
 # 配置日志
 logging.basicConfig(
@@ -48,11 +49,159 @@ async def main():
         await tool_library.initialize()
         
         # 注入工具库到监控API
-        core_manager.monitoring_api.tool_library = tool_library
+        await core_manager.set_tool_library_for_monitoring(tool_library)
         
+        # 🔧 修复：启动 ToolScore MCP 服务器 (8081端口)
+        from core.toolscore.mcp_server import MCPServer
+        from core.toolscore.interfaces import ToolCapability, ToolType
+        
+        toolscore_capabilities = [
+            ToolCapability(
+                name="register_tool",
+                description="注册新工具到工具库",
+                parameters={
+                    "tool_spec": {
+                        "type": "object",
+                        "description": "工具规范",
+                        "required": True
+                    }
+                },
+                examples=[{"tool_spec": {"tool_id": "example_tool", "name": "示例工具"}}]
+            ),
+            ToolCapability(
+                name="list_tools",
+                description="列出所有可用工具",
+                parameters={},
+                examples=[{}]
+            ),
+            ToolCapability(
+                name="execute_tool",
+                description="执行指定工具",
+                parameters={
+                    "tool_id": {
+                        "type": "string",
+                        "description": "工具ID",
+                        "required": True
+                    },
+                    "action": {
+                        "type": "string", 
+                        "description": "工具动作",
+                        "required": True
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "动作参数",
+                        "required": False
+                    }
+                },
+                examples=[{"tool_id": "python_executor_server", "action": "python_execute", "parameters": {"code": "print('hello')"}}]
+            )
+        ]
+        
+        toolscore_server = MCPServer(
+            server_name="toolscore",
+            server_id="toolscore-main-server", 
+            description="统一工具注册与调用中心",
+            capabilities=toolscore_capabilities,
+            tool_type=ToolType.MCP_SERVER,
+            endpoint="ws://0.0.0.0:8081/websocket",  # 修改为8081端口
+            toolscore_endpoint=None  # 自己就是toolscore
+        )
+        
+        # 设置工具库
+        toolscore_server.unified_tool_library = tool_library
+        
+        # 启动 ToolScore MCP 服务器
+        asyncio.create_task(toolscore_server.start())
+        logger.info("ToolScore MCP Server 已启动在端口 8081")
+
+        # 🔧 修复：直接注册Python Executor到工具库，避免WebSocket连接问题
+        from core.toolscore.interfaces import MCPServerSpec
+        
+        python_executor_spec = MCPServerSpec(
+            tool_id="python-executor-mcp-server",
+            name="python_executor_server",
+            description="Python代码执行和数据分析工具服务器",
+            tool_type=ToolType.MCP_SERVER,
+            capabilities=[
+                ToolCapability(
+                    name="python_execute",
+                    description="执行Python代码",
+                    parameters={
+                        "code": {
+                            "type": "string",
+                            "description": "要执行的Python代码",
+                            "required": True
+                        },
+                        "timeout": {
+                            "type": "integer", 
+                            "description": "执行超时时间（秒），默认30秒",
+                            "required": False
+                        }
+                    },
+                    examples=[
+                        {"code": "print('Hello, World!')"},
+                        {"code": "import math\nresult = math.sqrt(16)\nprint(f'平方根: {result}')"}
+                    ]
+                )
+            ],
+            endpoint="ws://localhost:8083/mcp"
+        )
+        
+        # 直接注册到工具库
+        registration_result = await tool_library.register_mcp_server(python_executor_spec)
+        if registration_result.success:
+            logger.info("✅ Python Executor 已直接注册到工具库")
+        else:
+            logger.error(f"❌ Python Executor 注册失败: {registration_result.error}")
+
+        # 启动 Python Executor MCP Server (禁用自动注册)
+        python_executor_server = PythonExecutorMCPServer()
+        # 修改为不尝试注册到ToolScore
+        python_executor_server.toolscore_endpoint = None
+        
+        # 🔧 修复：将Python Executor实例传递给ToolScore，避免WebSocket连接问题
+        toolscore_server.python_executor_server = python_executor_server
+        
+        asyncio.create_task(python_executor_server.run())
+        logger.info("Python Executor MCP Server 已启动在端口 8083 (已手动注册)")
+
+        # 启动 Task API (8000端口)
+        from core.task_api import app as task_api_app
+        import uvicorn
+        
+        # 启动Task API服务器
+        task_api_config = uvicorn.Config(
+            task_api_app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            access_log=True
+        )
+        task_api_server = uvicorn.Server(task_api_config)
+        asyncio.create_task(task_api_server.serve())
+        logger.info("Task API 已启动在端口 8000")
+
         # 启动服务
         await core_manager.start()
         
+        # ================= 启动 Enhanced Reasoning Runtime =================
+        try:
+            # 配置环境变量，使增强运行时能够正确连接当前实例的 ToolScore
+            os.environ.setdefault('TOOLSCORE_HTTP_URL', 'http://localhost:8082')  # Monitoring / HTTP API
+            os.environ.setdefault('TOOLSCORE_URL', 'ws://localhost:8081/websocket')  # MCP WebSocket
+
+            from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
+            from core.task_manager import start_runtime_service
+
+            enhanced_runtime = EnhancedReasoningRuntime()
+            await enhanced_runtime.initialize()
+            # 在后台消费 Redis 任务队列（tasks:reasoning）
+            asyncio.create_task(start_runtime_service(enhanced_runtime))
+            logger.info("Enhanced Reasoning Runtime 已启动并接入任务队列 (tasks:reasoning)")
+        except Exception as e:
+            logger.error(f"启动 Enhanced Reasoning Runtime 失败: {e}")
+
         logger.info("Agent Data Platform 启动成功！")
         logger.info("服务地址: http://localhost:8080")
         logger.info("WebSocket地址: ws://localhost:8081")
@@ -73,7 +222,15 @@ async def main():
         # 清理资源
         try:
             await core_manager.stop()
+            await toolscore_server.stop()
             logger.info("Agent Data Platform 已停止")
+
+            # 额外清理增强运行时
+            try:
+                if 'enhanced_runtime' in locals():
+                    await enhanced_runtime.cleanup()
+            except Exception as e:
+                logger.error(f"清理 Enhanced Reasoning Runtime 出错: {e}")
         except Exception as e:
             logger.error(f"停止服务时出错: {e}")
 

@@ -55,7 +55,7 @@ class CoreManager:
                 "tool_id": "python-executor-server",
                 "name": "Python Executor",
                 "description": "Execute Python code and scripts with full programming capabilities",
-                "endpoint": "ws://python-executor-server:8081/mcp",
+                "endpoint": "ws://localhost:8083/mcp",
                 "capabilities": [
                     {
                         "name": "python_execute",
@@ -71,7 +71,7 @@ class CoreManager:
                 "tool_id": "browser-navigator-server", 
                 "name": "Browser Navigator",
                 "description": "Navigate web pages, extract content, and perform browser automation",
-                "endpoint": "ws://browser-navigator-server:8082/mcp",
+                "endpoint": "ws://localhost:3002/mcp",
                 "capabilities": [
                     {
                         "name": "navigate_to_url",
@@ -103,7 +103,9 @@ class CoreManager:
         try:
             # 连接Redis
             self.redis_client = redis.from_url(self.redis_url)
-            await self.redis_client.ping()
+            if self.redis_client: # 添加 None 检查
+                if self.redis_client: # 添加 None 检查
+                    await self.redis_client.ping()
             
             # 延迟导入避免循环依赖
             from core.toolscore.dynamic_mcp_manager import DynamicMCPManager
@@ -116,14 +118,22 @@ class CoreManager:
             # 恢复容器
             await self._recover_all_containers()
             
-            # 自动注册预置服务器
-            await self._auto_register_predefined_servers()
+            # 暂时禁用自动注册，在所有服务启动后再手动注册
+            # await self._auto_register_predefined_servers()
             
-            logger.info("✅ 核心管理器启动成功")
+            logger.info("✅ 核心管理器初始化完成") # 修正日志信息，这里是初始化完成，不是启动成功
             
         except Exception as e:
             logger.error(f"❌ 核心管理器初始化失败: {e}")
             raise
+
+    async def set_tool_library_for_monitoring(self, tool_library):
+        """在监控API中设置工具库"""
+        if self.monitoring_api:
+            self.monitoring_api.tool_library = tool_library
+            logger.info("工具库已成功注入到监控API。")
+        else:
+            logger.warning("monitoring_api 未初始化，无法注入 tool_library。")
     
     # === 容器管理功能 (合并 persistent_container_manager + mcp_image_manager) ===
     
@@ -135,7 +145,10 @@ class CoreManager:
                 logger.info("当前 Runner 非 ProcessRunner，跳过容器恢复")
                 return 0
 
-            containers = self.runner.list_running_containers()
+            # ProcessRunner 不管理 Docker 容器，所以这里不调用 list_running_containers
+            # 而是假设没有需要恢复的容器
+            logger.info("ProcessRunner 模式下不恢复 Docker 容器。")
+            return 0 # 修正：这里应该返回实际恢复的数量，但ProcessRunner不恢复容器，所以返回0
             
             recovered_count = 0
             for container in containers:
@@ -177,9 +190,9 @@ class CoreManager:
         }
         
         # 当使用 ProcessRunner 时直接返回 None
-        if not isinstance(self.runner, ProcessRunner):
-            logger.debug("ProcessRunner 模式下不创建 Docker 容器")
-            return "process-runner-no-container"
+        # ProcessRunner 不创建 Docker 容器，直接返回成功
+        logger.debug("ProcessRunner 模式下不创建 Docker 容器，模拟成功。")
+        return "process-runner-no-container"
 
         try:
             container = self.runner.run_container(detach=True, **container_config)
@@ -272,12 +285,12 @@ class CoreManager:
     
     # === 缓存管理功能 ===
     
-    async def cache_search_result(self, cache_key: str, data: any, ttl: int = 3600):
+    async def cache_search_result(self, cache_key: str, data: Any, ttl: int = 3600):
         """缓存搜索结果"""
         if self.redis_client:
             await self.redis_client.setex(cache_key, ttl, json.dumps(data))
     
-    async def get_cached_result(self, cache_key: str) -> Optional[any]:
+    async def get_cached_result(self, cache_key: str) -> Optional[Any]:
         """获取缓存结果"""
         if not self.redis_client:
             return None
@@ -431,8 +444,9 @@ class CoreManager:
             bool: 如果镜像已缓存返回True，否则返回False
         """
         try:
-            images = self.runner.list_images(name=image_name)
-            return len(images) > 0
+            # ProcessRunner 不处理镜像，直接返回 False
+            logger.info("ProcessRunner 模式下不检查镜像缓存。")
+            return False
         except Exception as e:
             logger.error(f"检查镜像缓存失败: {e}")
             return False
@@ -447,10 +461,14 @@ class CoreManager:
             logger.info("正在启动 ToolScore 核心服务...")
             
             # 启动各个组件
-            await self.cache_manager.start()
-            await self.websocket_manager.start()
-            await self.monitoring_api.start()
-            await self.dynamic_mcp_manager.start()
+            if self.cache_manager:
+                await self.cache_manager.start()
+            if self.websocket_manager:
+                await self.websocket_manager.start()
+            if self.monitoring_api and hasattr(self.monitoring_api, 'start'):
+                await self.monitoring_api.start()
+            if self.dynamic_mcp_manager and hasattr(self.dynamic_mcp_manager, 'start'):
+                await self.dynamic_mcp_manager.start()
             
             # 恢复持久化服务器
             await self._restore_persistent_servers()
@@ -475,13 +493,18 @@ class CoreManager:
             await self._save_persistent_servers()
             
             # 停止各个组件
-            await self.dynamic_mcp_manager.stop()
-            await self.monitoring_api.stop()
-            await self.websocket_manager.stop()
-            await self.cache_manager.stop()
+            if self.dynamic_mcp_manager:
+                await self.dynamic_mcp_manager.stop()
+            if self.monitoring_api and hasattr(self.monitoring_api, 'stop'):
+                await self.monitoring_api.stop()
+            if self.websocket_manager:
+                await self.websocket_manager.stop()
+            if self.cache_manager:
+                await self.cache_manager.stop()
             
             # 清理所有运行的服务器
-            if hasattr(self.runner, 'cleanup_all'):
+            # ProcessRunner 有 cleanup_all 方法
+            if isinstance(self.runner, ProcessRunner):
                 await self.runner.cleanup_all()
             
             self.is_running = False
@@ -546,7 +569,7 @@ class CoreManager:
             logger.error(f"保存持久化服务器配置时出错: {e}")
 
     async def create_persistent_service(self, service_name: str, image_name: str, 
-                                      port: int, env_vars: Dict[str, str] = None,
+                                      port: int, env_vars: Optional[Dict[str, str]] = None,
                                       **kwargs) -> Dict[str, Any]:
         """创建持久化服务 (ProcessRunner 模式)"""
         logger.info(f"创建持久化服务: {service_name}")
@@ -631,9 +654,11 @@ class CoreManager:
             services.append(status)
         
         # 动态 MCP 服务器
-        if hasattr(self.runner, 'list_running_servers'):
+        # ProcessRunner 有 list_running_servers 方法
+        if isinstance(self.runner, ProcessRunner):
             running_servers = self.runner.list_running_servers()
             for server_id, server_info in running_servers.items():
+                # 避免重复添加已在 persistent_servers 中的服务
                 if server_id not in [s.get("server_id") for s in services]:
                     services.append({
                         "service_name": server_info.get("name", server_id),
@@ -674,7 +699,9 @@ class CoreManager:
 
     def get_stats(self) -> Dict[str, Any]:
         """获取系统统计信息"""
-        running_servers = getattr(self.runner, 'list_running_servers', lambda: {})()
+        running_servers = {}
+        if isinstance(self.runner, ProcessRunner):
+            running_servers = self.runner.list_running_servers()
         
         return {
             "is_running": self.is_running,

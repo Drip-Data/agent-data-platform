@@ -40,6 +40,10 @@ class UnifiedToolLibrary:
         # self.dispatcher = UnifiedDispatcher(self.tool_registry, mcp_client)  # 精简版本中已移除
         self.mcp_client = mcp_client
         
+        # 新增：MCP 服务器注册表
+        from .mcp_connector import MCPServerRegistry
+        self.mcp_server_registry = MCPServerRegistry()
+        
         # 动态MCP管理器（延迟初始化）
         self.dynamic_mcp_manager = None
         
@@ -128,6 +132,11 @@ class UnifiedToolLibrary:
         
         if registration_result.success:
             logger.info(f"Successfully registered external MCP server: {server_spec.name}")
+
+            # 注册到 MCP 服务器注册表，用于直接连接
+            if server_spec.endpoint:
+                self.mcp_server_registry.register_server(server_spec.tool_id, server_spec.endpoint)
+                logger.info(f"Registered MCP server connection: {server_spec.tool_id} -> {server_spec.endpoint}")
 
             # 触发实时注册，确保 WebSocket / Redis 事件同步
             try:
@@ -386,9 +395,9 @@ class UnifiedToolLibrary:
                 )
             
             # 根据工具类型执行
-            if tool.tool_type == ToolType.MCP_SERVER and self.mcp_client:
-                # MCP服务器工具通过MCP客户端执行
-                return await self.mcp_client.call_tool(tool_id, action, parameters)
+            if tool.tool_type == ToolType.MCP_SERVER:
+                # MCP服务器工具通过直接连接执行
+                return await self.mcp_server_registry.execute_tool(tool_id, action, parameters)
             else:
                 # Function工具直接执行（简化实现）
                 return ExecutionResult(
@@ -454,6 +463,11 @@ class UnifiedToolLibrary:
     async def cleanup(self):
         """清理资源"""
         try:
+            # 清理MCP服务器注册表
+            if self.mcp_server_registry:
+                await self.mcp_server_registry.cleanup()
+                logger.info("MCP server registry cleaned up")
+            
             # 清理动态MCP管理器
             if self.dynamic_mcp_manager:
                 await self.dynamic_mcp_manager.cleanup()

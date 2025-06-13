@@ -145,12 +145,10 @@ class ToolScoreMonitoringAPI:
             }
             
             # 添加特定类型的额外信息
-            if hasattr(tool, 'endpoint'):
-                tool_data['endpoint'] = tool.endpoint
-            if hasattr(tool, 'module_path'):
-                tool_data['module_path'] = tool.module_path
-            if hasattr(tool, 'class_name'):
-                tool_data['class_name'] = tool.class_name
+            # 添加特定类型的额外信息，使用 getattr 避免 AttributeError
+            tool_data['endpoint'] = getattr(tool, 'endpoint', None)
+            tool_data['module_path'] = getattr(tool, 'module_path', None)
+            tool_data['class_name'] = getattr(tool, 'class_name', None)
                 
             return web.json_response({
                 "status": "success",
@@ -191,7 +189,18 @@ class ToolScoreMonitoringAPI:
         site = web.TCPSite(runner, '0.0.0.0', self.port)
         await site.start()
         logger.info(f"ToolScore monitoring API started on port {self.port}")
+        self.runner = runner # 保存 runner 实例以便停止
         return runner
+
+    async def stop(self):
+        """停止HTTP服务器"""
+        if hasattr(self, 'runner') and self.runner:
+            logger.info("Stopping ToolScore monitoring API...")
+            await self.runner.cleanup()
+            self.runner = None
+            logger.info("ToolScore monitoring API stopped.")
+        else:
+            logger.info("ToolScore monitoring API 未运行或已停止。")
 
     async def get_persistent_storage(self, request):
         """获取持久化存储状态"""
@@ -517,9 +526,8 @@ class ToolScoreMonitoringAPI:
                         "usage_example": getattr(tool, 'usage_example', None)
                     }
                     
-                    # 添加特定类型的额外信息
-                    if hasattr(tool, 'endpoint'):
-                        tool_info['endpoint'] = tool.endpoint
+                    # 添加特定类型的额外信息，使用 getattr 避免 AttributeError
+                    tool_info['endpoint'] = getattr(tool, 'endpoint', None)
                     
                     available_tools.append(tool_info)
             
@@ -708,7 +716,7 @@ class ToolScoreMonitoringAPI:
                 # 发送当前工具列表给新连接的客户端
                 try:
                     current_tools = []
-                    tools = await self.tool_library.get_all_tools()
+                    tools = await self.tool_library.get_all_tools() if self.tool_library else []
                     for tool in tools:
                         if tool.enabled:
                             current_tools.append({
@@ -777,7 +785,7 @@ class ToolScoreMonitoringAPI:
         elif message_type == "get_tools":
             # 请求当前工具列表
             try:
-                tools = await self.tool_library.get_all_tools()
+                tools = await self.tool_library.get_all_tools() if self.tool_library else []
                 tools_list = []
                 for tool in tools:
                     if tool.enabled:
