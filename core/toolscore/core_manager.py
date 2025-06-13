@@ -7,7 +7,10 @@ import asyncio
 import json
 import logging
 import time
-import docker
+try:
+    import docker
+except ImportError:  # Docker may be absent when running without container support
+    docker = None
 import redis.asyncio as redis
 from typing import Dict, Any, List, Optional, Set
 from pathlib import Path
@@ -32,7 +35,8 @@ class CoreManager:
     def __init__(self, redis_url: str = "redis://redis:6379"):
         self.redis_url = redis_url
         self.redis_client: Optional[redis.Redis] = None
-        self.docker_client = docker.from_env()
+        # Docker客户端在无容器环境下可能不可用
+        self.docker_client = docker.from_env() if docker else None
         
         # 内存缓存
         self._tool_cache: Dict[str, Dict[str, Any]] = {}
@@ -102,6 +106,8 @@ class CoreManager:
     
     async def _recover_all_containers(self):
         """恢复所有MCP容器"""
+        if not self.docker_client:
+            return 0
         try:
             containers = self.docker_client.containers.list(
                 all=True,
@@ -128,6 +134,10 @@ class CoreManager:
     
     async def create_persistent_container(self, image_id: str, server_spec: MCPServerSpec, port: int) -> str:
         """创建持久化容器"""
+        if not self.docker_client:
+            logger.warning("Docker client not available, skipping container creation")
+            return ""
+
         container_name = f"mcp-{server_spec.tool_id}"
         
         container_config = {
@@ -147,14 +157,15 @@ class CoreManager:
             }
         }
         
+        if not self.docker_client:
+            return ""
         try:
             container = self.docker_client.containers.run(detach=True, **container_config)
             logger.info(f"创建持久化容器: {container.name}")
             return container.id
-            
         except Exception as e:
             logger.error(f"创建容器失败: {e}")
-            raise
+            return ""
     
     # === 实时注册和缓存功能 (合并 real_time_registry + mcp_cache_manager) ===
     
@@ -396,9 +407,11 @@ class CoreManager:
         Returns:
             bool: 如果镜像已缓存返回True，否则返回False
         """
+        if not self.docker_client:
+            return False
         try:
             images = self.docker_client.images.list(name=image_name)
             return len(images) > 0
         except Exception as e:
             logger.error(f"检查镜像缓存失败: {e}")
-            return False 
+            return False

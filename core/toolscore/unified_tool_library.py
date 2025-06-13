@@ -80,17 +80,9 @@ class UnifiedToolLibrary:
                 cache_manager=self.cache_manager  # 使用核心管理器的缓存功能
             )
             
-            # 初始化动态MCP管理器
-            from .dynamic_mcp_manager import DynamicMCPManager
-            self.dynamic_mcp_manager = DynamicMCPManager(self)
-            await self.dynamic_mcp_manager.initialize()
-            
-            # 初始化MCP搜索工具
-            from .mcp_search_tool import MCPSearchTool
-            self.mcp_search_tool = MCPSearchTool(
-                tool_gap_detector=self.tool_gap_detector,
-                dynamic_mcp_manager=self.dynamic_mcp_manager
-            )
+            # Docker相关功能已移除，动态MCP管理器和搜索工具暂不可用
+            self.dynamic_mcp_manager = None
+            self.mcp_search_tool = None
             
             logger.info("Tool library initialization completed - 核心管理器模式")
             self._initialized = True

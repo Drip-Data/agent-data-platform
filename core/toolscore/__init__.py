@@ -31,7 +31,6 @@ from .interfaces import (
 from .unified_tool_library import UnifiedToolLibrary
 from .tool_registry import ToolRegistry
 from .core_manager import CoreManager
-from .mcp_search_tool import MCPSearchTool
 from .tool_gap_detector import ToolGapDetector
 
 # 主要API入口
@@ -39,9 +38,8 @@ __all__ = [
     # === 核心类 ===
     "UnifiedToolLibrary",
     "CoreManager",
-    
+
     # === 工具搜索和分析 ===
-    "MCPSearchTool",
     "ToolGapDetector",
     
     # === 工具规范 ===
