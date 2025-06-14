@@ -1,7 +1,4 @@
-# Redis dependencies
-redis>=4.5.0
-redis[hiredis]>=4.5.0  # 高性能Redis客户端
-
+redis
 prometheus-client
 aiohttp
 pydantic

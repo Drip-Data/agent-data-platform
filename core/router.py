@@ -15,18 +15,17 @@ class IntelligentRouter:
     def __init__(self, redis_url: str):
         self.redis = redis.from_url(redis_url)
         self.metrics = EnhancedMetrics()
-        
-        # 运行时能力映射
+          # 运行时能力映射 - 已简化为unified reasoning runtime
+        # 注意：sandbox和web_navigator功能已迁移到MCP服务器
         self.runtime_capabilities = {
-            "sandbox": ["python_executor", "shell_executor", "file_operations"],
-            "web_navigator": ["browser_automation", "web_scraping", "form_filling"],
-            "reasoning": ["text_analysis", "logical_reasoning", "planning"]
+            "reasoning": ["text_analysis", "logical_reasoning", "planning", "python_executor", "browser_automation", "web_scraping", "form_filling", "file_operations"]
         }
         
-        # 队列映射
+        # 队列映射 - 所有任务类型现在都路由到reasoning队列
+        # enhanced-reasoning-runtime会通过toolscore调用相应的MCP服务器
         self.queue_mapping = {
-            TaskType.CODE: "tasks:code",
-            TaskType.WEB: "tasks:web", 
+            TaskType.CODE: "tasks:reasoning",  # 通过python-executor-server处理
+            TaskType.WEB: "tasks:reasoning",   # 通过browser-navigator-server处理
             TaskType.REASONING: "tasks:reasoning"
         }
     

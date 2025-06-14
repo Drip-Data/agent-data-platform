@@ -164,25 +164,20 @@ class TaskManager:
             logger.info(f"Cleaned up {len(expired_tasks)} expired tasks")
     
 def get_runtime(task_type: str):
-    """获取指定类型的运行时实例"""
-    if task_type == 'reasoning':
-        # 优先使用增强版本的推理运行时
+    """获取指定类型的运行时实例
+    
+    注意：历史运行时(sandbox, web_navigator)已被移除
+    所有功能已迁移至MCP服务器，通过enhanced-reasoning-runtime + toolscore调用
+    迁移日期: 2025-06-14
+    """
+    if task_type in ['reasoning', 'code', 'web']:
+        # 所有任务类型现在都使用enhanced-reasoning-runtime
+        # code和web功能通过toolscore调用相应的MCP服务器实现
         try:
             from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
             return EnhancedReasoningRuntime()
         except ImportError:
-            # # 如果增强版本不可用，回退到基础版本
-            # from runtimes.reasoning.runtime import ReasoningRuntime
-            # return ReasoningRuntime()
-
-            # 如果增强版本不可用，则抛出异常
             raise ImportError("EnhancedReasoningRuntime not found")
-    elif task_type == 'code':
-        from runtimes.sandbox.runtime import LightweightSandboxRuntime
-        return LightweightSandboxRuntime()
-    elif task_type == 'web':
-        from runtimes.web_navigator.runtime import MemoryControlledWebRuntime
-        return MemoryControlledWebRuntime()
     else:
         raise ValueError(f"Unsupported task type: {task_type}. Supported types: reasoning, code, web")
 

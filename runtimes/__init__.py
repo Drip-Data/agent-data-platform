@@ -1,34 +1,16 @@
-from .sandbox import LightweightSandboxRuntime, NSJailExecutor
+"""
+运行时模块 - 已简化为仅包含enhanced-reasoning-runtime
+
+注意：历史运行时(sandbox, web_navigator)已被移除
+所有功能已迁移至MCP服务器，通过enhanced-reasoning-runtime + toolscore调用
+迁移日期: 2025-06-14
+"""
+
+# 只保留推理运行时，其他功能通过MCP服务器提供
 from .reasoning import ReasoningRuntime
+from .reasoning.enhanced_runtime import EnhancedReasoningRuntime
 
-# 延迟导入web_navigator相关模块，避免playwright依赖问题
-def get_web_navigator_classes():
-    """延迟导入web navigator相关类"""
-    try:
-        from .web_navigator import MemoryControlledWebRuntime, BrowserManager
-        return MemoryControlledWebRuntime, BrowserManager
-    except ImportError as e:
-        print(f"Warning: Cannot import web navigator classes: {e}")
-        return None, None
-
-# 为了向后兼容，尝试导入但不强制要求
-try:
-    from .web_navigator import MemoryControlledWebRuntime, BrowserManager
-    __all__ = [
-        'LightweightSandboxRuntime', 
-        'NSJailExecutor',
-        'MemoryControlledWebRuntime', 
-        'BrowserManager',
-        'ReasoningRuntime',
-        'get_web_navigator_classes'
-    ]
-except ImportError:
-    # 如果导入失败，不包含web navigator相关类
-    MemoryControlledWebRuntime = None
-    BrowserManager = None
-    __all__ = [
-        'LightweightSandboxRuntime', 
-        'NSJailExecutor',
-        'ReasoningRuntime',
-        'get_web_navigator_classes'
-    ]
+__all__ = [
+    'ReasoningRuntime',
+    'EnhancedReasoningRuntime'
+]
