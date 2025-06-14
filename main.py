@@ -15,9 +15,11 @@ from dotenv import load_dotenv
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-# 创建必要的目录
+from core.path_utils import ensure_output_structure
+
+# 创建必要的目录结构
+ensure_output_structure()
 os.makedirs(project_root / 'logs', exist_ok=True)
-os.makedirs(project_root / 'output' / 'trajectories', exist_ok=True)
 os.makedirs(project_root / 'config', exist_ok=True)
 os.makedirs(project_root / 'data', exist_ok=True)
 
@@ -344,12 +346,15 @@ async def main():
             }
             
             registration_data = {"server_spec": server_spec_http}
-            
             try:
                 import aiohttp
+                from core.config_manager import get_ports_config
+                
+                ports_config = get_ports_config()
+                toolscore_http_port = ports_config['mcp_servers']['toolscore_http']['port']
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
-                        'http://localhost:8082/admin/mcp/register',
+                        f'http://localhost:{toolscore_http_port}/admin/mcp/register',
                         json=registration_data,
                         headers={'Content-Type': 'application/json'}
                     ) as response:
@@ -367,12 +372,12 @@ async def main():
                 logger.error(f"❌ HTTP API注册时发生错误: {e}")
             return False
 
-                    # 延迟执行HTTP注册，等待监控API完全启动
-            async def delayed_http_registration():
-                await asyncio.sleep(5)  # 增加等待时间，确保监控API完全就绪
-                await register_python_executor_via_http()
-            
-            asyncio.create_task(delayed_http_registration())
+        # 延迟执行HTTP注册，等待监控API完全启动
+        async def delayed_http_registration():
+            await asyncio.sleep(5)  # 增加等待时间，确保监控API完全就绪
+            await register_python_executor_via_http()
+        
+        asyncio.create_task(delayed_http_registration())
 
         # === 设置输出目录环境变量，避免只读文件系统问题 ===
         os.environ.setdefault('OUTPUT_DIR', str(Path.cwd() / 'output' / 'trajectories'))
@@ -416,11 +421,21 @@ async def main():
             nonlocal enhanced_runtime  # 声明使用外层作用域的变量
             try:
                 logger.info("🚀 启动Enhanced Reasoning Runtime消费者...")
-                
-                # 配置环境变量，使增强运行时能够正确连接当前实例的 ToolScore
-                os.environ.setdefault('TOOLSCORE_HTTP_URL', 'http://localhost:8082')  # Monitoring / HTTP API
-                os.environ.setdefault('TOOLSCORE_WS_URL', 'ws://localhost:8082')     # WebSocket for real-time updates
-                os.environ.setdefault('TOOLSCORE_URL', 'ws://localhost:8081/websocket')  # MCP WebSocket
+                  # 使用配置管理器获取端口配置
+                from core.config_manager import get_ports_config
+                try:
+                    ports_config = get_ports_config()
+                    toolscore_http_port = ports_config['mcp_servers']['toolscore_http']['port']
+                    toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
+                    
+                    os.environ.setdefault('TOOLSCORE_HTTP_URL', f'http://localhost:{toolscore_http_port}')
+                    os.environ.setdefault('TOOLSCORE_WS_URL', f'ws://localhost:{toolscore_http_port}')
+                    os.environ.setdefault('TOOLSCORE_URL', f'ws://localhost:{toolscore_mcp_port}/websocket')
+                except Exception as e:
+                    logger.warning(f"配置加载失败，使用默认端口: {e}")
+                    os.environ.setdefault('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
+                    os.environ.setdefault('TOOLSCORE_WS_URL', 'ws://localhost:8082')
+                    os.environ.setdefault('TOOLSCORE_URL', 'ws://localhost:8081/websocket')
 
                 from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
                 from core.task_manager import start_runtime_service

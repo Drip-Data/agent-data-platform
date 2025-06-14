@@ -1,3 +1,3 @@
-from .runtime import ReasoningRuntime
+from .enhanced_runtime import EnhancedReasoningRuntime
 
-__all__ = ['ReasoningRuntime']
+__all__ = ['EnhancedReasoningRuntime']

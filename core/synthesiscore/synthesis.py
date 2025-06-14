@@ -37,6 +37,7 @@ from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, Ac
 from ..llm_client import LLMClient
 from ..toolscore.unified_tool_library import UnifiedToolLibrary
 from ..toolscore.interfaces import ToolType, FunctionToolSpec, ToolCapability
+from ..path_utils import get_output_dir, get_trajectories_dir # Corrected import
 
 logger = logging.getLogger(__name__)
 
@@ -97,16 +98,15 @@ class SimpleSynthesizer:
         self.llm_client = LLMClient(config)
         self.enabled = config.get("synthesis_enabled", False)
         self.tool_library = UnifiedToolLibrary() # 初始化UnifiedToolLibrary
-        
-        # 使用容器内路径
-        self.task_essences_path = "/app/output/task_essences.json"
-        self.seed_tasks_path = "/app/output/seed_tasks.jsonl"
-        self.processed_trajectories_path = "/app/output/processed_trajectories.json"  # 新增：已处理轨迹记录文件
+          # 使用统一的路径管理
+        self.task_essences_path = str(get_output_dir() / "task_essences.json")
+        self.seed_tasks_path = str(get_output_dir() / "seed_tasks.jsonl")
+        self.processed_trajectories_path = str(get_output_dir() / "processed_trajectories.json")
         self.auto_monitor_enabled = config.get("auto_monitor_trajectories", True)
         self.auto_export_seeds = config.get("auto_export_seeds", True)
         
-        # 指定监控的轨迹集合文件 - 使用容器内路径
-        self.trajectories_collection_path = "/app/output/trajectories/trajectories_collection.json"
+        # 指定监控的轨迹集合文件
+        self.trajectories_collection_path = str(get_trajectories_dir() / "trajectories_collection.json") # Use get_trajectories_dir
         self.observer = None
         
         # 文件锁
@@ -675,14 +675,12 @@ class SimpleSynthesizer:
                 logger.warning(f"Unknown synthesis command: {command}")
                 
         except Exception as e:
-            logger.error(f"Error handling synthesis command: {e}")
-
-    async def _process_all_trajectories_once(self):
+            logger.error(f"Error handling synthesis command: {e}")    async def _process_all_trajectories_once(self):
         """一次性处理所有轨迹（不循环）"""
         logger.info("🔄 Starting one-time trajectory processing...")
         
         try:
-            trajectories_dir = "/app/output/trajectories"
+            trajectories_dir = get_trajectories_dir()
             if not os.path.exists(trajectories_dir):
                 logger.warning("Trajectories directory not found")
                 return
@@ -713,9 +711,8 @@ class SimpleSynthesizer:
     async def _process_unprocessed_trajectories(self):
         """只处理未处理的轨迹"""
         logger.info("🔄 Processing only unprocessed trajectories...")
-        
-        try:
-            trajectories_dir = "/app/output/trajectories"
+          try:
+            trajectories_dir = get_trajectories_dir()
             if not os.path.exists(trajectories_dir):
                 logger.warning("Trajectories directory not found")
                 return
@@ -1721,4 +1718,4 @@ async def main():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main()) 
+    asyncio.run(main())

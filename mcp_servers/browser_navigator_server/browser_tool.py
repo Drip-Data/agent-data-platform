@@ -10,6 +10,7 @@ from playwright.async_api import async_playwright, Browser, Page
 import json
 from core.browser_state_manager import state_manager
 import uuid
+from core.path_utils import get_screenshots_dir # Import get_screenshots_dir
 
 logger = logging.getLogger(__name__)
 
@@ -283,10 +284,11 @@ class BrowserTool:
         """截屏"""
         if not self._initialized or not self.page:
             return {"success": False, "output": {"error": "Browser not initialized"}}
-        
         try:
             if not path:
-                path = f"/app/output/screenshots/screenshot_{uuid.uuid4()}.png"
+                screenshots_dir = get_screenshots_dir() # Use get_screenshots_dir
+                screenshots_dir.mkdir(parents=True, exist_ok=True)
+                path = str(screenshots_dir / f"screenshot_{uuid.uuid4()}.png")
             
             await self.page.screenshot(path=path)
             return {
@@ -296,11 +298,14 @@ class BrowserTool:
                    "message": f"Screenshot saved to {path}"
                 }
             }
-        except Exception as e:
+        except Exception as e: # Add except block
+            logger.error(f"Failed to take screenshot: {e}")
             return {
                 "success": False,
                 "output": {
-                    "error": str(e)
+                    "error_type": "ScreenshotError",
+                    "error": str(e),
+                    "message": "Failed to take screenshot"
                 }
             }
     

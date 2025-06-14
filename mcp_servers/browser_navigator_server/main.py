@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
 from core.toolscore.mcp_server import MCPServer
-from runtimes.reasoning.tools.browser_tool import BrowserTool
+from .browser_tool import BrowserTool
 
 logger = logging.getLogger(__name__)
 

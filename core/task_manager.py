@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 import redis.asyncio as redis
 from .interfaces import TaskSpec, TrajectoryResult
 from .metrics import EnhancedMetrics
+from .path_utils import get_trajectories_dir
 
 logger = logging.getLogger(__name__)
 
@@ -129,14 +130,12 @@ class TaskManager:
     async def list_active_tasks(self) -> List[Dict]:
         """列出活跃任务"""
         return list(self._active_tasks.values())
-    
     async def _save_trajectory(self, result: TrajectoryResult):
         """保存轨迹到文件"""
         try:
-            import os
-            os.makedirs("output/trajectories", exist_ok=True)
+            trajectories_dir = get_trajectories_dir()
             
-            filename = f"output/trajectories/{result.task_id}.json"
+            filename = f"{trajectories_dir}/{result.task_id}.json"
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(result.json())
             

@@ -9,6 +9,7 @@ import redis.asyncio as redis
 from .interfaces import TaskSpec, TaskType
 from .cache import TemplateCache
 from .metrics import EnhancedMetrics
+from .config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,32 +22,35 @@ class EnhancedTaskDispatcher:
         self.cache = TemplateCache(self.redis)
         self.metrics = EnhancedMetrics()
         
-        # 工具管理服务配置
-        self.tool_service_url = os.getenv("TOOL_SERVICE_URL", "http://toolscore:8083")
-        
-        # 队列映射表 - 支持环境变量配置
-        default_mapping = {
-            TaskType.CODE: "tasks:code",
-            TaskType.WEB: "tasks:web", 
-            TaskType.REASONING: "tasks:reasoning"
-        }
-        
-        # 从环境变量读取队列映射配置
-        queue_mapping_env = os.getenv("QUEUE_MAPPING")
-        if queue_mapping_env:
-            try:
-                custom_mapping = json.loads(queue_mapping_env)
-                # 转换字符串键为TaskType枚举
-                self.queue_mapping = {}
-                for task_type_str, queue_name in custom_mapping.items():
-                    task_type = TaskType(task_type_str)
-                    self.queue_mapping[task_type] = queue_name
-                logger.info(f"使用自定义队列映射: {self.queue_mapping}")
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"解析QUEUE_MAPPING环境变量失败，使用默认配置: {e}")
-                self.queue_mapping = default_mapping
-        else:
-            self.queue_mapping = default_mapping
+        # 🔧 使用配置管理器替代硬编码
+        try:
+            self.config_manager = ConfigManager()
+            routing_config = self.config_manager.get_routing_config()
+            ports_config = self.config_manager.get_ports_config()
+            
+            # 从配置获取队列映射
+            self.queue_mapping = {}
+            task_type_mapping = routing_config['queue_mapping']['task_type_mapping']
+            for task_type_str, queue_name in task_type_mapping.items():
+                task_type = TaskType(task_type_str)
+                self.queue_mapping[task_type] = queue_name
+            
+            # 从配置获取工具服务URL
+            toolscore_port = ports_config['mcp_servers']['toolscore_http']['port']
+            self.tool_service_url = f"http://localhost:{toolscore_port}"
+            
+            logger.info(f"✅ 配置加载完成 - 队列映射: {self.queue_mapping}")
+            logger.info(f"✅ 工具服务URL: {self.tool_service_url}")
+            
+        except Exception as e:
+            logger.warning(f"配置加载失败，使用默认配置: {e}")
+            # 回退到默认配置
+            self.tool_service_url = os.getenv("TOOL_SERVICE_URL", "http://localhost:8082")
+            self.queue_mapping = {
+                TaskType.CODE: "tasks:reasoning",
+                TaskType.WEB: "tasks:reasoning",
+                TaskType.REASONING: "tasks:reasoning"
+            }
         
     async def _call_tool_selector_service(self, task: TaskSpec) -> Dict:
         """调用工具管理服务进行智能推荐"""
@@ -71,38 +75,38 @@ class EnhancedTaskDispatcher:
         except Exception as e:
             logger.error(f"调用工具推荐服务失败: {e}")
             return self._get_fallback_tools(task.task_type)
-    
-    def _get_fallback_tools(self, task_type: TaskType) -> Dict:
-        """获取备选工具推荐 - 支持环境变量配置"""
-        # 默认备选工具映射
-        default_fallback = {
-            TaskType.CODE: ["python_executor"],
-            TaskType.WEB: ["browser", "web_search"],
-            TaskType.REASONING: ["browser", "python_executor"]
-        }
-        
-        # 从环境变量读取备选工具配置
-        fallback_env = os.getenv("FALLBACK_TOOLS_MAPPING")
-        if fallback_env:
-            try:
-                custom_fallback = json.loads(fallback_env)
-                # 转换字符串键为TaskType枚举
-                fallback_mapping = {}
-                for task_type_str, tools in custom_fallback.items():
-                    task_type_enum = TaskType(task_type_str)
-                    fallback_mapping[task_type_enum] = tools
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"解析FALLBACK_TOOLS_MAPPING环境变量失败，使用默认配置: {e}")
-                fallback_mapping = default_fallback
-        else:
-            fallback_mapping = default_fallback
-        
-        return {
-            "recommended_tools": fallback_mapping.get(task_type, ["python_executor"]),
-            "confidence": float(os.getenv("FALLBACK_CONFIDENCE", "0.5")),
-            "reason": "使用备选工具配置",
-            "strategy": "fallback"
-        }
+      def _get_fallback_tools(self, task_type: TaskType) -> Dict:
+        """获取备选工具推荐 - 从配置文件读取"""
+        try:
+            # 从配置文件获取备选工具映射
+            routing_config = self.config_manager.get_routing_config()
+            fallback_mapping = routing_config['tool_recommendation']['fallback_mapping']
+            strategy_config = routing_config['tool_recommendation']['strategy']
+            
+            task_type_str = task_type.value
+            recommended_tools = fallback_mapping.get(task_type_str, ["python_executor"])
+            
+            return {
+                "recommended_tools": recommended_tools,
+                "confidence": strategy_config.get("default_confidence", 0.5),
+                "reason": "使用配置文件中的备选工具",
+                "strategy": "config_fallback"
+            }
+        except Exception as e:
+            logger.warning(f"读取配置失败，使用硬编码备选方案: {e}")
+            # 硬编码备选方案
+            default_fallback = {
+                TaskType.CODE: ["python_executor"],
+                TaskType.WEB: ["browser_navigator", "web_search"],
+                TaskType.REASONING: ["python_executor", "browser_navigator"]
+            }
+            
+            return {
+                "recommended_tools": default_fallback.get(task_type, ["python_executor"]),
+                "confidence": 0.5,
+                "reason": "使用硬编码备选工具配置",
+                "strategy": "hardcoded_fallback"
+            }
     
     async def _enhance_task_with_tools(self, task: TaskSpec) -> TaskSpec:
         """为任务增强工具选择"""

@@ -9,11 +9,19 @@ import aiohttp
 import json
 import time
 import logging
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import argparse
+import os
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from core.path_utils import get_output_dir
 
 logger = logging.getLogger(__name__)
 
@@ -315,16 +323,25 @@ class BatchTaskTester:
 
 async def main():
     """主函数"""
+    # 检查并调整工作目录，确保是项目根目录
+    current_dir = Path.cwd()
+    expected_root = project_root
+    if current_dir != expected_root:
+        logger.warning(f"当前工作目录 {current_dir} 不是项目根目录")
+        logger.warning(f"正在切换到项目根目录: {expected_root}")
+        os.chdir(expected_root)
+        logger.info(f"工作目录已切换为: {Path.cwd()}")
+
     parser = argparse.ArgumentParser(description="Agent Data Platform 批量任务测试")
     parser.add_argument("--tasks-file", default="tasks.jsonl", 
-                       help="任务文件路径 (JSONL格式)")
+                       help="任务文件路径 (JSONL格式)")    
     parser.add_argument("--api-url", default="http://localhost:8000",
                        help="Task API URL")
     parser.add_argument("--concurrent", type=int, default=3,
                        help="最大并发任务数")
     parser.add_argument("--timeout", type=int, default=300,
                        help="单个任务超时时间(秒)")
-    parser.add_argument("--output", default="output/batch_test_results.json",
+    parser.add_argument("--output", default="batch_test_results.json",
                        help="结果输出文件")
     parser.add_argument("--verbose", action="store_true",
                        help="详细日志输出")
@@ -364,10 +381,13 @@ async def main():
     report = tester.generate_test_report()
     print("\n" + report)
     
-    # 保存结果
-    output_path = Path(args.output)
+    # 保存结果 - 使用项目输出目录
+    if not Path(args.output).is_absolute():
+        output_path = get_output_dir() / args.output
+    else:
+        output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tester.save_results(str(output_path))
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

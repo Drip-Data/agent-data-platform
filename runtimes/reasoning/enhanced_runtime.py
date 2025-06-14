@@ -14,6 +14,8 @@ from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, Execut
 from core.llm_client import LLMClient
 from core.metrics import EnhancedMetrics
 from core.toolscore.mcp_client import MCPToolClient
+from core.path_utils import get_trajectories_dir
+from core.config_manager import get_ports_config
 from runtimes.reasoning.toolscore_client import ToolScoreClient
 from runtimes.reasoning.real_time_tool_client import RealTimeToolClient
 
@@ -21,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 class EnhancedReasoningRuntime(RuntimeInterface):
     """增强推理运行时 - 简化版本，专注LLM推理和执行"""
-    
     def __init__(self):
         self._runtime_id = f"enhanced-reasoning-{uuid.uuid4()}"
         self.config = {
@@ -34,9 +35,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         self.client = LLMClient(self.config)
         self.metrics = EnhancedMetrics(port=8003)
         
-        # 简化的工具管理架构
-        self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
-        self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8082')
+        # 使用配置管理器获取服务端点
+        try:
+            ports_config = get_ports_config()
+            toolscore_http_port = ports_config['mcp_servers']['toolscore_http']['port']
+            toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
+            
+            self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', f'http://localhost:{toolscore_http_port}')
+            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', f'ws://localhost:{toolscore_http_port}')
+        except Exception as e:
+            logger.warning(f"配置加载失败，使用默认端口: {e}")
+            self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
+            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8082')
         
         # 轻量级客户端
         self.toolscore_client = ToolScoreClient(self.toolscore_endpoint)
@@ -945,11 +955,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 默认返回原始ID
         return tool_id
-    
     async def _save_trajectory(self, trajectory: TrajectoryResult):
         """保存轨迹到文件"""
-        out_dir = os.getenv('OUTPUT_DIR', '/app/output/trajectories')
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = get_trajectories_dir()
         
         collection_file = os.path.join(out_dir, "trajectories_collection.json")
         

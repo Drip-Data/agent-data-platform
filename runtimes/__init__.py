@@ -7,10 +7,8 @@
 """
 
 # 只保留推理运行时，其他功能通过MCP服务器提供
-from .reasoning import ReasoningRuntime
 from .reasoning.enhanced_runtime import EnhancedReasoningRuntime
 
 __all__ = [
-    'ReasoningRuntime',
     'EnhancedReasoningRuntime'
 ]

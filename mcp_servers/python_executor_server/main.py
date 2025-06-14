@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
 from core.toolscore.mcp_server import MCPServer
-from runtimes.reasoning.tools.python_executor_tool import PythonExecutorTool
+from .python_executor_tool import PythonExecutorTool
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +34,18 @@ class PythonExecutorMCPServer:
         port = int(os.getenv("PYTHON_EXECUTOR_PORT", "8083"))
 
         # MCPServer 需要完整 ws://host:port 路径
-        self.endpoint = f"ws://{public_host}:{port}"
-
-        # 保存监听信息供 MCPServer 使用
+        self.endpoint = f"ws://{public_host}:{port}"        # 保存监听信息供 MCPServer 使用
         self._listen_host = listen_host
         self._listen_port = port
-        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://localhost:8081/websocket')
+        
+        # 使用配置管理器获取ToolScore端点
+        try:
+            from core.config_manager import get_ports_config
+            ports_config = get_ports_config()
+            toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
+            self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
+        except Exception:
+            self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://localhost:8081/websocket')
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取Python工具的所有能力"""

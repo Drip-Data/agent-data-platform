@@ -21,10 +21,21 @@ logger = logging.getLogger(__name__)
 
 class CleanupTestSuite:
     """清理后的测试套件"""
-    
-    def __init__(self):
-        self.task_api_url = "http://localhost:8000"
-        self.monitoring_api_url = "http://localhost:8082"
+      def __init__(self):
+        # 使用配置管理器获取端口
+        try:
+            from core.config_manager import get_ports_config
+            ports_config = get_ports_config()
+            
+            task_api_port = ports_config['core_services']['task_api']['port']
+            toolscore_http_port = ports_config['mcp_servers']['toolscore_http']['port']
+            
+            self.task_api_url = f"http://localhost:{task_api_port}"
+            self.monitoring_api_url = f"http://localhost:{toolscore_http_port}"
+        except Exception as e:
+            logger.warning(f"配置加载失败，使用默认端口: {e}")
+            self.task_api_url = "http://localhost:8000"
+            self.monitoring_api_url = "http://localhost:8082"
         
     async def test_basic_import(self):
         """测试基本导入功能"""

@@ -14,6 +14,13 @@ import re
 from io import StringIO
 from typing import Dict, Any, Optional
 import subprocess
+from pathlib import Path
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from core.path_utils import get_python_execution_dir
 
 # Delay matplotlib imports to avoid import errors in other containers
 def _get_matplotlib():
@@ -46,13 +53,9 @@ logger = logging.getLogger(__name__)
 
 class PythonExecutorTool:
     """Python执行器工具"""
-    
     def __init__(self):
-        # 使用项目相对路径替代硬编码的Docker路径
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        self.output_dir = os.path.join(project_root, "output", "python_execution")
-        # 确保输出目录存在
-        os.makedirs(self.output_dir, exist_ok=True)
+        # 使用统一的路径管理
+        self.output_dir = get_python_execution_dir()
         self.temp_dir = tempfile.mkdtemp()
         self._setup_matplotlib()
     

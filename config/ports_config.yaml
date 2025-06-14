@@ -13,7 +13,7 @@ core_services:
     description: "Redis任务队列和缓存"
     
 # 🔧 MCP服务器端口  
-mcp_servers:
+mcp_servers:  
   toolscore_mcp:
     port: 8081
     description: "ToolScore MCP协议服务器"
@@ -30,6 +30,12 @@ mcp_servers:
     port: 8083
     description: "Python代码执行器"
     protocol: "websocket" 
+    health_endpoint: "/health"
+    
+  browser_navigator:
+    port: 8084
+    description: "浏览器导航器MCP服务器"
+    protocol: "websocket"
     health_endpoint: "/health"
 
 # 🆕 未来扩展端口预留

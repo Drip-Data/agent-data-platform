@@ -8,13 +8,21 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from datetime import datetime
 from typing import Dict, Optional
+from pathlib import Path
 
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from core.path_utils import get_output_dir, get_trajectories_dir
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +98,10 @@ async def root():
             "GET /health": "健康检查",
             "POST /monitoring/start": "启动轨迹监控",
             "POST /monitoring/stop": "停止轨迹监控"
-        },
-        "file_paths": {
-            "task_essences": "/app/output/task_essences.json",
-            "seed_tasks": "/app/output/seed_tasks.jsonl",
-            "trajectories_collection": "/app/output/trajectories/trajectories_collection.json"
+        },        "file_paths": {
+            "task_essences": str(get_output_dir() / "task_essences.json"),
+            "seed_tasks": str(get_output_dir() / "seed_tasks.jsonl"),
+            "trajectories_collection": str(get_output_dir("trajectories") / "trajectories_collection.json")
         }
     }
 
