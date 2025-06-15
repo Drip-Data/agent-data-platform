@@ -422,10 +422,10 @@ class MCPServer:
         
         while True:
             try:
-                logger.info(f"Attempting to connect to toolscore at {self.toolscore_endpoint} for registration...")
-                async with websockets.connect(self.toolscore_endpoint) as ws:
+                logger.info(f"[{self.server_name}] Attempting to connect to toolscore at {self.toolscore_endpoint} for registration...")
+                async with websockets.connect(self.toolscore_endpoint, ping_interval=10, ping_timeout=20) as ws: # 添加 ping 参数
                     self.toolscore_client = ws
-                    logger.info(f"Connected to toolscore at {self.toolscore_endpoint}")
+                    logger.info(f"[{self.server_name}] Connected to toolscore at {self.toolscore_endpoint}")
                     
                     request_id = str(uuid4())
                     register_request = {
@@ -441,24 +441,32 @@ class MCPServer:
                             "connection_params": tool_spec.connection_params
                         }
                     }
+                    logger.info(f"[{self.server_name}] Sending registration request to toolscore: {json.dumps(register_request)}")
                     await ws.send(json.dumps(register_request))
                     
-                    response = await ws.recv()
-                    response_data = json.loads(response)
+                    logger.info(f"[{self.server_name}] Waiting for registration response from toolscore...")
+                    response_str = await asyncio.wait_for(ws.recv(), timeout=30.0) # 添加超时
+                    logger.info(f"[{self.server_name}] Received registration response: {response_str}")
+                    response_data = json.loads(response_str)
                     
                     if response_data.get("type") == "register_tool_response" and response_data.get("request_id") == request_id:
                         if response_data.get("success"):
-                            logger.info(f"Successfully registered {self.server_name} with toolscore.")
+                            logger.info(f"[{self.server_name}] Successfully registered with toolscore.")
                             break # 注册成功，退出循环
                         else:
-                            logger.error(f"Failed to register {self.server_name} with toolscore: {response_data.get('message')}")
+                            logger.error(f"[{self.server_name}] Failed to register with toolscore: {response_data.get('message')}")
                     else:
-                        logger.error(f"Unexpected response from toolscore: {response_data}")
+                        logger.error(f"[{self.server_name}] Unexpected response from toolscore: {response_data}")
                 
+            except websockets.exceptions.InvalidURI:
+                logger.error(f"[{self.server_name}] Invalid toolscore endpoint URI: {self.toolscore_endpoint}. Registration aborted.", exc_info=True)
+                break # 无效URI，停止重试
             except (websockets.exceptions.ConnectionClosedOK, websockets.exceptions.ConnectionClosedError, ConnectionRefusedError) as e:
-                logger.warning(f"Connection to toolscore failed: {e}. Retrying in 5 seconds...")
+                logger.warning(f"[{self.server_name}] Connection to toolscore failed: {e}. Retrying in 5 seconds...")
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.server_name}] Timeout waiting for registration response from toolscore. Retrying in 5 seconds...")
             except Exception as e:
-                logger.error(f"Error during toolscore registration: {e}", exc_info=True)
+                logger.error(f"[{self.server_name}] Error during toolscore registration: {e}", exc_info=True)
             
             await asyncio.sleep(5) # 等待5秒后重试
 
@@ -474,14 +482,20 @@ class MCPServer:
             _endpoint_without_scheme = self.endpoint.split('://', 1)[-1]
             host_part, port_part = _endpoint_without_scheme.split(':', 1)
             port = int(port_part.split('/')[0])
-
+ 
             # 对于 Python Executor 等特殊服务器，可通过环境变量覆盖绑定地址
             bind_host = os.getenv("PYTHON_EXECUTOR_BIND_HOST", host_part or "0.0.0.0")
-
+ 
             logger.info(f"Attempting to start {self.server_name} MCP Server on {bind_host}:{port}")
-            self.websocket_server = await websockets.serve(self.websocket_handler, bind_host, port)
-            logger.info(f"{self.server_name} MCP Server started successfully on {self.endpoint}")
-
+            self.websocket_server = await websockets.serve(
+                self.websocket_handler,
+                bind_host,
+                port,
+                ping_interval=30,  # 设置 ping 间隔为30秒
+                ping_timeout=60    # 设置 ping 超时为60秒
+            )
+            logger.info(f"{self.server_name} MCP Server started successfully on {self.endpoint} with ping_interval=30, ping_timeout=60")
+ 
             if self.toolscore_endpoint and self.server_name != "toolscore":
                 self.toolscore_registration_task = asyncio.create_task(self._register_with_toolscore())
 
@@ -509,6 +523,9 @@ class MCPServer:
         if self.unified_tool_library and self.server_name == "toolscore":
             await self.unified_tool_library.cleanup()
             logger.info("UnifiedToolLibrary cleaned up for toolscore server.")
+
+# Alias for backward compatibility with services.toolscore_service
+ToolScoreMCPServer = MCPServer
 
 async def main():
     """启动ToolScore MCP服务器和监控API"""

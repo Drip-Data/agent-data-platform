@@ -137,21 +137,7 @@ class TrajectoryResult:
             'task_description': self.task_description,
             'runtime_id': self.runtime_id,
             'success': self.success,
-            'steps': [
-                {
-                    'step_id': s.step_id,
-                    'action_type': s.action_type.value,
-                    'tool_input': s.action_params,
-                    'tool_output': s.observation,
-                    'thinking': s.thinking,
-                    'execution_code': s.execution_code,
-                    'success': s.success,
-                    'error_type': s.error_type.value if s.error_type and hasattr(s.error_type, 'value') else (str(s.error_type) if s.error_type else None),
-                    'error_message': s.error_message,
-                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(s.timestamp)),
-                    'duration': s.duration
-                } for s in self.steps
-            ],
+            'steps': [step.to_dict() for step in self.steps], # 调用 ExecutionStep.to_dict()
             'final_result': self.final_result,
             'error_type': error_type_value,
             'error_message': self.error_message,

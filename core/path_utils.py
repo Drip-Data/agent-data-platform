@@ -78,6 +78,6 @@ def get_python_execution_dir() -> str:
     return str(get_output_dir("python_execution"))
 
 
-def get_screenshots_dir() -> str:
+def get_screenshots_dir() -> Path:
     """获取截图存储目录"""
-    return str(get_output_dir("screenshots"))
+    return get_output_dir("screenshots")

@@ -34,8 +34,7 @@ class EnhancedTaskDispatcher:
             for task_type_str, queue_name in task_type_mapping.items():
                 task_type = TaskType(task_type_str)
                 self.queue_mapping[task_type] = queue_name
-            
-            # 从配置获取工具服务URL
+              # 从配置获取工具服务URL
             toolscore_port = ports_config['mcp_servers']['toolscore_http']['port']
             self.tool_service_url = f"http://localhost:{toolscore_port}"
             
@@ -71,11 +70,11 @@ class EnhancedTaskDispatcher:
                 else:
                     logger.warning(f"工具推荐服务返回错误: {response.status_code}")
                     return self._get_fallback_tools(task.task_type)
-                    
         except Exception as e:
             logger.error(f"调用工具推荐服务失败: {e}")
             return self._get_fallback_tools(task.task_type)
-      def _get_fallback_tools(self, task_type: TaskType) -> Dict:
+            
+    def _get_fallback_tools(self, task_type: TaskType) -> Dict:
         """获取备选工具推荐 - 从配置文件读取"""
         try:
             # 从配置文件获取备选工具映射

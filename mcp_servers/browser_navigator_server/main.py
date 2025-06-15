@@ -24,7 +24,7 @@ class BrowserNavigatorMCPServer:
         self.server_name = "browser_navigator_server"
         self.server_id = "browser-navigator-mcp-server"
         self.endpoint = "ws://0.0.0.0:8082/mcp"
-        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://toolscore:8080/websocket')
+        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://localhost:8081/websocket')
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取浏览器工具的所有能力"""

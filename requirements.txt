@@ -20,5 +20,5 @@ Pillow>=9.0.0
 
 # 注意：以下依赖已移至具体的MCP服务器或运行时模块中
 # - matplotlib, pandas, numpy, scikit-learn -> runtimes/reasoning/requirements.txt
-# - playwright -> MCP服务器自行管理
+# - playwright -> 已移至主依赖 (browser_navigator_server 需要)
 # - selenium, webdriver-manager -> 已删除，不再使用

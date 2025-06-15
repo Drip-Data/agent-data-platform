@@ -37,7 +37,7 @@ from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, Ac
 from ..llm_client import LLMClient
 from ..toolscore.unified_tool_library import UnifiedToolLibrary
 from ..toolscore.interfaces import ToolType, FunctionToolSpec, ToolCapability
-from ..path_utils import get_output_dir, get_trajectories_dir # Corrected import
+from ..path_utils import get_output_dir, get_trajectories_dir
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class TrajectoryHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"❌ 发送处理命令失败: {e}")
 
-class SimpleSynthesizer:
+class SynthesisService:
     """简单任务合成器 - 基于JSON文件存储"""
     
     def __init__(self, config: Dict):
@@ -106,7 +106,7 @@ class SimpleSynthesizer:
         self.auto_export_seeds = config.get("auto_export_seeds", True)
         
         # 指定监控的轨迹集合文件
-        self.trajectories_collection_path = str(get_trajectories_dir() / "trajectories_collection.json") # Use get_trajectories_dir
+        self.trajectories_collection_path = str(get_output_dir("trajectories") / "trajectories_collection.json")
         self.observer = None
         
         # 文件锁
@@ -262,10 +262,18 @@ class SimpleSynthesizer:
                 return
             
             logger.info(f"🔄 开始处理轨迹集合文件: {self.trajectories_collection_path}")
-            
+
+            if not os.path.exists(self.trajectories_collection_path) or os.path.getsize(self.trajectories_collection_path) == 0:
+                logger.info(f"📝 Trajectory collection file is empty or does not exist: {self.trajectories_collection_path}")
+                return
+
             # 读取轨迹集合数据
-            with open(self.trajectories_collection_path, 'r', encoding='utf-8') as f:
-                trajectories_data = json.load(f)
+            try:
+                with open(self.trajectories_collection_path, 'r', encoding='utf-8') as f:
+                    trajectories_data = json.load(f)
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Error decoding JSON from {self.trajectories_collection_path}: {e}")
+                return
             
             if not isinstance(trajectories_data, list):
                 logger.error("❌ 轨迹集合文件格式错误，应为轨迹数组")
@@ -675,7 +683,9 @@ class SimpleSynthesizer:
                 logger.warning(f"Unknown synthesis command: {command}")
                 
         except Exception as e:
-            logger.error(f"Error handling synthesis command: {e}")    async def _process_all_trajectories_once(self):
+            logger.error(f"Error handling synthesis command: {e}")
+    
+    async def _process_all_trajectories_once(self):
         """一次性处理所有轨迹（不循环）"""
         logger.info("🔄 Starting one-time trajectory processing...")
         
@@ -711,7 +721,7 @@ class SimpleSynthesizer:
     async def _process_unprocessed_trajectories(self):
         """只处理未处理的轨迹"""
         logger.info("🔄 Processing only unprocessed trajectories...")
-          try:
+        try:
             trajectories_dir = get_trajectories_dir()
             if not os.path.exists(trajectories_dir):
                 logger.warning("Trajectories directory not found")
@@ -736,8 +746,16 @@ class SimpleSynthesizer:
         """处理单个文件中未处理的轨迹，返回处理数量"""
         try:
             logger.info(f"🔍 Checking for unprocessed trajectories in: {trajectory_path}")
+            if not os.path.exists(trajectory_path) or os.path.getsize(trajectory_path) == 0:
+                logger.info(f"📝 Trajectory file is empty or does not exist: {trajectory_path}")
+                return 0
+            
             with open(trajectory_path, 'r', encoding='utf-8') as f:
-                trajectory_data = json.load(f)
+                try:
+                    trajectory_data = json.load(f)
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Error decoding JSON from {trajectory_path}: {e}")
+                    return 0 #无法解析文件，返回0
             
             processed_count = 0
             new_seed_tasks = []  # 收集新生成的种子任务
@@ -1032,22 +1050,35 @@ class SimpleSynthesizer:
     def _convert_trajectory_format(self, data: Dict) -> Optional[TrajectoryResult]:
         """将轨迹数据转换为TrajectoryResult格式"""
         try:
+            logger.debug(f"Attempting to convert trajectory data for task_id: {data.get('task_id', 'Unknown')}, type of data: {type(data)}")
             # 转换steps格式
             converted_steps = []
-            for step_data in data.get('steps', []):
+            steps_list = data.get('steps', [])
+            if not isinstance(steps_list, list):
+                logger.error(f"Field 'steps' is not a list for task_id: {data.get('task_id', 'Unknown')}. Got {type(steps_list)}. Skipping steps conversion.")
+                steps_list = []
+
+            for i, step_data in enumerate(steps_list):
+                logger.debug(f"Processing step {i} for task_id: {data.get('task_id', 'Unknown')}: type={type(step_data)}, content='{str(step_data)[:200]}...'")
+                if not isinstance(step_data, dict):
+                    logger.error(f"Skipping step {i} for task_id: {data.get('task_id', 'Unknown')} due to unexpected format. Expected dict, got {type(step_data)}. Content: {str(step_data)[:200]}")
+                    continue
+
                 # 映射字段名称
                 converted_step = ExecutionStep(
                     step_id=step_data.get('step_id', 0),
                     action_type=ActionType(step_data.get('action_type', 'code_generation')), # 确保是ActionType枚举
-                    action_params=step_data.get('tool_input', {}),
-                    observation=step_data.get('tool_output', ''),
+                    action_params=step_data.get('action_params', step_data.get('tool_input', {})), # 优先action_params，兼容tool_input
+                    observation=step_data.get('observation', step_data.get('tool_output', '')), # 优先observation，兼容tool_output
                     success=step_data.get('success', True),
                     thinking=step_data.get('thinking'),
                     execution_code=step_data.get('execution_code'),
                     error_type=ErrorType(step_data['error_type']) if step_data.get('error_type') else None, # 确保是ErrorType枚举
                     error_message=step_data.get('error_message'),
                     timestamp=step_data.get('timestamp', time.time()),
-                    duration=step_data.get('duration', 0.0)
+                    duration=step_data.get('duration', 0.0),
+                    # llm_interactions 字段在 ExecutionStep 定义中，但原始数据中可能没有，需要处理
+                    llm_interactions=[LLMInteraction(**interaction_dict) for interaction_dict in step_data.get('llm_interactions', []) if isinstance(interaction_dict, dict)]
                 )
                 converted_steps.append(converted_step)
             
@@ -1684,7 +1715,7 @@ async def main():
     logger.info(f"  自动种子导出: {config['auto_export_seeds']}")
     logger.info(f"  存储方式: JSON文件")
     
-    synthesizer = SimpleSynthesizer(config)
+    synthesizer = SynthesisService(config)
     
     try:
         if config["synthesis_enabled"]:
@@ -1708,6 +1739,9 @@ async def main():
             
             # 清理UnifiedToolLibrary管理的资源
             if hasattr(synthesizer, 'tool_library'):
+               
+               
+               
                 await synthesizer.tool_library.cleanup()
                 logger.info("🧹 UnifiedToolLibrary资源已清理")
 

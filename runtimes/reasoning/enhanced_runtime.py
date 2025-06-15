@@ -40,13 +40,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             ports_config = get_ports_config()
             toolscore_http_port = ports_config['mcp_servers']['toolscore_http']['port']
             toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
+            logger.info(f"DEBUG: Loaded toolscore_http_port: {toolscore_http_port}, toolscore_mcp_port: {toolscore_mcp_port}")
             
             self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', f'http://localhost:{toolscore_http_port}')
-            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', f'ws://localhost:{toolscore_http_port}')
+            # 使用 toolscore_mcp_port (例如8081) 而不是 toolscore_http_port (8082)
+            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', f'ws://localhost:{toolscore_mcp_port}')
+            logger.info(f"DEBUG: Configured toolscore_websocket_endpoint (using mcp_port): {self.toolscore_websocket_endpoint}")
         except Exception as e:
             logger.warning(f"配置加载失败，使用默认端口: {e}")
             self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
-            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8082')
+            # 如果配置加载失败，也应该考虑一个更合适的默认MCP WS端口，或者确保环境变量TOOLSCORE_WS_URL被设置
+            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8081') # 默认为8081，与ports_config一致
         
         # 轻量级客户端
         self.toolscore_client = ToolScoreClient(self.toolscore_endpoint)

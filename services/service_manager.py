@@ -1,0 +1,103 @@
+import logging
+from typing import Dict, List, Optional, Callable
+
+logger = logging.getLogger(__name__)
+
+class ServiceManager:
+    """统一管理所有服务的生命周期"""
+    
+    def __init__(self):
+        self.services = {}
+        self.start_order = []
+        self.stop_order = []
+        
+    def register_service(self, name: str, 
+                         initialize_fn: Callable, 
+                         start_fn: Callable,
+                         stop_fn: Optional[Callable] = None,
+                         health_check_fn: Optional[Callable] = None,
+                         dependencies: List[str] = None):
+        """注册一个服务及其生命周期函数"""
+        self.services[name] = {
+            'initialize': initialize_fn,
+            'start': start_fn,
+            'stop': stop_fn,
+            'health_check': health_check_fn,
+            'dependencies': dependencies or []
+        }
+        
+    def _resolve_start_order(self):
+        """根据依赖关系解析服务启动顺序"""
+        # 简单的拓扑排序实现
+        visited = set()
+        temp_visited = set()
+        order = []
+        
+        def visit(name):
+            if name in temp_visited:
+                raise ValueError(f"发现循环依赖: {name}")
+            if name in visited:
+                return
+            
+            temp_visited.add(name)
+            for dep in self.services[name]['dependencies']:
+                if dep in self.services:
+                    visit(dep)
+            
+            temp_visited.remove(name)
+            visited.add(name)
+            order.append(name)
+        
+        for service_name in self.services:
+            if service_name not in visited:
+                visit(service_name)
+                
+        self.start_order = order
+        self.stop_order = list(reversed(order))
+    
+    def initialize_all(self, config=None):
+        """初始化所有服务"""
+        logger.info("正在初始化所有服务...")
+        self._resolve_start_order()
+        
+        for name in self.start_order:
+            logger.info(f"初始化服务: {name}")
+            self.services[name]['initialize'](config)
+    
+    def start_all(self):
+        """按依赖顺序启动所有服务"""
+        logger.info("正在启动所有服务...")
+        
+        for name in self.start_order:
+            logger.info(f"启动服务: {name}")
+            self.services[name]['start']()
+            
+        logger.info("所有服务已启动")
+    
+    def stop_all(self):
+        """按依赖的反序停止所有服务"""
+        logger.info("正在停止所有服务...")
+        
+        for name in self.stop_order:
+            if self.services[name]['stop']:
+                logger.info(f"停止服务: {name}")
+                try:
+                    self.services[name]['stop']()
+                except Exception as e:
+                    logger.error(f"停止服务 {name} 时出错: {e}")
+        
+        logger.info("所有服务已停止")
+    
+    def health_check(self):
+        """检查所有服务的健康状态"""
+        results = {}
+        for name, service in self.services.items():
+            if service['health_check']:
+                try:
+                    results[name] = service['health_check']()
+                except Exception as e:
+                    results[name] = {'status': 'error', 'message': str(e)}
+            else:
+                results[name] = {'status': 'unknown', 'message': 'No health check implemented'}
+        
+        return results

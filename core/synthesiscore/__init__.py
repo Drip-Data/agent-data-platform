@@ -3,7 +3,7 @@ SynthesisCore - Task Synthesis Engine
 智能任务合成引擎核心模块
 """
 
-from .synthesis import SimpleSynthesizer, TaskEssence
+from .synthesis import SynthesisService, TaskEssence
 
 # 可选导入，避免依赖问题
 try:
@@ -22,9 +22,9 @@ except ImportError:
 # from .init_synthesis_db import init_synthesis_database as init_database
 
 __all__ = [
-    'SimpleSynthesizer',
+    'SynthesisService',
     'TaskEssence',
     'synthesis_api',
     'SynthesisManager'
     # 'init_database'  # JSON版本不需要
-] 
+]
