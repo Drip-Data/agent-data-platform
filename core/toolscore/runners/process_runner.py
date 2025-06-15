@@ -24,8 +24,9 @@ class ProcessRunner(BaseRunner):
     def __init__(self):
         super().__init__()
         self.running_servers: Dict[str, Dict[str, Any]] = {}
-        self.port_range_start = int(os.getenv("PROCESS_PORT_RANGE_START", "8100"))
-        self.port_range_end = int(os.getenv("PROCESS_PORT_RANGE_END", "8200"))
+        from config import settings # 导入 settings
+        self.port_range_start = settings.MCP_SERVER_PORT_RANGE_START # 从 settings 获取
+        self.port_range_end = settings.MCP_SERVER_PORT_RANGE_END # 从 settings 获取
 
     def _allocate_port(self) -> int:
         """分配一个可用的端口，优先使用配置的端口范围。"""

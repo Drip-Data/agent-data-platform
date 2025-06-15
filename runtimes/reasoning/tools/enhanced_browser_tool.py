@@ -4,7 +4,7 @@
 
 import logging
 from typing import Dict, Any, List
-from core.toolscore.interfaces import ToolCapability, ToolType
+from core.toolscore.interfaces.toolscore_interfaces import ToolCapability, ToolType
 from .browser_tool import BrowserTool
 
 logger = logging.getLogger(__name__)

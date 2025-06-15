@@ -12,10 +12,12 @@ from typing import Dict, Any, Optional, List
 import redis.asyncio as redis
 import httpx
 
-from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ErrorType
-from core.cache import TemplateCache
-from core.metrics import EnhancedMetrics
-from core.llm_client import LLMClient
+from core.interfaces.runtime_interfaces import RuntimeInterface
+from core.interfaces.task_interfaces import TaskSpec, TrajectoryResult, ExecutionStep
+from core.interfaces.common_interfaces import ErrorType, ActionType
+from core.cache.cache import TemplateCache
+from core.metrics.metrics import EnhancedMetrics
+from core.llm.llm_client import LLMClient
 
 # 跨平台文件锁导入
 try:
@@ -25,7 +27,8 @@ except ImportError:
     HAS_FCNTL = False
 
 logger = logging.getLogger(__name__)
-metrics = EnhancedMetrics(port=8001)
+from config import settings # 导入 settings
+metrics = EnhancedMetrics(port=settings.METRICS_SANDBOX_PORT) # 使用 settings 中的端口
 
 class NSJailExecutor:
     """NSJail执行器"""
@@ -210,7 +213,7 @@ class LightweightSandboxRuntime(RuntimeInterface):
             # 执行代码
             execution_result = await self._execute_code_safely(code)
               # 构建执行步骤
-            from core.interfaces import ExecutionStep, ActionType
+            # ExecutionStep 和 ActionType 已在文件顶部导入
             # 增强思考过程的代码生成步骤
             cache_status = "使用了缓存的代码" if cached_code and not self.disable_cache else "无可用缓存或缓存已禁用"
             generation_thinking = f"""

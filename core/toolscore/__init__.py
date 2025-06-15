@@ -28,11 +28,11 @@ from .interfaces import (
     ToolExecutionInterface
 )
 
-from .unified_tool_library import UnifiedToolLibrary
-from .tool_registry import ToolRegistry
-from .core_manager import CoreManager
-from .mcp_search_tool import MCPSearchTool
-from .tool_gap_detector import ToolGapDetector
+from .managers.unified_tool_library import UnifiedToolLibrary
+from .managers.tool_registry import ToolRegistry
+from .managers.core_manager import CoreManager
+from .detection.mcp_search_tool import MCPSearchTool
+from .detection.tool_gap_detector import ToolGapDetector
 
 # 主要API入口
 __all__ = [

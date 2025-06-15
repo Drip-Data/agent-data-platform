@@ -7,24 +7,39 @@ Browser Navigator MCP Server
 import asyncio
 import logging
 import os
+import argparse # 新增导入
 from typing import Dict, Any, List
+from config import settings # 新增导入
 from uuid import uuid4
 
-from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
-from core.toolscore.mcp_server import MCPServer
-from runtimes.reasoning.tools.browser_tool import BrowserTool
+from core.toolscore.interfaces.toolscore_interfaces import ToolCapability, ToolType, ExecutionResult
+from core.toolscore.mcp.mcp_server import MCPServer
+from runtimes.reasoning.tools import BrowserTool
 
 logger = logging.getLogger(__name__)
 
 class BrowserNavigatorMCPServer:
     """浏览器导航MCP服务器"""
     
-    def __init__(self):
+    def __init__(self, port: int): # 接受端口作为参数
         self.browser_tool = BrowserTool()
         self.server_name = "browser_navigator_server"
         self.server_id = "browser-navigator-mcp-server"
-        self.endpoint = "ws://0.0.0.0:8082/mcp"
-        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://toolscore:8080/websocket')
+        
+        # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的
+        # 0.0.0.0 仅在服务端语义正确，客户端连接会失败。因此这里拆分：
+        #   • listen_host: 服务端绑定地址（默认 0.0.0.0）
+        #   • public_host: 向外暴露的可连接地址（默认 localhost，可通过 BROWSER_NAVIGATOR_HOST 覆盖）
+        listen_host = os.getenv("BROWSER_NAVIGATOR_LISTEN_HOST", "0.0.0.0")
+        public_host = os.getenv("BROWSER_NAVIGATOR_HOST", "localhost")
+        
+        # 端口现在从构造函数参数获取
+        self.endpoint = f"ws://{public_host}:{port}/mcp"
+        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', settings.TOOLSCORE_MCP_WS_URL)
+        
+        # 保存监听信息供 MCPServer 使用
+        self._listen_host = listen_host
+        self._listen_port = port
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取浏览器工具的所有能力"""
@@ -214,7 +229,11 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    server = BrowserNavigatorMCPServer()
+    parser = argparse.ArgumentParser(description="Browser Navigator MCP Server")
+    parser.add_argument("--port", type=int, required=True, help="Port to run the MCP server on")
+    args = parser.parse_args()
+
+    server = BrowserNavigatorMCPServer(port=args.port) # 传入解析到的端口
     await server.run()
 
 if __name__ == "__main__":

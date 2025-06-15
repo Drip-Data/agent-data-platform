@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 from playwright.async_api import async_playwright, Browser, Page
 import json
-from core.browser_state_manager import state_manager
+from core.browser.browser_state_manager import state_manager
 import uuid
 
 logger = logging.getLogger(__name__)

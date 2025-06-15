@@ -328,6 +328,8 @@ async def main():
                        help="结果输出文件")
     parser.add_argument("--verbose", action="store_true",
                        help="详细日志输出")
+    parser.add_argument("--run", action="store_true",
+                       help="执行批量任务测试 (默认不执行)") # 新增 --run 参数
     
     args = parser.parse_args()
     
@@ -338,36 +340,40 @@ async def main():
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
     
-    # 创建批量测试器
-    tester = BatchTaskTester(
-        task_api_url=args.api_url,
-        max_concurrent=args.concurrent,
-        timeout=args.timeout
-    )
-    
-    # 加载任务
-    tasks = tester.load_tasks_from_jsonl(args.tasks_file)
-    if not tasks:
-        logger.error("没有找到有效的任务，退出")
-        return
+    # 只有当 --run 参数被提供时才执行测试
+    if args.run:
+        # 创建批量测试器
+        tester = BatchTaskTester(
+            task_api_url=args.api_url,
+            max_concurrent=args.concurrent,
+            timeout=args.timeout
+        )
         
-    # 执行批量测试
-    logger.info("🚀 开始批量测试...")
-    start_time = time.time()
-    
-    results = await tester.run_batch_test(tasks)
-    
-    end_time = time.time()
-    logger.info(f"🎉 批量测试完成，总耗时: {end_time - start_time:.1f}秒")
-    
-    # 生成报告
-    report = tester.generate_test_report()
-    print("\n" + report)
-    
-    # 保存结果
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    tester.save_results(str(output_path))
+        # 加载任务
+        tasks = tester.load_tasks_from_jsonl(args.tasks_file)
+        if not tasks:
+            logger.error("没有找到有效的任务，退出")
+            return
+            
+        # 执行批量测试
+        logger.info("🚀 开始批量测试...")
+        start_time = time.time()
+        
+        results = await tester.run_batch_test(tasks)
+        
+        end_time = time.time()
+        logger.info(f"🎉 批量测试完成，总耗时: {end_time - start_time:.1f}秒")
+        
+        # 生成报告
+        report = tester.generate_test_report()
+        print("\n" + report)
+        
+        # 保存结果
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        tester.save_results(str(output_path))
+    else:
+        logger.info("未检测到 --run 参数，跳过批量任务测试。")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

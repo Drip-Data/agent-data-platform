@@ -33,7 +33,8 @@ import aiofiles
 import redis
 import redis.asyncio as async_redis
 
-from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType
+from core.interfaces.task_interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep
+from core.interfaces.common_interfaces import ActionType, ErrorType
 from ..llm_client import LLMClient
 from ..toolscore.unified_tool_library import UnifiedToolLibrary
 from ..toolscore.interfaces import ToolType, FunctionToolSpec, ToolCapability

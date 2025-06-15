@@ -4,7 +4,7 @@
 
 import logging
 from typing import Dict, Any, List
-from core.toolscore.interfaces import ToolCapability, ToolType
+from core.toolscore.interfaces.toolscore_interfaces import ToolCapability, ToolType
 from .python_executor_tool import PythonExecutorTool
 
 logger = logging.getLogger(__name__)

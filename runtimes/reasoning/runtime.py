@@ -7,14 +7,17 @@ import time
 import uuid
 # import json # json is already imported at line 3
 from typing import Dict, Any, Optional, List
-from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ExecutionStep, ErrorType, ActionType
-from core.llm_client import LLMClient
-from core.metrics import EnhancedMetrics
-from core.browser_state_manager import BrowserStateManager # Import the new state manager
+from core.interfaces.runtime_interfaces import RuntimeInterface
+from core.interfaces.task_interfaces import TaskSpec, TrajectoryResult, ExecutionStep
+from core.interfaces.common_interfaces import ErrorType, ActionType
+from core.llm.llm_client import LLMClient
+from core.metrics.metrics import EnhancedMetrics
+from core.browser.browser_state_manager import BrowserStateManager # Import the new state manager
 from .tools import get_browser_tool, get_python_executor_tool
-
+from config import settings # 导入 settings
+ 
 logger = logging.getLogger(__name__)
-metrics = EnhancedMetrics(port=8003)
+metrics = EnhancedMetrics(port=settings.METRICS_REASONING_PORT) # 使用 settings 中的端口
 
 class ReasoningRuntime(RuntimeInterface):
     """推理运行时服务实现"""
@@ -409,6 +412,6 @@ if __name__ == '__main__':
     import logging
     logging.basicConfig(level=logging.INFO)
     runtime = ReasoningRuntime()
-    from core.task_manager import start_runtime_service
+    from core.task_management.task_manager import start_runtime_service
     # 直接调用启动服务
     start_runtime_service(runtime)

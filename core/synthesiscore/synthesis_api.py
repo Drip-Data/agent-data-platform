@@ -216,10 +216,11 @@ async def send_custom_command(request: SynthesisRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    
-    port = int(os.getenv("API_PORT", "8081"))
+    from config import settings # 导入 settings
+
+    port = int(os.getenv("API_PORT", str(settings.METRICS_SYNTHESIS_PORT))) # 使用 settings 中的端口
     host = os.getenv("API_HOST", "0.0.0.0")
-    
+
     logger.info(f"Starting Synthesis API on {host}:{port}")
     
     uvicorn.run(

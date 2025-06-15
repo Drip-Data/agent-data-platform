@@ -1,8 +1,8 @@
 import asyncio
 import uuid
-from core.toolscore.interfaces import MCPServerSpec, ToolType, ToolCapability
-from core.toolscore.unified_tool_library import UnifiedToolLibrary
-from core.toolscore.tool_registry import ToolRegistry # 假设ToolRegistry是可导入的
+from core.toolscore.interfaces.toolscore_interfaces import MCPServerSpec, ToolType, ToolCapability
+from core.toolscore.managers.unified_tool_library import UnifiedToolLibrary
+from core.toolscore.managers.tool_registry import ToolRegistry # 假设ToolRegistry是可导入的
 
 async def test_register_external_mcp_server():
     """

@@ -1,1 +1,14 @@
-{}
+[
+  {
+    "name": "Python Executor",
+    "id": "python_executor_server",
+    "module_path": "mcp_servers.python_executor_server.main",
+    "runtime_path": "runtimes.sandbox.runtime"
+  },
+  {
+    "name": "Browser Navigator",
+    "id": "browser_navigator_server",
+    "module_path": "mcp_servers.browser_navigator_server.main",
+    "runtime_path": "runtimes.web_navigator.runtime"
+  }
+]

@@ -7,19 +7,22 @@ Python Executor MCP Server
 import asyncio
 import logging
 import os
+import argparse
 from typing import Dict, Any, List
+from config import settings
 from uuid import uuid4
+from utils.port_manager import PortManager # 新增导入
 
-from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
-from core.toolscore.mcp_server import MCPServer
-from runtimes.reasoning.tools.python_executor_tool import PythonExecutorTool
+from core.toolscore.interfaces.toolscore_interfaces import ToolCapability, ToolType, ExecutionResult
+from core.toolscore.mcp.mcp_server import MCPServer
+from runtimes.reasoning.tools import PythonExecutorTool
 
 logger = logging.getLogger(__name__)
 
 class PythonExecutorMCPServer:
     """Python执行器MCP服务器"""
     
-    def __init__(self):
+    def __init__(self, port: int): # 接受端口作为参数
         self.python_tool = PythonExecutorTool()
         self.server_name = "python_executor_server"
         self.server_id = "python-executor-mcp-server"
@@ -31,15 +34,16 @@ class PythonExecutorMCPServer:
 
         listen_host = os.getenv("PYTHON_EXECUTOR_LISTEN_HOST", "0.0.0.0")
         public_host = os.getenv("PYTHON_EXECUTOR_HOST", "localhost")
-        port = int(os.getenv("PYTHON_EXECUTOR_PORT", "8083"))
-
+        # 端口现在从构造函数参数获取
+        
         # MCPServer 需要完整 ws://host:port 路径
-        self.endpoint = f"ws://{public_host}:{port}"
+        # MCP Server的endpoint需要包含路径，以便MCPServerConnector正确连接
+        self.endpoint = f"ws://{public_host}:{port}/mcp"
 
         # 保存监听信息供 MCPServer 使用
         self._listen_host = listen_host
-        self._listen_port = port
-        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://localhost:8081/websocket')
+        self._listen_port = port # 使用传入的端口
+        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', settings.TOOLSCORE_MCP_WS_URL)
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取Python工具的所有能力"""
@@ -54,7 +58,7 @@ class PythonExecutorMCPServer:
                         "required": True
                     },
                     "timeout": {
-                        "type": "integer", 
+                        "type": "integer",
                         "description": "执行超时时间（秒），默认30秒",
                         "required": False
                     }
@@ -85,7 +89,7 @@ class PythonExecutorMCPServer:
                 ]
             ),
             ToolCapability(
-                name="python_visualize", 
+                name="python_visualize",
                 description="创建数据可视化图表",
                 parameters={
                     "data": {
@@ -201,19 +205,48 @@ class PythonExecutorMCPServer:
         # 注册工具动作处理器
         mcp_server.register_tool_action_handler(self.handle_tool_action)
         
-        # 在启动之前，覆盖其监听地址，防止绑定到不可用端口
-        # MCPServer.start() 会解析 endpoint 字符串，只关心端口；因此额外在环境变量中覆盖端口足够。
-        os.environ["PYTHON_EXECUTOR_BIND_HOST"] = self._listen_host
-        await mcp_server.start()
+        # 尝试连接到 ToolScore，直到成功
+        max_retries = 60  # 60次重试，每次5秒，总共5分钟
+        for i in range(max_retries):
+            try:
+                logger.info(f"尝试连接到 ToolScore ({i+1}/{max_retries})...")
+                # 尝试启动 MCP 服务器，这会同时尝试连接 ToolScore
+                await mcp_server.start()
+                logger.info("成功连接到 ToolScore 并启动 MCP 服务器。")
+                break # 成功启动，退出循环
+            except Exception as e:
+                logger.warning(f"连接到 ToolScore 失败: {e}. 5秒后重试...")
+                await asyncio.sleep(5)
+        else:
+            logger.error("达到最大重试次数，无法连接到 ToolScore。")
+            raise ConnectionRefusedError("无法连接到 ToolScore 服务")
 
 async def main():
     """主函数"""
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG, # 将日志级别改为 DEBUG
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    server = PythonExecutorMCPServer()
+    parser = argparse.ArgumentParser(description="Python Executor MCP Server")
+    parser.add_argument("--port", type=int, help="Port to run the MCP server on")
+    args = parser.parse_args()
+
+    port = args.port
+    if port is None:
+        port_manager = PortManager()
+        try:
+            port = port_manager.find_available_port() # 修改为 find_available_port
+            logger.info(f"No port specified, found available port: {port}")
+        except Exception as e:
+            logger.error(f"Failed to get an available port: {e}")
+            return # 无法获取端口，退出
+
+    if port is None:
+        logger.error("No port available to start the server.")
+        return
+
+    server = PythonExecutorMCPServer(port=port)
     await server.run()
 
 if __name__ == "__main__":

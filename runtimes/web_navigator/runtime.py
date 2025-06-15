@@ -8,17 +8,17 @@ from typing import List, Dict, Optional
 import redis.asyncio as redis
 from playwright.async_api import Page
 
-from core.interfaces import (
-    RuntimeInterface, TaskSpec, TrajectoryResult, 
-    ExecutionStep, ActionType, ErrorType
-)
-from core.metrics import EnhancedMetrics
-from core.cache import TemplateCache
-from core.llm_client import LLMClient
-from runtimes.web_navigator.browser_manager import BrowserManager
+from core.interfaces.runtime_interfaces import RuntimeInterface
+from core.interfaces.task_interfaces import TaskSpec, TrajectoryResult, ExecutionStep
+from core.interfaces.common_interfaces import ActionType, ErrorType
+from core.metrics.metrics import EnhancedMetrics
+from core.cache.cache import TemplateCache
+from core.llm.llm_client import LLMClient
+from .browser_manager import BrowserManager
 
 logger = logging.getLogger(__name__)
-metrics = EnhancedMetrics(port=8002)
+from config import settings # 导入 settings
+metrics = EnhancedMetrics(port=settings.METRICS_WEB_NAVIGATOR_PORT) # 使用 settings 中的端口
 
 class MemoryControlledWebRuntime(RuntimeInterface):
     """内存控制的Web导航运行时"""

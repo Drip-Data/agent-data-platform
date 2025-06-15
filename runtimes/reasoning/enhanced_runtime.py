@@ -8,14 +8,18 @@ import json
 import logging
 import os
 import time
+import re
 import uuid
 from typing import Dict, Any, Optional, List
-from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ExecutionStep, ErrorType, ActionType
-from core.llm_client import LLMClient
-from core.metrics import EnhancedMetrics
-from core.toolscore.mcp_client import MCPToolClient
-from runtimes.reasoning.toolscore_client import ToolScoreClient
-from runtimes.reasoning.real_time_tool_client import RealTimeToolClient
+from core.interfaces.runtime_interfaces import RuntimeInterface
+from core.interfaces.task_interfaces import TaskSpec, TrajectoryResult, ExecutionStep
+from core.interfaces.common_interfaces import ErrorType, ActionType
+from core.interfaces.llm_interfaces import LLMInteraction
+from core.llm.llm_client import LLMClient
+from core.metrics.metrics import EnhancedMetrics
+from core.toolscore.mcp.mcp_client import MCPToolClient
+from .toolscore_client import ToolScoreClient
+from .real_time_tool_client import RealTimeToolClient
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +36,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             'save_individual_trajectories': os.getenv("SAVE_INDIVIDUAL_TRAJECTORIES", "").lower() in ("1", "true", "yes")
         }
         self.client = LLMClient(self.config)
-        self.metrics = EnhancedMetrics(port=8003)
+        from config import settings # 导入 settings
+        self.metrics = EnhancedMetrics(port=settings.METRICS_REASONING_PORT) # 使用 settings 中的端口
         
         # 简化的工具管理架构
         self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
@@ -43,8 +48,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         self.real_time_client = RealTimeToolClient(self.toolscore_websocket_endpoint)
         
         # 保留MCP客户端用于直接工具调用
-        toolscore_url = os.getenv('TOOLSCORE_URL', 'ws://toolscore:8080/websocket')
-        self.mcp_client = MCPToolClient(toolscore_url)
+        # MCP客户端用于直接调用其他MCP服务器（例如Python Executor）
+        # 应该连接到Python Executor的实际WebSocket地址
+        # 根据 config/settings.py，Python Executor的端口是 8083，路径是 /mcp
+        python_executor_ws_url = os.getenv('PYTHON_EXECUTOR_WS_URL', 'ws://localhost:8083/mcp')
+        self.mcp_client = MCPToolClient(python_executor_ws_url)
         
         # 等待工具安装的任务
         self.pending_tool_requests = {}
@@ -228,7 +236,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             interaction_start = time.time()
             response = await original_call_api(prompt)
             
-            from core.interfaces import LLMInteraction
             interaction = LLMInteraction(
                 provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
                 model=getattr(self.client, 'model', 'unknown'),
@@ -274,7 +281,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 missing_caps = gap_result.get("gap_analysis", {}).get("missing_capabilities", [])
 
                 logger.info(
-                    f"⚠ 检测到能力缺口，缺少: {missing_caps or '未知'}. 正在请求 ToolScore 自动安装…")
+                    f"检测到能力缺口，缺少: {missing_caps or '未知'}. 正在请求 ToolScore 自动安装…")
 
                 cap_req_res = await self.toolscore_client.request_tool_capability(
                     task_description=task.description,
@@ -337,7 +344,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 response = await original_call_api(prompt)
                 
                 # 记录LLM交互
-                from core.interfaces import LLMInteraction
                 interaction = LLMInteraction(
                     provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
                     model=getattr(self.client, 'model', 'unknown'),
@@ -408,7 +414,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         interaction_start = time.time()
                         response = await original_call_api_complete(prompt)
                         
-                        from core.interfaces import LLMInteraction
                         interaction = LLMInteraction(
                             provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
                             model=getattr(self.client, 'model', 'unknown'),
@@ -610,7 +615,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         
                         if execution_result.get("success"):
                             tool_success = True
-                            result_data = execution_result.get("result", {})
+                            result_data = execution_result.get("data", {})
                             
                             # 处理执行结果
                             if isinstance(result_data, dict):
@@ -771,7 +776,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 interaction_start = time.time()
                 response = await original_call_api(prompt)
                 
-                from core.interfaces import LLMInteraction
                 interaction = LLMInteraction(
                     provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
                     model=getattr(self.client, 'model', 'unknown'),
@@ -853,7 +857,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         interaction_start = time.time()
                         response = await original_call_api(prompt)
                         
-                        from core.interfaces import LLMInteraction
                         interaction = LLMInteraction(
                             provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
                             model=getattr(self.client, 'model', 'unknown'),
@@ -996,7 +999,7 @@ if __name__ == '__main__':
         runtime = EnhancedReasoningRuntime()
         await runtime.initialize()
         
-        from core.task_manager import start_runtime_service
+        from core.task_management.task_manager import start_runtime_service
         # 启动服务
         await start_runtime_service(runtime)
     

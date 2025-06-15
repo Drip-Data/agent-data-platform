@@ -6,9 +6,9 @@
 import asyncio
 import json
 import logging
-import websockets
 import time
 from typing import Dict, Any, List, Callable, Optional
+import aiohttp # 确保导入 aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -38,28 +38,12 @@ class RealTimeToolClient:
         
         try:
             logger.info(f"🔌 连接到ToolScore实时更新: {websocket_url}")
-            # 创建WebSocket连接（兼容旧版本websockets）
-            try:
-                # 首选 websockets 库客户端
-                try:
-                    self.websocket = await websockets.connect(
-                        websocket_url,
-                        extra_headers={
-                            "User-Agent": "Enhanced-Reasoning-Runtime/1.0"
-                        }
-                    )
-                except TypeError:
-                    # 兼容旧版本websockets，不支持 extra_headers
-                    self.websocket = await websockets.connect(websocket_url)
-            except Exception as ws_err:
-                logger.warning(f"websockets.connect 失败: {ws_err}，尝试使用 aiohttp ClientSession 作为后备方案")
-                try:
-                    import aiohttp
-                    session = aiohttp.ClientSession()
-                    self.websocket = await session.ws_connect(websocket_url, headers={"User-Agent": "Enhanced-Reasoning-Runtime/1.0"})
-                except Exception as aio_err:
-                    logger.error(f"aiohttp ws_connect 同样失败: {aio_err}")
-                    raise aio_err
+            # 强制使用 aiohttp ClientSession 连接，因为 ToolScore Monitoring API 是基于 aiohttp.web 构建的
+            # 避免 websockets 库与 aiohttp 服务器的兼容性问题
+            session = aiohttp.ClientSession()
+            self.websocket = await session.ws_connect(websocket_url, headers={"User-Agent": "Enhanced-Reasoning-Runtime/1.0"})
+            # 存储 session 以便在 close 方法中正确关闭
+            self._session = session
             self.is_connected = True
             self.reconnect_attempts = 0
             
@@ -86,25 +70,22 @@ class RealTimeToolClient:
     async def _listen_for_updates(self):
         """监听工具更新事件"""
         try:
-            import aiohttp
             async for message in self.websocket:
                 try:
-                    # websockets 库 -> str / bytes
-                    # aiohttp        -> WSMessage 对象
-                    if isinstance(message, aiohttp.WSMessage):
-                        if message.type == aiohttp.WSMsgType.TEXT:
-                            payload = message.data
-                        elif message.type == aiohttp.WSMsgType.BINARY:
-                            payload = message.data.decode()
-                        elif message.type == aiohttp.WSMsgType.ERROR:
-                            logger.error(f"WebSocket错误消息: {message.data}")
-                            continue
-                        else:
-                            # ping/pong/close 等
-                            continue
+                    # 确保处理的是 aiohttp.WSMessage 对象
+                    if message.type == aiohttp.WSMsgType.TEXT:
+                        payload = message.data
+                    elif message.type == aiohttp.WSMsgType.BINARY:
+                        payload = message.data.decode()
+                    elif message.type == aiohttp.WSMsgType.ERROR:
+                        logger.error(f"WebSocket错误消息: {message.data}")
+                        continue
+                    elif message.type == aiohttp.WSMsgType.CLOSE:
+                        logger.info("WebSocket连接被服务器关闭。")
+                        break # 退出循环，触发重连
                     else:
-                        # websockets 返回的 str/bytes
-                        payload = message
+                        # ping/pong 等其他消息类型
+                        continue
 
                     event = json.loads(payload)
                     await self._handle_tool_event(event)
@@ -113,15 +94,21 @@ class RealTimeToolClient:
                 except Exception as e:
                     logger.error(f"处理工具事件失败: {e}")
                     
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("🔌 WebSocket连接已断开")
+        except aiohttp.client_exceptions.ClientConnectorError as e:
+            logger.error(f"❌ WebSocket连接失败: {e}")
             self.is_connected = False
-            # 尝试重连
+            if self.reconnect_attempts < self.max_reconnect_attempts:
+                await self._reconnect_with_delay()
+        except aiohttp.client_exceptions.WSServerHandshakeError as e:
+            logger.error(f"❌ WebSocket握手失败: {e}")
+            self.is_connected = False
             if self.reconnect_attempts < self.max_reconnect_attempts:
                 await self._reconnect_with_delay()
         except Exception as e:
             logger.error(f"❌ WebSocket监听异常: {e}")
             self.is_connected = False
+            if self.reconnect_attempts < self.max_reconnect_attempts:
+                await self._reconnect_with_delay()
     
     async def _handle_tool_event(self, event: Dict[str, Any]):
         """处理工具事件"""
@@ -404,9 +391,12 @@ class RealTimeToolClient:
             return "disconnected"
     
     async def close(self):
-        """关闭WebSocket连接"""
+        """关闭WebSocket连接和aiohttp会话"""
         if self.websocket:
             await self.websocket.close()
             self.websocket = None
+        if hasattr(self, '_session') and self._session:
+            await self._session.close()
+            self._session = None
         self.is_connected = False
-        logger.info("🔌 实时工具客户端已关闭") 
+        logger.info("🔌 实时工具客户端已关闭")
