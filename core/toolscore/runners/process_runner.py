@@ -235,7 +235,7 @@ class ProcessRunner(BaseRunner):
                 }
 
         except subprocess.CalledProcessError as e:
-            error_msg = f"命令执行失败: {e.stderr.decode() if e.stderr else str(e)}"
+            error_msg = f"命令执行失败: {e.stderr if e.stderr else str(e)}"
             logger.error(f"安装 MCP Server 失败: {error_msg}")
             shutil.rmtree(temp_dir, ignore_errors=True)
             return {"success": False, "error_msg": error_msg}

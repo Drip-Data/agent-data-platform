@@ -10,6 +10,8 @@ class TaskType(Enum):
     CODE = "code"
     WEB = "web"
     REASONING = "reasoning"
+    CODE_GENERATION = "code_generation"  # Added
+    WEB_TASK = "web_task"  # Added
     # GENERAL = "general"  # 添加通用任务类型
 
 class ActionType(Enum):
@@ -41,6 +43,7 @@ class TaskSpec:
     max_steps: int = 10
     timeout: int = 300
     priority: int = 1
+    # user_id: Optional[str] = None  # Removed user_id
     
     def __post_init__(self):
         if not self.task_id:
@@ -57,6 +60,7 @@ class TaskSpec:
     def from_dict(cls, data: Dict) -> 'TaskSpec':
         if isinstance(data.get('task_type'), str):
             data['task_type'] = TaskType(data['task_type'])
+        # data.pop('user_id', None)  # Removed user_id from pop
         return cls(**data)
     
     def json(self) -> str:
@@ -137,7 +141,7 @@ class TrajectoryResult:
             'task_description': self.task_description,
             'runtime_id': self.runtime_id,
             'success': self.success,
-            'steps': [step.to_dict() for step in self.steps], # 调用 ExecutionStep.to_dict()
+            'steps': [step.to_dict() if hasattr(step, 'to_dict') else step for step in self.steps], # 调用 ExecutionStep.to_dict()
             'final_result': self.final_result,
             'error_type': error_type_value,
             'error_message': self.error_message,

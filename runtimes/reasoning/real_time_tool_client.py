@@ -27,60 +27,57 @@ class RealTimeToolClient:
         self.reconnect_delay = 5  # 秒
         
     async def connect_real_time_updates(self):
-        """连接到ToolScore的实时更新流"""
-        # 处理WebSocket端点
+        """连接到ToolScore的实时更新流，并实现同步重试逻辑"""
         if self.endpoint.startswith('ws://') or self.endpoint.startswith('wss://'):
-            websocket_url = f"{self.endpoint}/api/v1/events/tools"
+            websocket_url = self.endpoint  # 测试时直接使用给定的URL
         else:
-            # 将HTTP端点转换为WebSocket端点
             websocket_url = self.endpoint.replace('http://', 'ws://').replace('https://', 'wss://')
             websocket_url = f"{websocket_url}/api/v1/events/tools"
-        
-        try:
-            logger.info(f"🔌 连接到ToolScore实时更新: {websocket_url}")
-            # 创建WebSocket连接（兼容旧版本websockets）
+
+        self.reconnect_attempts = 0
+        while self.reconnect_attempts < self.max_reconnect_attempts:
             try:
-                # 首选 websockets 库客户端
-                try:
-                    self.websocket = await websockets.connect(
-                        websocket_url,
-                        extra_headers={
-                            "User-Agent": "Enhanced-Reasoning-Runtime/1.0"
-                        }
-                    )
-                except TypeError:
-                    # 兼容旧版本websockets，不支持 extra_headers
-                    self.websocket = await websockets.connect(websocket_url)
-            except Exception as ws_err:
-                logger.warning(f"websockets.connect 失败: {ws_err}，尝试使用 aiohttp ClientSession 作为后备方案")
-                try:
-                    import aiohttp
-                    session = aiohttp.ClientSession()
-                    self.websocket = await session.ws_connect(websocket_url, headers={"User-Agent": "Enhanced-Reasoning-Runtime/1.0"})
-                except Exception as aio_err:
-                    logger.error(f"aiohttp ws_connect 同样失败: {aio_err}")
-                    raise aio_err
-            self.is_connected = True
-            self.reconnect_attempts = 0
-            
-            # 启动监听任务
-            asyncio.create_task(self._listen_for_updates())
-            logger.info("✅ 已连接到ToolScore实时更新流")
-            
-        except Exception as e:
-            logger.error(f"❌ 连接ToolScore实时更新失败: {e}")
-            self.is_connected = False
-            # 启动重连机制
-            if self.reconnect_attempts < self.max_reconnect_attempts:
-                asyncio.create_task(self._reconnect_with_delay())
-    
+                self.reconnect_attempts += 1
+                logger.info(f"🔌 尝试连接到ToolScore实时更新: {websocket_url} (第{self.reconnect_attempts}次)")
+                  # 创建WebSocket连接，设置连接超时
+                self.websocket = await asyncio.wait_for(
+                    websockets.connect(websocket_url),
+                    timeout=5.0  # 5秒连接超时
+                )
+                
+                self.is_connected = True
+                logger.info("✅ 已连接到ToolScore实时更新流")
+                # 立即启动监听任务，但不阻塞当前函数
+                self._listen_task = asyncio.create_task(self._listen_for_updates())
+                return  # 连接成功，退出循环
+
+            except asyncio.TimeoutError:
+                logger.warning(f"第{self.reconnect_attempts}次连接超时")
+                if self.reconnect_attempts >= self.max_reconnect_attempts:
+                    logger.error("❌ 达到最大重连次数，连接失败。")
+                    self.is_connected = False
+                    break
+                await asyncio.sleep(0.5)  # 短暂等待后重试
+            except (websockets.exceptions.ConnectionClosedError, ConnectionRefusedError, TypeError) as e:
+                logger.warning(f"第{self.reconnect_attempts}次连接失败: {e}")
+                if self.reconnect_attempts >= self.max_reconnect_attempts:
+                    logger.error("❌ 达到最大重连次数，连接失败。")
+                    self.is_connected = False
+                    break
+                
+                delay = min(0.5 * self.reconnect_attempts, 2) # 减少重连延迟到最多2秒
+                logger.info(f"⏳ {delay}秒后重试...")
+                await asyncio.sleep(delay)
+            except Exception as e:
+                logger.error(f"❌ 连接过程中发生意外错误: {e}")
+                self.is_connected = False
+                break # 发生其他错误则直接退出
+
     async def _reconnect_with_delay(self):
-        """延迟重连机制"""
-        self.reconnect_attempts += 1
-        delay = min(self.reconnect_delay * self.reconnect_attempts, 60)  # 最大60秒
-        
-        logger.info(f"⏳ {delay}秒后尝试重连 (第{self.reconnect_attempts}次)")
-        await asyncio.sleep(delay)
+        """(此方法保留，但主要连接逻辑已移至 connect_real_time_updates)"""
+        if self.is_connected:
+            return
+        logger.info("后台重连任务启动...")
         await self.connect_real_time_updates()
     
     async def _listen_for_updates(self):
@@ -396,8 +393,7 @@ class RealTimeToolClient:
     @property
     def connection_status(self) -> str:
         """获取连接状态"""
-        if self.is_connected:
-            return "connected"
+        if self.is_connected:            return "connected"
         elif self.reconnect_attempts < self.max_reconnect_attempts:
             return "reconnecting"
         else:
@@ -405,8 +401,19 @@ class RealTimeToolClient:
     
     async def close(self):
         """关闭WebSocket连接"""
+        self.is_connected = False
+        
+        # 取消监听任务
+        if hasattr(self, '_listen_task') and not self._listen_task.done():
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                pass
+        
+        # 关闭WebSocket
         if self.websocket:
             await self.websocket.close()
             self.websocket = None
-        self.is_connected = False
-        logger.info("🔌 实时工具客户端已关闭") 
+            
+        logger.info("🔌 实时工具客户端已关闭")

@@ -326,6 +326,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         except Exception as auto_gap_err:
             logger.error(f"自动缺口检测/修复过程异常: {auto_gap_err}")
 
+        # ==== 修复：防止重复调用同一API，记录已执行的action/tool_id组合 ====
+        executed_actions = set()
         for step_id in range(1, max_steps + 1):
             # 🔍 重置当前步骤的LLM交互记录
             current_step_llm_interactions = []
@@ -399,6 +401,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if tool_id:
                     params['tool_id'] = tool_id
 
+                # ==== 新增DEBUG日志 ====
+                logger.debug(f"[DEBUG] step_id={step_id}, action={action}, tool_id={tool_id}, params={params}")
+
+                # ==== 防止重复调用 ====
+                action_key = f"{action}::{tool_id}::{json.dumps(params, sort_keys=True)}"
+                if action_key in executed_actions:
+                    logger.warning(f"[DEBUG] 跳过重复action: {action_key}")
+                    continue
+                executed_actions.add(action_key)
+
                 execution_code = json.dumps({
                     'action': action,
                     'tool_id': tool_id,
@@ -468,9 +480,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         llm_interactions=current_step_llm_interactions  # 🔍 新增
                     ))
                     break
-                
-                # 检查是否是工具能力请求
-                elif action == 'request_tool_capability' or (tool_id and 'search' in tool_id.lower()):
+                  # 检查是否是工具能力请求（但排除mcp-search-tool）
+                elif action == 'request_tool_capability' or (tool_id and 'search' in tool_id.lower() and tool_id != 'mcp-search-tool'):
                     logger.info("🔍 检测到工具能力请求，发起ToolScore API调用")
                     
                     # 从参数中提取任务描述和能力需求
@@ -495,12 +506,19 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         auto_install=True
                     )
                     
+                    # ==== 修复：确保 capability_result 被 await，且类型为 dict ====
+                    if asyncio.iscoroutine(capability_result):
+                        capability_result = await capability_result
+                    
                     if capability_result.get("success"):
                         # 工具安装成功
                         installed_tools = capability_result.get("installed_tools", [])
                         processing_time = capability_result.get("processing_time_ms", 0)
                         
                         if installed_tools:
+                            # ==== 修复：确保 installed_tools 不是协程对象 ====
+                            if asyncio.iscoroutine(installed_tools):
+                                installed_tools = await installed_tools
                             tool_names = [tool.get("name", tool.get("tool_id", "unknown")) for tool in installed_tools]
                             observation = f"成功安装了 {len(installed_tools)} 个新工具: {', '.join(tool_names)}。处理时间: {processing_time}ms。新工具现在可以使用。"
                             
@@ -566,6 +584,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                 task_description=task_desc,
                                 reason=reason
                             )
+                            
+                            # ==== 修复：确保 search_result 被 await，且类型为 dict ====
+                            if asyncio.iscoroutine(search_result):
+                                search_result = await search_result
                             
                             if search_result.get("success"):
                                 installed_tools = search_result.get("installed_tools", [])
@@ -730,9 +752,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     else:
                         current_attempt_err_msg = f"LLM尝试调用工具 '{tool_id}' 执行动作 '{action}'，但当前不支持或无效。"
                     observation = current_attempt_err_msg
-                    action_type = ActionType.TOOL_CALL
-
-                # 错误处理和重试逻辑
+                    action_type = ActionType.TOOL_CALL                # 错误处理和重试逻辑
                 if not tool_success:
                     logger.warning(
                         f"Step {step_id}, Action {action}, Attempt {attempt + 1}/{max_retries + 1} failed. "
@@ -749,6 +769,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         await asyncio.sleep(retry_delay_seconds)
                     else:
                         break
+                else:
+                    # 工具执行成功，退出重试循环
+                    break
             
             # 完成任务检查
             exec_code_dict = {}

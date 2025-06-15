@@ -18,6 +18,16 @@ python-dotenv>=1.0.0
 beautifulsoup4>=4.11.0
 Pillow>=9.0.0
 
+# 测试依赖
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+pytest-timeout>=2.1.0
+pytest-mock>=3.10.0
+pytest-xdist>=3.0.0
+pytest-html>=3.1.0
+pytest-json-report>=1.5.0
+
 # 注意：以下依赖已移至具体的MCP服务器或运行时模块中
 # - matplotlib, pandas, numpy, scikit-learn -> runtimes/reasoning/requirements.txt
 # - playwright -> 已移至主依赖 (browser_navigator_server 需要)
