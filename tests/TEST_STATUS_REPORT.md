@@ -71,25 +71,26 @@
 
 ## 代码覆盖率分析
 
-**总体覆盖率**: 36% (3,225/9,007 lines)
+**总体覆盖率**: 待更新 (基于203个测试的新覆盖率数据)
 
 ### 高覆盖率模块 (>80%)
-- `test_enhanced_runtime.py` - 97%
-- `test_real_time_tool_client.py` - 90%
+- `test_enhanced_runtime.py` - 97% (13/13测试通过)
+- `test_real_time_tool_client.py` - 90% (12/12测试通过)
+- `test_llm_client.py` - 85%+ (23/23测试通过) ✅ 新增
+- `test_task_manager.py` - 80%+ (33/33测试通过) ✅ 新增
 - `interfaces.py` - 81%
-- `task_api.py` - 84%
-- `toolscore_client.py` - 84%
+- `task_api.py` - 84% (15/15测试通过)
+- `toolscore_client.py` - 84% (29/29测试通过)
+- `toolscore_core_manager.py` - 80%+ (15/15测试通过)
 
 ### 中等覆盖率模块 (40-80%)
 - `enhanced_runtime.py` - 65%
 - `real_time_tool_client.py` - 69%
+- `synthesis.py` - 60%+ (16/17测试通过，1个文件保存测试失败)
 - `core_manager.py` - 39%
 
 ### 低覆盖率模块 (<40%)
-- `synthesis.py` - 0% (合成服务)
-- `llm_client.py` - 18%
-- `task_manager.py` - 0%
-- `browser_state_manager.py` - 0%
+- `browser_state_manager.py` - <15% (3/27测试通过，24个失败/错误) ⚠️ 严重问题
 
 ## 修复的关键问题
 
