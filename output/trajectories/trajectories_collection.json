@@ -4058,5 +4058,165 @@
       "original_task_id": "test-tool-exception"
     },
     "created_at": 1750012785.1338735
+  },
+  {
+    "task_name": "test-task-1",
+    "task_id": "test-task-1",
+    "task_description": "Test task: use mock_tool to do something.",
+    "runtime_id": "enhanced-reasoning-d8c130ab-e8aa-4c3f-853f-1d274fad619d",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': '\\n    # 已注册的工具\\n    - mock_tool_id (Mock Tool): A tool for mocking. (能力: mock_capability) [function类型]\\n    '}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037683.6267886, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'param1': 'value1', 'action': 'mock_action', 'tool_id': 'mock_tool_id'}, observation=\"工具 'mock_tool_id/mock_action' 执行成功。输出: Mock tool executed successfully.\", success=True, thinking='I should use mock_tool.', execution_code='{\"action\": \"mock_action\", \"tool_id\": \"mock_tool_id\", \"parameters\": {\"param1\": \"value1\", \"action\": \"mock_action\", \"tool_id\": \"mock_tool_id\"}}', error_type=None, error_message=None, timestamp=1750037683.6269703, duration=0.00011324882507324219, llm_interactions=[])"
+    ],
+    "final_result": "任务完成。生成结果：\nMock tool executed successfully.",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.00023889541625976562,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-d8c130ab-e8aa-4c3f-853f-1d274fad619d",
+      "original_task_id": "test-task-1"
+    },
+    "created_at": 1750037683.6270082
+  },
+  {
+    "task_name": "test-task-2",
+    "task_id": "test-task-2",
+    "task_description": "Test task: need a new_tool for a new_capability.",
+    "runtime_id": "enhanced-reasoning-5899ac1b-37c2-4e59-899c-80ff39638bcf",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': 'No tools available initially.'}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037683.646069, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'p_new': 'v_new', 'action': 'new_action', 'tool_id': 'new_tool_id'}, observation=\"工具 'new_tool_id/new_action' 执行成功。输出: New tool executed successfully.\", success=True, thinking='New tool is available, I should use new_tool_id.', execution_code='{\"action\": \"new_action\", \"tool_id\": \"new_tool_id\", \"parameters\": {\"p_new\": \"v_new\", \"action\": \"new_action\", \"tool_id\": \"new_tool_id\"}}', error_type=None, error_message=None, timestamp=1750037685.6486137, duration=0.0001842975616455078, llm_interactions=[])"
+    ],
+    "final_result": "任务完成。生成结果：\nNew tool executed successfully.",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 2.0026063919067383,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-5899ac1b-37c2-4e59-899c-80ff39638bcf",
+      "original_task_id": "test-task-2"
+    },
+    "created_at": 1750037685.6486616
+  },
+  {
+    "task_name": "test-fallback",
+    "task_id": "test-fallback",
+    "task_description": "Test fallback",
+    "runtime_id": "enhanced-reasoning-21c0fcf6-c8ed-4292-b5cb-35cabb76ce32",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': '- fallback_tool (Fallback Tool): For testing fallback.'}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037685.683651, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'action': 'do_fallback', 'tool_id': 'fallback_tool'}, observation='Tool \\'fallback_tool/do_fallback\\' executed successfully. Summary: {\"result\": \"MCP fallback success\"}', success=True, thinking='Use fallback_tool.', execution_code='{\"action\": \"do_fallback\", \"tool_id\": \"fallback_tool\", \"parameters\": {\"action\": \"do_fallback\", \"tool_id\": \"fallback_tool\"}}', error_type=None, error_message=None, timestamp=1750037685.6839192, duration=0.0002105236053466797, llm_interactions=[])"
+    ],
+    "final_result": "Mocked task summary.",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.0003180503845214844,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-21c0fcf6-c8ed-4292-b5cb-35cabb76ce32",
+      "original_task_id": "test-fallback"
+    },
+    "created_at": 1750037685.6839705
+  },
+  {
+    "task_name": "test-llm-req-cap",
+    "task_id": "test-llm-req-cap",
+    "task_description": "LLM requests capability",
+    "runtime_id": "enhanced-reasoning-73638216-c443-4e18-a01a-121682e9fc59",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': 'No tools available.'}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037685.7106187, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'task_description': 'Need super_ability for my task', 'required_capabilities': ['super_ability'], 'action': 'request_tool_capability'}, observation='成功安装了 1 个新工具: SuperTool。处理时间: 0ms。新工具现在可以使用。', success=True, thinking=\"I need a tool for 'super_ability'.\", execution_code='{\"action\": \"request_tool_capability\", \"tool_id\": null, \"parameters\": {\"task_description\": \"Need super_ability for my task\", \"required_capabilities\": [\"super_ability\"], \"action\": \"request_tool_capability\"}}', error_type=None, error_message=None, timestamp=1750037685.7109594, duration=0.0002837181091308594, llm_interactions=[])"
+    ],
+    "final_result": "Mocked task summary.",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.0003917217254638672,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-73638216-c443-4e18-a01a-121682e9fc59",
+      "original_task_id": "test-llm-req-cap"
+    },
+    "created_at": 1750037685.711013
+  },
+  {
+    "task_name": "test-mcp-search",
+    "task_id": "test-mcp-search",
+    "task_description": "LLM uses mcp-search-tool",
+    "runtime_id": "enhanced-reasoning-f9887b66-2291-4577-8671-f10096396bcc",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': 'No tools available.'}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037685.737279, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'task_description': 'Edit an image', 'reason': 'Need to crop and resize', 'action': 'search_and_install_tools', 'tool_id': 'mcp-search-tool'}, observation='成功搜索并安装了 1 个新工具: ImageEditor。', success=True, thinking=\"I need to find a tool for 'image_editing'.\", execution_code='{\"action\": \"search_and_install_tools\", \"tool_id\": \"mcp-search-tool\", \"parameters\": {\"task_description\": \"Edit an image\", \"reason\": \"Need to crop and resize\", \"action\": \"search_and_install_tools\", \"tool_id\": \"mcp-search-tool\"}}', error_type=None, error_message=None, timestamp=1750037685.7374773, duration=0.00013446807861328125, llm_interactions=[])"
+    ],
+    "final_result": "Mocked task summary.",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.00025081634521484375,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-f9887b66-2291-4577-8671-f10096396bcc",
+      "original_task_id": "test-mcp-search"
+    },
+    "created_at": 1750037685.737532
+  },
+  {
+    "task_name": "test-max-steps",
+    "task_id": "test-max-steps",
+    "task_description": "Test max steps",
+    "runtime_id": "enhanced-reasoning-82e1cf89-5ee4-41c7-a326-49a82ca0354e",
+    "success": false,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': 'No tools available.'}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037685.7655926, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'action': 'some_action', 'tool_id': 'some_tool'}, observation=\"工具 'some_tool/some_action' 执行成功。输出: Step executed\", success=True, thinking='Still working...', execution_code='{\"action\": \"some_action\", \"tool_id\": \"some_tool\", \"parameters\": {\"action\": \"some_action\", \"tool_id\": \"some_tool\"}}', error_type=None, error_message=None, timestamp=1750037685.7657547, duration=9.846687316894531e-05, llm_interactions=[])"
+    ],
+    "final_result": "Task failed after 2 steps",
+    "error_type": "ErrorType.EXECUTION_FAILED",
+    "error_message": "Task failed after 2 steps",
+    "total_duration": 0.0012309551239013672,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-82e1cf89-5ee4-41c7-a326-49a82ca0354e",
+      "original_task_id": "test-max-steps"
+    },
+    "created_at": 1750037685.766791
+  },
+  {
+    "task_name": "test-direct-complete",
+    "task_id": "test-direct-complete",
+    "task_description": "LLM completes directly",
+    "runtime_id": "enhanced-reasoning-0f1ad851-7403-4b85-ab0e-51250296b4a4",
+    "success": true,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': 'No tools available.'}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037685.7947252, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'summary': 'All information gathered and processed.', 'action': 'complete_task'}, observation='Final summary from LLM for complete_task action.', success=True, thinking='I have all the info.', execution_code='{\"action\": \"complete_task\", \"tool_id\": null, \"parameters\": {\"summary\": \"All information gathered and processed.\", \"action\": \"complete_task\"}}', error_type=None, error_message=None, timestamp=1750037685.7948806, duration=9.179115295410156e-05, llm_interactions=[])"
+    ],
+    "final_result": "Final summary from LLM for complete_task action.",
+    "error_type": null,
+    "error_message": null,
+    "total_duration": 0.00019478797912597656,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-0f1ad851-7403-4b85-ab0e-51250296b4a4",
+      "original_task_id": "test-direct-complete"
+    },
+    "created_at": 1750037685.7948997
+  },
+  {
+    "task_name": "test-tool-exception",
+    "task_id": "test-tool-exception",
+    "task_description": "Tool throws exception",
+    "runtime_id": "enhanced-reasoning-44c1e6e8-6b4b-4e4a-9c00-567c38667415",
+    "success": false,
+    "steps": [
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'tools_snapshot': 'No tools available.'}, observation='Tools exposed to LLM for planning', success=True, thinking=None, execution_code=None, error_type=None, error_message=None, timestamp=1750037685.8221283, duration=0.0, llm_interactions=[])",
+      "ExecutionStep(step_id=1, action_type=<ActionType.TOOL_CALL: 'tool_call'>, action_params={'action': 'risky_op', 'tool_id': 'risky_tool'}, observation=\"工具 'risky_tool' 执行失败: Network Error during tool call\", success=False, thinking='Using risky_tool.', execution_code='{\"action\": \"risky_op\", \"tool_id\": \"risky_tool\", \"parameters\": {\"action\": \"risky_op\", \"tool_id\": \"risky_tool\"}}', error_type=<ErrorType.TOOL_ERROR: 'tool_error'>, error_message='Network Error during tool call', timestamp=1750037685.8224354, duration=0.0002460479736328125, llm_interactions=[])"
+    ],
+    "final_result": "Network Error during tool call",
+    "error_type": "ErrorType.TOOL_ERROR",
+    "error_message": "Network Error during tool call",
+    "total_duration": 0.002760171890258789,
+    "metadata": {
+      "runtime_id": "enhanced-reasoning-44c1e6e8-6b4b-4e4a-9c00-567c38667415",
+      "original_task_id": "test-tool-exception"
+    },
+    "created_at": 1750037685.824865
   }
 ]
