@@ -26,9 +26,18 @@ class BrowserNavigatorMCPServer:
         self.server_id = "browser-navigator-mcp-server"
         self.config_manager = config_manager
         
-        # 从配置中获取端口
+        # 从配置中获取端口，优先使用动态分配的端口
         ports_config = self.config_manager.get_ports_config()
-        browser_port = ports_config['mcp_servers']['browser_navigator']['port']
+        
+        # 检查是否有动态分配的端口（由MCP启动器设置）
+        dynamic_port = os.getenv('BROWSER_NAVIGATOR_SERVER_PORT')
+        if dynamic_port:
+            browser_port = int(dynamic_port)
+            logger.info(f"使用动态分配端口: {browser_port}")
+        else:
+            browser_port = ports_config['mcp_servers']['browser_navigator']['port']
+            logger.info(f"使用配置文件端口: {browser_port}")
+        
         toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
 
         # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的

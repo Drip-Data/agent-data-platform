@@ -306,26 +306,74 @@ def stop():
         logger.info(f"停止MCP服务器: {server_name}")
         
         try:
-            # 尝试正常终止进程
-            process.terminate()
+            # 检查进程是否还活着
+            if process.poll() is None:
+                # 进程还在运行，尝试正常终止
+                process.terminate()
+                
+                # 等待进程结束
+                try:
+                    process.wait(timeout=3)  # 减少超时时间
+                    logger.info(f"MCP服务器已正常停止: {server_name}")
+                except subprocess.TimeoutExpired:
+                    # 如果进程没有及时结束，强制杀死
+                    logger.warning(f"MCP服务器未响应终止信号，强制杀死: {server_name}")
+                    process.kill()
+                    try:
+                        process.wait(timeout=2)
+                        logger.info(f"MCP服务器已强制停止: {server_name}")
+                    except subprocess.TimeoutExpired:
+                        logger.error(f"无法停止MCP服务器: {server_name}")
+            else:
+                logger.info(f"MCP服务器已经停止: {server_name}")
             
-            # 等待进程结束
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # 如果进程没有及时结束，强制杀死
-                logger.warning(f"MCP服务器未响应终止信号，强制杀死: {server_name}")
-                process.kill()
-            
-            logger.info(f"MCP服务器已停止: {server_name}")
             server_statuses[server_name] = {'status': 'stopped'}
             
         except Exception as e:
             logger.error(f"停止MCP服务器时出错: {server_name} - {str(e)}")
             server_statuses[server_name] = {'status': 'error', 'message': f"Stop error: {str(e)}"}
     
+    # 强制清理可能遗留的进程
+    _force_cleanup_mcp_processes()
+    
     # 清空进程字典
     mcp_processes = {}
+    
+    logger.info("所有MCP服务器已停止")
+
+def _force_cleanup_mcp_processes():
+    """强制清理可能遗留的MCP服务器进程"""
+    mcp_server_ports = [8081, 8082, 8080]  # MCP服务器使用的端口
+    
+    for port in mcp_server_ports:
+        try:
+            # 查找占用端口的进程
+            result = subprocess.run(
+                ['lsof', '-ti', f':{port}'], 
+                capture_output=True, text=True, timeout=3
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    try:
+                        # 检查这是否是我们的MCP服务器进程
+                        # 通过检查命令行参数来确认
+                        cmd_result = subprocess.run(
+                            ['ps', '-p', pid, '-o', 'args='], 
+                            capture_output=True, text=True, timeout=2
+                        )
+                        
+                        if (cmd_result.returncode == 0 and 
+                            'mcp_servers' in cmd_result.stdout):
+                            # 这是我们的MCP服务器进程，强制终止
+                            subprocess.run(['kill', '-KILL', pid], timeout=2, check=False)
+                            logger.info(f"强制清理MCP服务器进程 {pid} (端口 {port})")
+                        
+                    except Exception as e:
+                        logger.debug(f"清理端口 {port} 进程 {pid} 时出错: {e}")
+        except Exception as e:
+            logger.debug(f"检查端口 {port} 占用情况失败: {e}")
     
     logger.info("所有MCP服务器已停止")
 

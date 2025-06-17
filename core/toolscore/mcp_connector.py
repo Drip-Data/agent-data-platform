@@ -30,11 +30,24 @@ class MCPServerConnector:
         
         try:
             logger.info(f"Connecting to MCP server at {self.endpoint}...")
-            self.websocket = await websockets.connect(self.endpoint)
+            logger.info(f"WebSocket库版本: {websockets.__version__}")
+            
+            # 添加更多调试信息
+            import websockets.legacy.client as websockets_client
+            self.websocket = await websockets_client.connect(
+                self.endpoint,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=10
+            )
             self._connected = True
             logger.info(f"Successfully connected to MCP server at {self.endpoint}")
         except Exception as e:
             logger.error(f"Failed to connect to MCP server at {self.endpoint}: {e}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            logger.error(f"错误详情: {str(e)}")
+            import traceback
+            logger.error(f"完整堆栈跟踪:\n{traceback.format_exc()}")
             self._connected = False
             raise
     

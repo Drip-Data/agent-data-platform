@@ -185,41 +185,64 @@ def stop():
     
     logger.info("正在停止ToolScore服务...")
     
+    # 1. 首先尝试优雅关闭WebSocket服务器
     if toolscore_server:
-        # 尝试在ToolScore MCP服务器的线程中停止它
-        # 由于toolscore_server是在其自己的asyncio事件循环中运行的，
-        # 我们不能在当前线程中直接调用asyncio.run(toolscore_server.stop())
-        # 否则会引发RuntimeError。
-        # 理想情况下，toolscore_server应该提供一个同步的停止方法，
-        # 或者通过其内部的事件循环来调度停止。
-        # 暂时，我们假设toolscore_server.stop()可以在其自己的线程中被处理。
-        # 在测试环境中，我们可能需要mock掉这个行为或者在fixture中直接await停止。
-        # 对于生产环境，如果toolscore_server是daemon线程，进程退出时它也会退出。
-        # 这里暂时移除asyncio.run，依赖daemon线程的自动清理或外部信号。
-        # 如果需要更优雅的停止，toolscore_server需要实现一个同步的shutdown方法
-        # 或者通过一个队列/事件来通知其内部事件循环停止。
-        # For now, we'll rely on the daemon thread to be terminated with the main process.
-        # In tests, the fixture's teardown will handle the async stop.
-        # 强制关闭WebSocket服务器来释放端口
         try:
             if hasattr(toolscore_server, 'websocket_server') and toolscore_server.websocket_server:
                 toolscore_server.websocket_server.close()
                 logger.info("WebSocket服务器已关闭")
         except Exception as e:
             logger.warning(f"关闭WebSocket服务器时出错: {e}")
+        
+        # 尝试停止server的内部循环
+        try:
+            if hasattr(toolscore_server, '_is_running'):
+                toolscore_server._is_running = False
+        except Exception as e:
+            logger.warning(f"停止server内部循环时出错: {e}")
+            
         logger.info("ToolScore MCP服务器已停止")
     
-    if toolscore_thread and toolscore_thread.is_alive():
-        toolscore_thread.join(timeout=5) # 等待线程结束，设置超时
-        if toolscore_thread.is_alive():
-            logger.warning("ToolScore MCP线程未能正常结束")
+    # 2. 强制停止线程
+    threads_to_stop = [
+        (toolscore_thread, "ToolScore MCP"),
+        (_http_api_thread, "ToolScore HTTP API")
+    ]
     
-    if _http_api_thread and _http_api_thread.is_alive():
-        _http_api_thread.join(timeout=5) # 等待线程结束，设置超时
-        if _http_api_thread.is_alive():
-            logger.warning("ToolScore HTTP API线程未能正常结束")
+    for thread, name in threads_to_stop:
+        if thread and thread.is_alive():
+            logger.info(f"等待 {name} 线程停止...")
+            thread.join(timeout=3)  # 减少超时时间
+            
+            if thread.is_alive():
+                logger.warning(f"{name} 线程未能正常结束，尝试强制停止...")
+                
+                # 尝试强制停止线程（Python没有直接的线程终止方法）
+                try:
+                    import threading
+                    import ctypes
+                    
+                    # 获取线程ID
+                    thread_id = thread.ident
+                    if thread_id:
+                        # 尝试发送异常到线程（这是不安全的，但在关闭时可以使用）
+                        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                            ctypes.c_long(thread_id), 
+                            ctypes.py_object(SystemExit)
+                        )
+                        if res > 1:
+                            ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                                ctypes.c_long(thread_id), 
+                                None
+                            )
+                        logger.info(f"强制终止 {name} 线程")
+                except Exception as e:
+                    logger.warning(f"强制停止 {name} 线程失败: {e}")
 
-    # 清理资源
+    # 3. 强制释放相关端口
+    _force_release_toolscore_ports()
+
+    # 4. 清理资源
     core_manager = None
     tool_library = None
     toolscore_server = None
@@ -227,6 +250,51 @@ def stop():
     _http_api_thread = None
     
     logger.info("ToolScore服务已停止")
+
+def _force_release_toolscore_ports():
+    """强制释放ToolScore相关端口"""
+    toolscore_ports = [8088, 8089, 8081, 8082, 8080]  # ToolScore HTTP, MCP, 以及MCP服务器端口
+    
+    for port in toolscore_ports:
+        try:
+            import subprocess
+            
+            # 查找占用端口的进程
+            result = subprocess.run(
+                ['lsof', '-ti', f':{port}'], 
+                capture_output=True, text=True, timeout=3
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    try:
+                        # 首先尝试TERM信号
+                        subprocess.run(['kill', '-TERM', pid], timeout=2, check=False)
+                        
+                        # 等待一秒后检查进程是否还存在
+                        import time
+                        time.sleep(1)
+                        
+                        # 检查进程是否仍然存在
+                        check_result = subprocess.run(
+                            ['kill', '-0', pid], 
+                            capture_output=True, timeout=1
+                        )
+                        
+                        if check_result.returncode == 0:
+                            # 进程仍然存在，使用KILL信号
+                            subprocess.run(['kill', '-KILL', pid], timeout=2, check=False)
+                            logger.info(f"强制释放端口 {port}，杀死进程 {pid}")
+                        else:
+                            logger.info(f"端口 {port} 进程 {pid} 已正常退出")
+                            
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"释放端口 {port} 进程 {pid} 超时")
+                    except Exception as e:
+                        logger.warning(f"释放端口 {port} 进程 {pid} 失败: {e}")
+        except Exception as e:
+            logger.debug(f"检查端口 {port} 占用情况失败: {e}")  # 降级为debug，因为这不是关键错误
 
 async def health_check(): # 将 health_check 定义为异步函数
     """检查ToolScore服务健康状态"""

@@ -26,9 +26,18 @@ class SearchToolMCPServer:
         self.server_id = "mcp-search-tool" # 使用用户指定的ID
         self.config_manager = config_manager
         
-        # 从配置中获取端口
+        # 从配置中获取端口，优先使用动态分配的端口
         ports_config = self.config_manager.get_ports_config()
-        search_tool_port = ports_config['mcp_servers']['search_tool']['port']
+        
+        # 检查是否有动态分配的端口（由MCP启动器设置）
+        dynamic_port = os.getenv('SEARCH_TOOL_SERVER_PORT')
+        if dynamic_port:
+            search_tool_port = int(dynamic_port)
+            logger.info(f"使用动态分配端口: {search_tool_port}")
+        else:
+            search_tool_port = ports_config['mcp_servers']['search_tool']['port']
+            logger.info(f"使用配置文件端口: {search_tool_port}")
+        
         toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
 
         # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的

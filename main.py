@@ -84,15 +84,101 @@ def parse_arguments():
 
 def setup_signal_handlers(service_manager):
     """设置信号处理器以优雅关闭"""
-    async def signal_handler(sig, frame): # 信号处理器也需要是异步的
-        logger.info(f"收到信号 {sig}，正在优雅关闭...")
-        await service_manager.stop_all()
-        sys.exit(0)
+    def signal_handler(sig, frame):
+        logger.info(f"收到信号 {sig}，正在强制关闭所有服务...")
+        
+        # 设置一个短超时来尝试优雅关闭
+        try:
+            # 尝试使用服务管理器的强制停止
+            service_manager.force_stop_all()
+            logger.info("服务管理器强制停止完成")
+        except Exception as e:
+            logger.warning(f"服务管理器强制停止失败: {e}")
+        
+        # 无论如何都执行强制清理
+        force_cleanup()
+        
+        # 强制退出
+        logger.info("强制退出系统")
+        os._exit(0)
     
-    # 注册信号处理器，需要将异步函数包装为同步可调用对象
-    loop = asyncio.get_event_loop()
-    loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(signal_handler(signal.SIGINT, None)))
-    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(signal_handler(signal.SIGTERM, None)))
+    async def emergency_shutdown(service_manager):
+        """紧急关闭流程"""
+        try:
+            # 设置较短的超时时间
+            await asyncio.wait_for(service_manager.stop_all(), timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("服务停止超时，执行强制清理")
+            force_cleanup()
+        except Exception as e:
+            logger.error(f"紧急关闭失败: {e}")
+            force_cleanup()
+    
+    def force_cleanup():
+        """强制清理所有资源"""
+        logger.info("执行强制清理...")
+        
+        # 首先尝试使用系统命令强制清理MCP服务器进程
+        try:
+            import subprocess
+            # 清理所有MCP服务器相关进程
+            subprocess.run(['pkill', '-f', 'mcp_servers'], timeout=5, check=False)
+            subprocess.run(['pkill', '-f', 'python_executor_server'], timeout=3, check=False)
+            subprocess.run(['pkill', '-f', 'browser_navigator_server'], timeout=3, check=False)
+            subprocess.run(['pkill', '-f', 'search_tool_server'], timeout=3, check=False)
+            logger.info("已尝试清理MCP服务器进程")
+        except Exception as e:
+            logger.warning(f"清理MCP服务器进程失败: {e}")
+        
+        # 强制杀死所有相关进程
+        try:
+            import psutil
+            current_pid = os.getpid()
+            current_process = psutil.Process(current_pid)
+            
+            # 杀死所有子进程
+            for child in current_process.children(recursive=True):
+                try:
+                    child.terminate()
+                    child.wait(timeout=2)
+                except:
+                    try:
+                        child.kill()
+                    except:
+                        pass
+        except ImportError:
+            # 如果没有psutil，使用系统命令
+            try:
+                import subprocess
+                subprocess.run(['pkill', '-f', 'python.*main.py'], timeout=5, check=False)
+            except:
+                pass
+        
+        # 释放端口
+        release_ports([8088, 8089, 8100, 8081, 8082, 8080])
+    
+    def release_ports(ports):
+        """强制释放端口"""
+        for port in ports:
+            try:
+                import subprocess
+                # 在macOS上查找并杀死占用端口的进程
+                result = subprocess.run(['lsof', '-ti', f':{port}'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        try:
+                            subprocess.run(['kill', '-9', pid], timeout=3)
+                            logger.info(f"强制释放端口 {port}，杀死进程 {pid}")
+                        except:
+                            pass
+            except:
+                pass
+    
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
 async def main_async():
     """异步主函数，应用入口点"""

@@ -3,7 +3,7 @@ import json
 import logging
 import websockets.legacy.server as websockets_server
 import websockets.legacy.client as websockets_client
-from typing import Dict, Any, Callable, Optional, List, TYPE_CHECKING, Union
+from typing import Dict, Any, Callable, Optional, List, Union
 from websockets.legacy.client import WebSocketClientProtocol
 from websockets.legacy.server import WebSocketServerProtocol
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError, InvalidURI
@@ -11,9 +11,7 @@ from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError, Inv
 from uuid import uuid4
 import os
 
-# 仅在类型检查时导入，避免循环导入
-if TYPE_CHECKING:
-    from mcp_servers.python_executor_server.main import PythonExecutorMCPServer
+# 移除了本地调用路径，强制使用WebSocket
 
 from .interfaces import ToolSpec, ToolType, RegistrationResult, ExecutionResult, ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType
 from .unified_tool_library import UnifiedToolLibrary
@@ -52,9 +50,7 @@ class MCPServer:
         self.toolscore_registration_task: Optional[asyncio.Task] = None
         self._is_healthy: bool = False # 新增：服务健康状态
         self._startup_error_message: Optional[str] = None # 新增：启动错误信息
-        
-        # 🔧 新增：用于存储同进程的MCP服务器引用，避免WebSocket连接问题
-        self.python_executor_server: Optional["PythonExecutorMCPServer"] = None # 添加类型提示
+        self._is_running: bool = False # 新增：运行状态标志
 
         # 如果是toolscore本身，则不连接toolscore_endpoint
         if self.server_name == "toolscore":
@@ -336,26 +332,6 @@ class MCPServer:
     async def _forward_to_mcp_server(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """转发请求到实际的MCP服务器"""
         try:
-            # 🔧 修复：对于同进程的Python Executor，直接调用避免WebSocket连接问题
-            # 确保 self.python_executor_server 被正确赋值且是可等待的
-            if tool_id == "python-executor-mcp-server" and self.python_executor_server is not None:
-                logger.info(f"🚀 直接调用同进程的Python Executor")
-                try:
-                    # 假设 self.python_executor_server 是一个具有 handle_tool_action 方法的实例
-                    action_result = await self.python_executor_server.handle_tool_action(action, parameters)
-                    return {
-                        "success": action_result.get("success", False),
-                        "result": action_result.get("data") or action_result.get("result"),
-                        "error": action_result.get("error") or action_result.get("error_message"),
-                        "error_type": action_result.get("error_type")
-                    }
-                except Exception as e:
-                    logger.error(f"❌ 直接调用Python Executor失败: {e}")
-                    return {
-                        "success": False,
-                        "error": f"Direct call to Python Executor failed: {str(e)}",
-                        "error_type": ErrorType.SYSTEM_ERROR.value
-                    }
             
             # 从工具库中获取工具规范和端点信息
             if self.unified_tool_library:

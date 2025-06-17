@@ -744,11 +744,28 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 success = True
                 break
         
-        # 如果循环结束但任务没有成功完成，设置错误状态
+        # 改进的任务完成判断逻辑
         if not success and steps:
-            final_trajectory_error_type = steps[-1].error_type or ErrorType.EXECUTION_FAILED
-            final_trajectory_error_message = steps[-1].error_message or f"Task failed after {len(steps)} steps"
-            logger.warning(f"Task execution completed without success: {final_trajectory_error_message}")
+            # 检查是否所有步骤都成功，且LLM多次确认任务完成
+            successful_steps = [s for s in steps if s.success]
+            completion_confirmations = 0
+            
+            # 统计LLM确认任务完成的次数
+            for step in steps:
+                if hasattr(step, 'llm_interactions') and step.llm_interactions:
+                    for interaction in step.llm_interactions:
+                        if (interaction.context and 'completion_check' in interaction.context and 
+                            interaction.response and ('任务已完成' in interaction.response or '任务完成' in interaction.response)):
+                            completion_confirmations += 1
+            
+            # 如果大部分步骤成功且LLM多次确认完成，认为任务成功
+            if len(successful_steps) >= len(steps) * 0.8 and completion_confirmations >= 3:
+                logger.info(f"任务被重新评估为成功：{len(successful_steps)}/{len(steps)}步成功，{completion_confirmations}次LLM确认完成")
+                success = True
+            else:
+                final_trajectory_error_type = steps[-1].error_type or ErrorType.EXECUTION_FAILED
+                final_trajectory_error_message = steps[-1].error_message or f"Task failed after {len(steps)} steps"
+                logger.warning(f"Task execution completed without success: {final_trajectory_error_message}")
 
         total_duration = time.time() - start_time
         

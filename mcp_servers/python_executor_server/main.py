@@ -26,9 +26,18 @@ class PythonExecutorMCPServer:
         self.server_id = "python-executor-mcp-server"
         self.config_manager = config_manager
         
-        # 从配置中获取端口
+        # 从配置中获取端口，优先使用动态分配的端口
         ports_config = self.config_manager.get_ports_config()
-        python_executor_port = ports_config['mcp_servers']['python_executor']['port']
+        
+        # 检查是否有动态分配的端口（由MCP启动器设置）
+        dynamic_port = os.getenv('PYTHON_EXECUTOR_SERVER_PORT')
+        if dynamic_port:
+            python_executor_port = int(dynamic_port)
+            logger.info(f"使用动态分配端口: {python_executor_port}")
+        else:
+            python_executor_port = ports_config['mcp_servers']['python_executor']['port']
+            logger.info(f"使用配置文件端口: {python_executor_port}")
+        
         toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
 
         # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的
@@ -40,6 +49,15 @@ class PythonExecutorMCPServer:
         self._listen_port = python_executor_port
         
         self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
+        
+        # 添加日志以确认端口和端点信息
+        logger.info(f"PythonExecutorMCPServer initialized:")
+        logger.info(f"  Server Name: {self.server_name}")
+        logger.info(f"  Server ID: {self.server_id}")
+        logger.info(f"  Listen Host: {self._listen_host}")
+        logger.info(f"  Listen Port: {self._listen_port}")
+        logger.info(f"  Public Endpoint: {self.endpoint}")
+        logger.info(f"  ToolScore Endpoint: {self.toolscore_endpoint}")
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取Python工具的所有能力"""
@@ -204,7 +222,14 @@ class PythonExecutorMCPServer:
         # 在启动之前，覆盖其监听地址，防止绑定到不可用端口
         # MCPServer.start() 会解析 endpoint 字符串，只关心端口；因此额外在环境变量中覆盖端口足够。
         os.environ["PYTHON_EXECUTOR_BIND_HOST"] = self._listen_host
-        await mcp_server.start()
+        
+        logger.info(f"Attempting to start MCPServer for {self.server_name} at {self.endpoint}...")
+        try:
+            await mcp_server.start()
+            logger.info(f"MCPServer for {self.server_name} started successfully.")
+        except Exception as e:
+            logger.error(f"Failed to start MCPServer for {self.server_name}: {e}", exc_info=True)
+            raise # Re-raise the exception to propagate the failure
 
 async def main():
     """主函数"""

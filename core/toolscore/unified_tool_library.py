@@ -115,7 +115,28 @@ class UnifiedToolLibrary:
     
     async def register_mcp_server(self, server_spec: MCPServerSpec) -> RegistrationResult:
         """注册MCP Server"""
-        return await self.tool_registry.register_mcp_server(server_spec)
+        # 首先注册到工具注册表
+        registration_result = await self.tool_registry.register_mcp_server(server_spec)
+        
+        # 如果注册成功，同时注册到MCP服务器连接器注册表
+        if registration_result.success:
+            logger.info(f"Successfully registered MCP server to tool registry: {server_spec.name}")
+
+            # 注册到 MCP 服务器注册表，用于直接连接
+            if server_spec.endpoint:
+                self.mcp_server_registry.register_server(server_spec.tool_id, server_spec.endpoint)
+                logger.info(f"Registered MCP server connection: {server_spec.tool_id} -> {server_spec.endpoint}")
+
+            # 触发实时注册，确保 WebSocket / Redis 事件同步
+            try:
+                if self.core_manager:
+                    await self.core_manager.register_tool_immediately(server_spec)
+            except Exception as rt_err:
+                logger.warning(f"Real-time broadcast failed for {server_spec.tool_id}: {rt_err}")
+        else:
+            logger.error(f"Failed to register MCP server {server_spec.name}: {registration_result.error}")
+            
+        return registration_result
 
     async def register_external_mcp_server(self, server_spec: MCPServerSpec) -> RegistrationResult:
         """
@@ -157,9 +178,21 @@ class UnifiedToolLibrary:
     async def unregister_tool(self, tool_id: str) -> RegistrationResult:
         """注销工具"""
         try:
+            # 首先获取工具规范以确定是否是MCP服务器
+            tool_spec = await self.tool_registry.get_tool_spec(tool_id)
+            
             success = await self.tool_registry.unregister_tool(tool_id)
             
             if success:
+                # 如果是MCP服务器，也要从连接器注册表中移除
+                if tool_spec and tool_spec.tool_type == ToolType.MCP_SERVER:
+                    if tool_id in self.mcp_server_registry.connectors:
+                        # 清理连接器
+                        connector = self.mcp_server_registry.connectors[tool_id]
+                        await connector.cleanup()
+                        del self.mcp_server_registry.connectors[tool_id]
+                        logger.info(f"Removed MCP server connector for tool: {tool_id}")
+                
                 logger.info(f"✅ 工具已从注册表中注销: {tool_id}")
                 return RegistrationResult(success=True, tool_id=tool_id)
             else:

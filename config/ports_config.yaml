@@ -73,7 +73,7 @@ future_mcp_servers:
 
 # 🔧 端口管理配置
 port_management:
-  auto_detect: true         # 启用自动检测，使用固定端口以确保API可访问性
+  auto_detect: false        # 禁用自动检测，使用固定端口以确保API可访问性
   port_range_start: 8100     # 动态分配起始端口，避免与toolscore_mcp (8089) 冲突
   port_range_end: 8200       # 动态分配结束端口
   check_interval: 30         # 健康检查间隔(秒)

@@ -75,7 +75,7 @@ class ServiceManager:
             
         logger.info("所有服务已启动")
     
-    async def stop_all(self):
+    async def stop_all(self, timeout_per_service=8):
         """按依赖的反序停止所有服务"""
         logger.info("正在停止所有服务...")
         
@@ -83,15 +83,45 @@ class ServiceManager:
             if self.services[name]['stop']:
                 logger.info(f"停止服务: {name}")
                 try:
-                    # 检查stop_fn是否是协程，并await它
+                    # 为每个服务设置超时
                     if asyncio.iscoroutinefunction(self.services[name]['stop']):
-                        await self.services[name]['stop']()
+                        await asyncio.wait_for(
+                            self.services[name]['stop'](), 
+                            timeout=timeout_per_service
+                        )
                     else:
-                        self.services[name]['stop']()
+                        # 对于同步函数，在executor中运行以支持超时
+                        await asyncio.wait_for(
+                            asyncio.get_event_loop().run_in_executor(
+                                None, self.services[name]['stop']
+                            ),
+                            timeout=timeout_per_service
+                        )
+                    logger.info(f"服务 {name} 已成功停止")
+                except asyncio.TimeoutError:
+                    logger.warning(f"停止服务 {name} 超时 ({timeout_per_service}秒)，继续停止其他服务")
                 except Exception as e:
                     logger.error(f"停止服务 {name} 时出错: {e}")
         
         logger.info("所有服务已停止")
+    
+    def force_stop_all(self):
+        """强制停止所有服务（同步版本，用于紧急情况）"""
+        logger.info("执行强制停止所有服务...")
+        
+        for name in self.stop_order:
+            if self.services[name]['stop']:
+                logger.info(f"强制停止服务: {name}")
+                try:
+                    # 只调用同步停止函数
+                    if not asyncio.iscoroutinefunction(self.services[name]['stop']):
+                        self.services[name]['stop']()
+                    else:
+                        logger.warning(f"跳过异步服务 {name}，在强制模式下无法调用")
+                except Exception as e:
+                    logger.error(f"强制停止服务 {name} 时出错: {e}")
+        
+        logger.info("强制停止完成")
     
     def health_check(self):
         """检查所有服务的健康状态"""
