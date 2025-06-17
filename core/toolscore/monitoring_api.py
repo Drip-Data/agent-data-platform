@@ -62,6 +62,7 @@ class ToolScoreMonitoringAPI:
         # 🔧 调试端点 - 帮助诊断工具注册问题
         self.app.router.add_get('/debug/tools/raw', self.debug_get_raw_tools)
         self.app.router.add_get('/debug/tools/formatted', self.debug_get_formatted_tools)
+        self.app.router.add_get('/debug/connectors', self.debug_get_connectors)
     
     async def health_check(self, request):
         """健康检查"""
@@ -1278,6 +1279,36 @@ class ToolScoreMonitoringAPI:
             logger.error(f"获取格式化工具描述失败: {e}")
             return web.json_response({
                 "error": str(e)
+            }, status=500)
+
+    async def debug_get_connectors(self, request):
+        """调试端点：查看注册的连接器"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            registry = self.tool_library.mcp_server_registry
+            connectors_info = {}
+            
+            for tool_id, connector in registry.connectors.items():
+                connectors_info[tool_id] = {
+                    "endpoint": connector.endpoint if hasattr(connector, 'endpoint') else "unknown",
+                    "connector_type": str(type(connector))
+                }
+            
+            return web.json_response({
+                "status": "success",
+                "connectors": connectors_info,
+                "total_count": len(connectors_info)
+            })
+        except Exception as e:
+            logger.error(f"Error getting connectors: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
             }, status=500)
 
 async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8080):

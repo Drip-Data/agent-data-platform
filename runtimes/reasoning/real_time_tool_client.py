@@ -113,15 +113,16 @@ class RealTimeToolClient:
                 except Exception as e:
                     logger.error(f"处理工具事件失败: {e}")
                     
-        except websockets_client.ConnectionClosed:
-            logger.warning("🔌 WebSocket连接已断开")
-            self.is_connected = False
-            # 尝试重连
-            if self.reconnect_attempts < self.max_reconnect_attempts:
-                await self._reconnect_with_delay()
         except Exception as e:
-            logger.error(f"❌ WebSocket监听异常: {e}")
-            self.is_connected = False
+            if "ConnectionClosed" in str(type(e)):
+                logger.warning("🔌 WebSocket连接已断开")
+                self.is_connected = False
+                # 尝试重连
+                if self.reconnect_attempts < self.max_reconnect_attempts:
+                    await self._reconnect_with_delay()
+            else:
+                logger.error(f"❌ WebSocket监听异常: {e}")
+                self.is_connected = False
     
     async def _handle_tool_event(self, event: Dict[str, Any]):
         """处理工具事件"""
