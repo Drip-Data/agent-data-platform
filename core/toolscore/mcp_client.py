@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-import websockets
+import websockets.legacy.client as websockets_client
 from typing import Dict, Any, List, Optional
 
 from .interfaces import ToolSpec, ExecutionResult, RegistrationResult, ToolCapability, ToolType, MCPServerSpec, FunctionToolSpec, ErrorType
@@ -16,7 +16,7 @@ class MCPToolClient:
     """
     def __init__(self, toolscore_endpoint: str):
         self.toolscore_endpoint = toolscore_endpoint
-        self.websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self.websocket: Optional[websockets_client.WebSocketClientProtocol] = None
         self._connected = False
         logger.info(f"MCPToolClient initialized for toolscore at {toolscore_endpoint}")
 
@@ -28,7 +28,7 @@ class MCPToolClient:
 
         try:
             logger.info(f"Attempting to connect to toolscore at {self.toolscore_endpoint}...")
-            self.websocket = await websockets.connect(self.toolscore_endpoint)
+            self.websocket = await websockets_client.connect(self.toolscore_endpoint)
             self._connected = True
             logger.info(f"Successfully connected to toolscore at {self.toolscore_endpoint}")
         except Exception as e:
@@ -70,7 +70,7 @@ class MCPToolClient:
                 error_msg = response.get("error") or response.get("message", "Unknown error")
                 raise Exception(f"Toolscore error: {error_msg}")
             return response
-        except websockets.exceptions.ConnectionClosedOK:
+        except websockets_client.ConnectionClosedOK:
             logger.warning("Connection to toolscore closed gracefully. Attempting to reconnect for next request.")
             self._connected = False
             await self.connect() # 尝试重新连接

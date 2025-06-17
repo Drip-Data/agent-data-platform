@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import redis.asyncio as redis
 from .interfaces import TaskSpec, TrajectoryResult
 from .metrics import EnhancedMetrics
-from .path_utils import get_trajectories_dir
+from .utils.path_utils import get_trajectories_dir
 
 logger = logging.getLogger(__name__)
 

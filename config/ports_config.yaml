@@ -15,55 +15,66 @@ core_services:
 # 🔧 MCP服务器端口  
 mcp_servers:  
   toolscore_mcp:
-    port: 8081
+    port: 8089 # 将端口从8090更改为8089，以避免冲突
     description: "ToolScore MCP协议服务器"
     protocol: "websocket"
     endpoint: "/websocket"
+    # 明确禁用ToolScore MCP的自动端口检测，确保它始终使用8089
+    auto_detect_port: false
     
   toolscore_http:
-    port: 8082  
+    port: 8088
     description: "ToolScore HTTP监控API"
     protocol: "http"
     health_endpoint: "/health"
     
   python_executor:
-    port: 8083
+    port: 8081 # 初始配置端口，但会受auto_detect影响
     description: "Python代码执行器"
-    protocol: "websocket" 
+    protocol: "websocket"
     health_endpoint: "/health"
+    auto_start: true
     
   browser_navigator:
-    port: 8084
+    port: 8082 # 初始配置端口，但会受auto_detect影响
     description: "浏览器导航器MCP服务器"
     protocol: "websocket"
     health_endpoint: "/health"
+    auto_start: true
+  search_tool:
+    port: 8080 # 搜索工具MCP服务器
+    description: "文件内容搜索和代码定义搜索工具服务器"
+    protocol: "websocket"
+    health_endpoint: "/health"
+    auto_start: true
 
 # 🆕 未来扩展端口预留
 future_mcp_servers:
-  web_scraper:
-    port: 8084
-    description: "网页抓取工具服务器"
-    auto_start: false
+# 🆕 未来扩展端口预留
+#   web_scraper:
+#     port: 8084
+#     description: "网页抓取工具服务器"
+#     auto_start: false
     
-  file_manager:
-    port: 8085
-    description: "文件管理工具服务器"
-    auto_start: false
+#   file_manager:
+#     port: 8085
+#     description: "文件管理工具服务器"
+#     auto_start: false
     
-  database_connector:
-    port: 8086
-    description: "数据库连接工具服务器" 
-    auto_start: false
+#   database_connector:
+#     port: 8086
+#     description: "数据库连接工具服务器"
+#     auto_start: false
     
-  image_processor:
-    port: 8087
-    description: "图像处理工具服务器"
-    auto_start: false
+#   image_processor:
+#     port: 8087
+#     description: "图像处理工具服务器"
+#     auto_start: false
 
 # 🔧 端口管理配置
 port_management:
-  auto_detect: true          # 自动检测端口冲突
-  port_range_start: 8088     # 动态分配起始端口
+  auto_detect: true         # 启用自动检测，使用固定端口以确保API可访问性
+  port_range_start: 8100     # 动态分配起始端口，避免与toolscore_mcp (8089) 冲突
   port_range_end: 8200       # 动态分配结束端口
   check_interval: 30         # 健康检查间隔(秒)
   
@@ -74,5 +85,5 @@ reverse_proxy:
   ssl_port: 443
   routes:
     "/api/v1/tasks": "http://localhost:8000"
-    "/api/v1/tools": "http://localhost:8082" 
-    "/ws/mcp": "ws://localhost:8081" 
+    "/api/v1/tools": "http://localhost:8082"
+    "/ws/mcp": "ws://localhost:8089"

@@ -185,7 +185,9 @@ class MCPSearchTool:
             # 调用LLM进行选择（明确指定gemini提供商）
             from core.llm_client import LLMClient
             llm_client = LLMClient({"provider": "gemini"})
-            llm_response = await llm_client._call_api(prompt)
+            # 将字符串prompt转换为消息格式
+            messages = [{"role": "user", "content": prompt}]
+            llm_response = await llm_client._call_api(messages)
             
             # 🔍 新增：记录LLM的原始响应
             logger.info("📥 LLM响应接收:")

@@ -204,21 +204,24 @@ class ToolScoreClient:
         logger.error("❌ ToolScore服务未就绪")
         return False
     
-    async def get_available_tools(self) -> Dict[str, Any]:
-        """获取已注册工具列表"""
+    async def get_available_tools(self) -> List[str]:
+        """获取已注册工具列表 - 返回工具ID列表"""
         await self._ensure_session()
         
         try:
             async with self.session.get(f"{self.endpoint}/api/v1/tools/available") as response:
                 if response.status == 200:
-                    return await response.json()
+                    data = await response.json()
+                    # 提取工具ID列表
+                    tools = data.get("available_tools", [])
+                    return [tool.get("tool_id", "") for tool in tools if isinstance(tool, dict) and tool.get("tool_id")]
                 else:
                     logger.error(f"获取已注册工具列表失败: HTTP {response.status}")
-                    return {"available_tools": []}
+                    return []
                     
         except Exception as e:
             logger.error(f"获取已注册工具列表时发生异常: {e}")
-            return {"available_tools": []}
+            return []
     
     async def close(self):
         """关闭HTTP会话"""

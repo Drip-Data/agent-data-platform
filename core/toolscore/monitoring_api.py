@@ -55,6 +55,13 @@ class ToolScoreMonitoringAPI:
         
         # WebSocket实时事件端点 (Step 4.1)
         self.app.router.add_get('/api/v1/events/tools', self.websocket_tools_events)
+        
+        # 🎯 智能工具推荐端点 - 支持ToolScoreClient
+        self.app.router.add_post('/api/tools/intelligent-recommend', self.intelligent_recommend)
+        
+        # 🔧 调试端点 - 帮助诊断工具注册问题
+        self.app.router.add_get('/debug/tools/raw', self.debug_get_raw_tools)
+        self.app.router.add_get('/debug/tools/formatted', self.debug_get_formatted_tools)
     
     async def health_check(self, request):
         """健康检查"""
@@ -183,15 +190,22 @@ class ToolScoreMonitoringAPI:
             }, status=500)
     
     async def start(self):
-        """启动HTTP服务器"""
+        """启动HTTP服务器 (保持运行)"""
         runner = web.AppRunner(self.app)
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', self.port)
         await site.start()
         logger.info(f"ToolScore monitoring API started on port {self.port}")
-        self.runner = runner # 保存 runner 实例以便停止
-        return runner
+        self.runner = runner  # 保存 runner 实例以便停止
 
+        # --- 关键修改: 保持事件循环不退出 ---
+        try:
+            while True:
+                await asyncio.sleep(3600)  # 轻量保持，占用极少 CPU
+        except asyncio.CancelledError:
+            # 外部停止时跳出循环并由 stop() 清理
+            pass
+    
     async def stop(self):
         """停止HTTP服务器"""
         if hasattr(self, 'runner') and self.runner:
@@ -1117,6 +1131,154 @@ class ToolScoreMonitoringAPI:
                 "success": False,
                 "message": f"注册失败: {str(e)}"
             }, status=400)
+
+    async def intelligent_recommend(self, request):
+        """智能工具推荐端点 - 支持ToolScoreClient"""
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            task_type = data.get('task_type', 'reasoning')
+            constraints = data.get('constraints', {})
+            max_steps = data.get('max_steps', 5)
+            
+            if not task_description:
+                return web.json_response({
+                    "error": "task_description is required"
+                }, status=400)
+            
+            logger.info(f"🎯 智能工具推荐请求: {task_description} (类型: {task_type})")
+            
+            # 基于任务类型和描述进行智能推荐
+            recommended_tools = []
+            confidence = 0.8  # 较高置信度
+            reason = "基于任务类型和描述的智能分析"
+            
+            # 简单的规则-based推荐逻辑
+            if any(keyword in task_description.lower() for keyword in ['python', 'code', 'calculate', 'fibonacci', '计算', '函数', 'gcd', '编程']):
+                recommended_tools.append('python_executor')
+                
+            if any(keyword in task_description.lower() for keyword in ['web', 'browser', '浏览器', '网页', 'html', 'http']):
+                recommended_tools.append('browser_navigator')
+                
+            if any(keyword in task_description.lower() for keyword in ['reasoning', '推理', '分析', '思考']):
+                # 对于推理任务，默认提供Python执行器
+                if 'python_executor' not in recommended_tools:
+                    recommended_tools.append('python_executor')
+            
+            # 如果没有匹配到任何特定工具，提供默认工具
+            if not recommended_tools:
+                recommended_tools = ['python_executor', 'browser_navigator']
+                confidence = 0.5
+                reason = "默认工具推荐"
+            
+            response = {
+                "recommended_tools": recommended_tools,
+                "confidence": confidence, 
+                "reason": reason,
+                "strategy": "intelligent_analysis"
+            }
+            
+            logger.info(f"✅ 推荐工具: {recommended_tools} (置信度: {confidence})")
+            return web.json_response(response)
+            
+        except Exception as e:
+            logger.error(f"智能工具推荐失败: {e}")
+            return web.json_response({
+                "error": f"推荐失败: {str(e)}"
+            }, status=500)
+    
+    async def debug_get_raw_tools(self, request):
+        """调试端点：获取原始工具注册信息"""
+        if not self.tool_library:
+            return web.json_response({
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 获取所有工具的原始信息
+            tools = await self.tool_library.get_all_tools()
+            
+            debug_info = {
+                "total_tools_count": len(tools),
+                "tools_detail": [],
+                "registry_stats": await self.tool_library.get_library_stats(),
+                "debug_timestamp": time.time()
+            }
+            
+            for tool in tools:
+                tool_detail = {
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type.value if hasattr(tool.tool_type, 'value') else str(tool.tool_type),
+                    "enabled": tool.enabled,
+                    "capabilities_count": len(getattr(tool, 'capabilities', [])),
+                    "capabilities": [
+                        {
+                            "name": cap.name,
+                            "description": cap.description
+                        } for cap in getattr(tool, 'capabilities', [])
+                    ],
+                    "tags": getattr(tool, 'tags', []),
+                    "endpoint": getattr(tool, 'endpoint', None),
+                    "module_path": getattr(tool, 'module_path', None)
+                }
+                debug_info["tools_detail"].append(tool_detail)
+            
+            logger.info(f"🔧 调试信息: 共有 {len(tools)} 个工具注册")
+            return web.json_response(debug_info)
+            
+        except Exception as e:
+            logger.error(f"获取调试信息失败: {e}")
+            return web.json_response({
+                "error": str(e)
+            }, status=500)
+    
+    async def debug_get_formatted_tools(self, request):
+        """调试端点：获取格式化的工具描述（LLM视角）"""
+        if not self.tool_library:
+            return web.json_response({
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 模拟RealTimeToolClient的工具描述生成
+            tools = await self.tool_library.get_all_tools()
+            
+            # 生成工具ID列表
+            tool_ids = [tool.tool_id for tool in tools if tool.enabled]
+            
+            # 生成详细描述
+            tool_descriptions = []
+            if tools:
+                tool_descriptions.append("# 已注册的工具")
+                for tool in tools:
+                    if tool.enabled:
+                        desc = f"- {tool.tool_id}: {tool.name}"
+                        if getattr(tool, 'capabilities', []):
+                            cap_names = [cap.name for cap in tool.capabilities]
+                            desc += f" (能力: {', '.join(cap_names)})"
+                        tool_descriptions.append(desc)
+            
+            formatted_description = "\n".join(tool_descriptions) if tool_descriptions else "暂无可用工具"
+            
+            debug_info = {
+                "tool_ids_list": tool_ids,
+                "tool_ids_count": len(tool_ids),
+                "formatted_description": formatted_description,
+                "description_length": len(formatted_description),
+                "contains_no_tools_message": "暂无可用工具" in formatted_description,
+                "debug_timestamp": time.time()
+            }
+            
+            logger.info(f"🔧 格式化工具描述调试: {len(tool_ids)} 个工具, 描述长度: {len(formatted_description)}")
+            return web.json_response(debug_info)
+            
+        except Exception as e:
+            logger.error(f"获取格式化工具描述失败: {e}")
+            return web.json_response({
+                "error": str(e)
+            }, status=500)
 
 async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8080):
     """启动监控API服务器的便捷函数"""

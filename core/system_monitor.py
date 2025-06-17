@@ -6,8 +6,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, List, Optional
-import redis.asyncio as redis
+from typing import Dict, List, Optional, Any
+import redis.asyncio as async_redis
 from .interfaces import TaskSpec, TaskType
 from .metrics import EnhancedMetrics
 from .config_manager import ConfigManager
@@ -17,36 +17,21 @@ logger = logging.getLogger(__name__)
 class SystemMonitor:
     """系统健康监控器 - 简化版，专注监控功能"""
     
-    def __init__(self, redis_url: str):
-        self.redis = redis.from_url(redis_url)
+    def __init__(self, redis_url: str, config_manager: ConfigManager):
+        self.redis = async_redis.from_url(redis_url)
         self.metrics = EnhancedMetrics()
+        self.config_manager = config_manager
         
-        try:
-            self.config_manager = ConfigManager()
-            routing_config = self.config_manager.get_routing_config()
-            
-            # 从配置获取运行时能力
-            self.runtime_capabilities = {}
-            for runtime_name, runtime_config in routing_config['runtimes'].items():
-                self.runtime_capabilities[runtime_name] = runtime_config['capabilities']
-            
-            # 从配置获取队列映射
-            self.queue_mapping = routing_config['queue_mapping']['task_type_mapping']
-            
-            logger.info("✅ SystemMonitor 配置加载完成")
-            
-        except Exception as e:
-            logger.warning(f"SystemMonitor 配置加载失败，使用默认配置: {e}")
-            self.runtime_capabilities = {
-                "enhanced-reasoning": ["text_analysis", "logical_reasoning", "planning", 
-                                     "python_executor", "browser_automation"]
-            }
-            self.queue_mapping = {
-                "CODE": "tasks:reasoning",
-                "WEB": "tasks:reasoning",
-                "REASONING": "tasks:reasoning"
-            }
-      async def get_system_health(self) -> Dict[str, Any]:
+        # 从ConfigManager获取运行时能力和队列映射，不再处理内部加载失败和默认配置
+        routing_config = self.config_manager.load_routing_config()
+        self.runtime_capabilities = {
+            runtime_name: runtime_config.capabilities
+            for runtime_name, runtime_config in routing_config.runtimes.items()
+        }
+        self.queue_mapping = routing_config.task_type_mapping
+        
+        logger.info("✅ SystemMonitor 配置加载完成")
+    async def get_system_health(self) -> Dict[str, Any]:
         """获取系统整体健康状态 - 主要监控功能"""
         health_status = {}
         
@@ -134,7 +119,7 @@ class SystemMonitor:
         except Exception as e:
             logger.error(f"Error getting queue load for {queue_name}: {e}")
             return 0
-      async def get_runtime_stats(self) -> Dict[str, Dict]:
+    async def get_runtime_stats(self) -> Dict[str, Dict]:
         """获取所有运行时统计信息 - 增强版"""
         stats = {}
         
@@ -164,6 +149,3 @@ class SystemMonitor:
                 }
         
         return stats
-
-# 保持向后兼容性的别名
-IntelligentRouter = SystemMonitor

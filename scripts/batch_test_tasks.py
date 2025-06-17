@@ -21,7 +21,8 @@ import os
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.path_utils import get_output_dir
+from core.utils.path_utils import get_output_dir
+from core.utils.port_discovery import discover_task_api_url
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +51,13 @@ class BatchTaskTester:
     """批量任务测试器"""
     
     def __init__(self, 
-                 task_api_url: str = "http://localhost:8000",
+                 task_api_url: Optional[str] = None, # 将使用自动发现
                  max_concurrent: int = 3,
                  timeout: int = 300):
-        self.task_api_url = task_api_url
+        self.task_api_url = task_api_url  # 如果为None，将在运行时自动发现
         self.max_concurrent = max_concurrent
         self.timeout = timeout
-        self.results: List[TaskResult] = []
+        self.results: List[Any] = [] # 允许TaskResult或Exception
         
     def load_tasks_from_jsonl(self, file_path: str) -> List[Dict]:
         """从JSONL文件加载任务"""
@@ -117,7 +118,7 @@ class BatchTaskTester:
             async with session.post(
                 f"{self.task_api_url}/api/v1/tasks",
                 json=task,
-                timeout=10
+                timeout=aiohttp.ClientTimeout(total=10) # 使用ClientTimeout
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -142,7 +143,7 @@ class BatchTaskTester:
             try:
                 async with session.get(
                     f"{self.task_api_url}/api/v1/tasks/{task_id}",
-                    timeout=5
+                    timeout=aiohttp.ClientTimeout(total=5) # 使用ClientTimeout
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -223,7 +224,19 @@ class BatchTaskTester:
     
     async def run_batch_test(self, tasks: List[Dict]) -> List[TaskResult]:
         """运行批量测试"""
+        # 如果没有指定API URL，自动发现
+        if not self.task_api_url:
+            logger.info("🔍 自动发现Task API端口...")
+            discovered_url = await discover_task_api_url()
+            if discovered_url:
+                self.task_api_url = discovered_url
+                logger.info(f"✅ 发现Task API: {self.task_api_url}")
+            else:
+                logger.error("❌ 无法发现Task API端口，请检查服务是否运行")
+                return []
+        
         logger.info(f"🎯 开始批量测试 {len(tasks)} 个任务 (最大并发: {self.max_concurrent})")
+        logger.info(f"🔗 使用Task API: {self.task_api_url}")
         
         async with aiohttp.ClientSession() as session:
             # 创建信号量控制并发
@@ -335,8 +348,8 @@ async def main():
     parser = argparse.ArgumentParser(description="Agent Data Platform 批量任务测试")
     parser.add_argument("--tasks-file", default="tasks.jsonl", 
                        help="任务文件路径 (JSONL格式)")    
-    parser.add_argument("--api-url", default="http://localhost:8000",
-                       help="Task API URL")
+    parser.add_argument("--api-url", default=None, # 自动发现Task API端口
+                       help="Task API URL (如果不指定，将自动发现)")
     parser.add_argument("--concurrent", type=int, default=3,
                        help="最大并发任务数")
     parser.add_argument("--timeout", type=int, default=300,

@@ -1,4 +1,5 @@
 import logging
+import asyncio # 导入asyncio
 from typing import Dict, List, Optional, Callable
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class ServiceManager:
                          start_fn: Callable,
                          stop_fn: Optional[Callable] = None,
                          health_check_fn: Optional[Callable] = None,
-                         dependencies: List[str] = None):
+                         dependencies: List[str] = []): # 将None改为[]
         """注册一个服务及其生命周期函数"""
         self.services[name] = {
             'initialize': initialize_fn,
@@ -74,7 +75,7 @@ class ServiceManager:
             
         logger.info("所有服务已启动")
     
-    def stop_all(self):
+    async def stop_all(self):
         """按依赖的反序停止所有服务"""
         logger.info("正在停止所有服务...")
         
@@ -82,7 +83,11 @@ class ServiceManager:
             if self.services[name]['stop']:
                 logger.info(f"停止服务: {name}")
                 try:
-                    self.services[name]['stop']()
+                    # 检查stop_fn是否是协程，并await它
+                    if asyncio.iscoroutinefunction(self.services[name]['stop']):
+                        await self.services[name]['stop']()
+                    else:
+                        self.services[name]['stop']()
                 except Exception as e:
                     logger.error(f"停止服务 {name} 时出错: {e}")
         

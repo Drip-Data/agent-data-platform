@@ -53,7 +53,9 @@ class ToolGapDetector:
         if self.llm_client:
             try:
                 prompt = self._build_analysis_prompt(task_description, available_tools, previous_attempts)
-                response = await self.llm_client._call_api(prompt)
+                # Fix: Convert prompt string to messages format
+                messages = [{"role": "user", "content": prompt}]
+                response = await self.llm_client._call_api(messages)
                 analysis = self._parse_analysis_response(response)
                 
                 # 缓存结果

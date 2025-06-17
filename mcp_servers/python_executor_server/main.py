@@ -13,39 +13,33 @@ from uuid import uuid4
 from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
 from core.toolscore.mcp_server import MCPServer
 from .python_executor_tool import PythonExecutorTool
+from core.config_manager import ConfigManager # 导入ConfigManager
 
 logger = logging.getLogger(__name__)
 
 class PythonExecutorMCPServer:
     """Python执行器MCP服务器"""
     
-    def __init__(self):
+    def __init__(self, config_manager: ConfigManager):
         self.python_tool = PythonExecutorTool()
         self.server_name = "python_executor_server"
         self.server_id = "python-executor-mcp-server"
+        self.config_manager = config_manager
         
-        # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的
-        # 0.0.0.0 仅在服务端语义正确，客户端连接会失败。因此这里拆分：
-        #   • listen_host: 服务端绑定地址（默认 0.0.0.0）
-        #   • public_host: 向外暴露的可连接地址（默认 localhost，可通过 PYTHON_EXECUTOR_HOST 覆盖）
+        # 从配置中获取端口
+        ports_config = self.config_manager.get_ports_config()
+        python_executor_port = ports_config['mcp_servers']['python_executor']['port']
+        toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
 
+        # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的
         listen_host = os.getenv("PYTHON_EXECUTOR_LISTEN_HOST", "0.0.0.0")
         public_host = os.getenv("PYTHON_EXECUTOR_HOST", "localhost")
-        port = int(os.getenv("PYTHON_EXECUTOR_PORT", "8083"))
-
-        # MCPServer 需要完整 ws://host:port 路径
-        self.endpoint = f"ws://{public_host}:{port}"        # 保存监听信息供 MCPServer 使用
-        self._listen_host = listen_host
-        self._listen_port = port
         
-        # 使用配置管理器获取ToolScore端点
-        try:
-            from core.config_manager import get_ports_config
-            ports_config = get_ports_config()
-            toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
-            self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
-        except Exception:
-            self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://localhost:8081/websocket')
+        self.endpoint = f"ws://{public_host}:{python_executor_port}"        # 保存监听信息供 MCPServer 使用
+        self._listen_host = listen_host
+        self._listen_port = python_executor_port
+        
+        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取Python工具的所有能力"""
@@ -219,7 +213,11 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    server = PythonExecutorMCPServer()
+    # 初始化ConfigManager
+    from core.config_manager import ConfigManager
+    config_manager = ConfigManager()
+    
+    server = PythonExecutorMCPServer(config_manager)
     await server.run()
 
 if __name__ == "__main__":

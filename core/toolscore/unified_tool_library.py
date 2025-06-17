@@ -9,7 +9,7 @@ import time
 from typing import Dict, Any, List, Optional
 
 from .interfaces import (
-    ToolSpec, FunctionToolSpec, MCPServerSpec,
+    ToolSpec, FunctionToolSpec, MCPServerSpec, ToolCapability, # 添加 ToolCapability
     ExecutionResult, RegistrationResult, ToolType, ErrorType
 )
 from .tool_registry import ToolRegistry
@@ -57,6 +57,11 @@ class UnifiedToolLibrary:
         
         self._initialized = False
         logger.info("Unified Tool Library initialized - 使用核心管理器整合模式")
+
+    @property
+    def is_initialized(self) -> bool:
+        """返回工具库是否已初始化"""
+        return self._initialized
     
     async def initialize(self):
         """初始化工具库"""
@@ -191,10 +196,30 @@ class UnifiedToolLibrary:
             install_result = await self.dynamic_mcp_manager.install_mcp_server(best_candidate)
             
             if install_result.success:
-                # 注册到工具库
-                registration_result = await self.dynamic_mcp_manager.register_installed_server(
-                    best_candidate, install_result
+                # 注册到工具库 (使用 UnifiedToolLibrary 自身的注册方法)
+                # 从 best_candidate 和 install_result 构建 MCPServerSpec
+                # 确保 tool_id 和 endpoint 是 str 类型
+                tool_id_str = install_result.server_id if install_result.server_id is not None else ""
+                endpoint_str = install_result.endpoint if install_result.endpoint is not None else ""
+
+                # 将 List[str] 类型的 capabilities 转换为 List[ToolCapability]
+                # 假设每个字符串能力对应一个简单的 ToolCapability
+                tool_capabilities = [
+                    ToolCapability(name=cap, description=f"提供 {cap} 功能", parameters={})
+                    for cap in best_candidate.capabilities
+                ]
+
+                server_spec = MCPServerSpec(
+                    tool_id=tool_id_str,
+                    name=best_candidate.name,
+                    description=best_candidate.description,
+                    tool_type=ToolType.MCP_SERVER,
+                    capabilities=tool_capabilities, # 使用转换后的 capabilities
+                    tags=best_candidate.tags,
+                    endpoint=endpoint_str,
+                    connection_params={"timeout": 30, "retry_count": 3} # 默认参数
                 )
+                registration_result = await self.register_external_mcp_server(server_spec)
                 
                 return {
                     "success": registration_result.success,
@@ -227,19 +252,14 @@ class UnifiedToolLibrary:
             installed_servers = await self.dynamic_mcp_manager.get_installed_servers()
             health_status = await self.dynamic_mcp_manager.health_check_installed_servers()
             
-            if hasattr(self.dynamic_mcp_manager, 'core_manager') and self.dynamic_mcp_manager._storage_initialized:
-                storage_stats = {
-                    "storage_type": "core_manager",
-                    "initialized": True
-                }
-            else:
-                storage_stats = {"error": "Persistent storage not initialized"}
+            # 获取 DynamicMCPManager 自身的统计信息
+            dynamic_mcp_stats = self.dynamic_mcp_manager.get_stats()
             
             return {
                 "installed_servers_count": len(installed_servers),
                 "installed_servers": {k: {"endpoint": v.endpoint, "success": v.success} for k, v in installed_servers.items()},
                 "health_status": health_status,
-                "storage_stats": storage_stats
+                "dynamic_mcp_manager_stats": dynamic_mcp_stats
             }
         except Exception as e:
             logger.error(f"Failed to get dynamic MCP stats: {e}")
@@ -377,8 +397,21 @@ class UnifiedToolLibrary:
         # 精简版本：返回简单的示例说明
         tool = await self.get_tool_by_id(tool_id)
         if tool:
-            return f"请参考 {tool.name} 的文档说明"
-        return "未找到工具使用示例"
+            # 返回工具的示例列表，如果存在
+            # 收集所有能力的示例
+            all_examples = []
+            for capability in tool.capabilities:
+                if capability.examples:
+                    all_examples.extend(capability.examples)
+            
+            if all_examples:
+                return all_examples
+            
+            # 如果没有具体示例，返回包含通用说明的列表
+            return [{"description": f"请参考 {tool.name} 的文档说明"}]
+        
+        # 如果工具未找到
+        return [{"description": "未找到工具使用示例"}]
     
     # ============ 工具执行API ============
     

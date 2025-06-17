@@ -1,0 +1,17 @@
+# LLM 配置
+llm_providers:
+  vllm:
+    enabled: true
+    api_base: "http://localhost:8000/v1"
+    model: "default-model" # 替换为你的vLLM模型名称
+    api_key: "YOUR_VLLM_API_KEY" # 如果vLLM需要API Key，请填写
+  openai:
+    enabled: false
+    api_key: "YOUR_OPENAI_API_KEY"
+    model: "gpt-4o"
+  gemini:
+    enabled: true
+    api_key: "AIzaSyDbiXNxcSvPEK2UnObGjHFkY3g3xuA-lTs"
+    model: "gemini-2.5-flash-preview-05-20"
+
+default_provider: "gemini"

@@ -1,13 +1,22 @@
 import asyncio
 import json
 import logging
-import websockets
-from typing import Dict, Any, Callable, Optional, List # 导入 List
+import websockets.legacy.server as websockets_server
+import websockets.legacy.client as websockets_client
+from typing import Dict, Any, Callable, Optional, List, TYPE_CHECKING, Union
+from websockets.legacy.client import WebSocketClientProtocol
+from websockets.legacy.server import WebSocketServerProtocol
+from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError, InvalidURI
+
 from uuid import uuid4
 import os
 
-from .interfaces import ToolSpec, ToolType, RegistrationResult, ExecutionResult, ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType # 导入 ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType
-from .unified_tool_library import UnifiedToolLibrary # 导入UnifiedToolLibrary，用于注册工具
+# 仅在类型检查时导入，避免循环导入
+if TYPE_CHECKING:
+    from mcp_servers.python_executor_server.main import PythonExecutorMCPServer
+
+from .interfaces import ToolSpec, ToolType, RegistrationResult, ExecutionResult, ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType
+from .unified_tool_library import UnifiedToolLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +26,16 @@ class MCPServer:
     用于接收工具注册和工具调用请求
     """
     
-    def __init__(self, 
-                 server_name: str, 
-                 server_id: str, 
-                 description: str, 
-                 capabilities: List[ToolCapability], 
+    def __init__(self,
+                 server_name: str,
+                 server_id: str,
+                 description: str,
+                 capabilities: List[ToolCapability],
                  tool_type: ToolType,
                  endpoint: str, # 本MCP Server的WebSocket地址
-                 toolscore_endpoint: Optional[str] = None # UnifiedToolLibrary MCP Server的地址
+                 toolscore_endpoint: Optional[str] = None, # UnifiedToolLibrary MCP Server的地址
+                 bind_port: Optional[int] = None, # 新增：用于动态端口分配
+                 server_started_event: Optional[asyncio.Event] = None # 新增：用于通知服务器启动完成
                  ):
         self.server_name = server_name
         self.server_id = server_id
@@ -33,13 +44,17 @@ class MCPServer:
         self.tool_type = tool_type
         self.endpoint = endpoint
         self.toolscore_endpoint = toolscore_endpoint
+        self.bind_port = bind_port # 存储动态分配的端口
+        self.server_started_event = server_started_event # 存储Event
         self.websocket_server = None
         self.tool_action_handler: Optional[Callable[[str, Dict[str, Any]], Any]] = None
-        self.toolscore_client: Optional[websockets.WebSocketClientProtocol] = None
+        self.toolscore_client: Optional[WebSocketClientProtocol] = None # 使用 legacy WebSocket 类型
         self.toolscore_registration_task: Optional[asyncio.Task] = None
+        self._is_healthy: bool = False # 新增：服务健康状态
+        self._startup_error_message: Optional[str] = None # 新增：启动错误信息
         
         # 🔧 新增：用于存储同进程的MCP服务器引用，避免WebSocket连接问题
-        self.python_executor_server = None
+        self.python_executor_server: Optional["PythonExecutorMCPServer"] = None # 添加类型提示
 
         # 如果是toolscore本身，则不连接toolscore_endpoint
         if self.server_name == "toolscore":
@@ -51,9 +66,11 @@ class MCPServer:
         """注册处理工具动作的函数"""
         self.tool_action_handler = handler
 
-    async def _handle_message(self, websocket: websockets.WebSocketServerProtocol, message: str):
+    async def _handle_message(self, websocket: WebSocketServerProtocol, message: Union[str, bytes]): # 允许 str 或 bytes
         """处理接收到的WebSocket消息"""
         try:
+            if isinstance(message, bytes):
+                message = message.decode('utf-8') # 确保消息是字符串
             request = json.loads(message)
             request_type = request.get("type")
             request_id = request.get("request_id")
@@ -99,6 +116,51 @@ class MCPServer:
                         "message": "Missing tool_spec in registration request"
                     }
                 await websocket.send(json.dumps(response))
+
+            elif request_type == "request" and self.server_name == "toolscore":
+                # 处理ToolScoreClient发送的请求类型消息
+                action = request.get("action")
+                
+                if action == "get_available_tools":
+                    # 处理获取可用工具列表请求
+                    if self.unified_tool_library:
+                        try:
+                            all_tools = await self.unified_tool_library.get_all_tools()
+                            tool_ids = [tool.tool_id for tool in all_tools]
+                            
+                            response = {
+                                "type": "response",
+                                "request_id": request_id,
+                                "success": True,
+                                "data": tool_ids
+                            }
+                        except Exception as e:
+                            logger.error(f"Error getting available tools: {e}", exc_info=True)
+                            response = {
+                                "type": "response",
+                                "request_id": request_id,
+                                "success": False,
+                                "error_message": str(e),
+                                "data": []
+                            }
+                    else:
+                        response = {
+                            "type": "response",
+                            "request_id": request_id,
+                            "success": False,
+                            "error_message": "UnifiedToolLibrary not initialized for this server.",
+                            "data": []
+                        }
+                    await websocket.send(json.dumps(response))
+                else:
+                    # 处理其他action类型
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": False,
+                        "error_message": f"Unknown action: {action}"
+                    }
+                    await websocket.send(json.dumps(response))
 
             elif request_type == "list_tools" and self.server_name == "toolscore":
                 # 只有toolscore才处理工具列表请求
@@ -270,15 +332,16 @@ class MCPServer:
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
             await websocket.send(json.dumps({"type": "error", "message": str(e)}))
-
+                
     async def _forward_to_mcp_server(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """转发请求到实际的MCP服务器"""
         try:
             # 🔧 修复：对于同进程的Python Executor，直接调用避免WebSocket连接问题
-            if tool_id == "python-executor-mcp-server" and self.python_executor_server:
+            # 确保 self.python_executor_server 被正确赋值且是可等待的
+            if tool_id == "python-executor-mcp-server" and self.python_executor_server is not None:
                 logger.info(f"🚀 直接调用同进程的Python Executor")
                 try:
-                    # 直接调用Python Executor的handle_tool_action方法
+                    # 假设 self.python_executor_server 是一个具有 handle_tool_action 方法的实例
                     action_result = await self.python_executor_server.handle_tool_action(action, parameters)
                     return {
                         "success": action_result.get("success", False),
@@ -305,6 +368,14 @@ class MCPServer:
                         "error_type": ErrorType.TOOL_ERROR.value
                     }
                 
+                # 确保tool_spec是MCPServerSpec类型，以便访问endpoint
+                if not isinstance(tool_spec, MCPServerSpec):
+                    return {
+                        "success": False,
+                        "error": f"Tool {tool_id} is not an MCPServerSpec type.",
+                        "error_type": ErrorType.SYSTEM_ERROR.value
+                    }
+
                 # 获取实际的端点地址
                 endpoint = tool_spec.endpoint
                 logger.info(f"🔗 工具端点: {endpoint}")
@@ -331,18 +402,19 @@ class MCPServer:
                 "parameters": parameters
             }
             
-            import websockets
+            # 移除重复的 import websockets
             try:
                 logger.info(f"🔌 尝试连接到MCP服务器 {tool_id} at {endpoint}")
                 # 使用ping_interval和ping_timeout来处理连接超时
-                async with websockets.connect(endpoint, ping_interval=10, ping_timeout=30) as ws:
+                async with websockets_client.connect(endpoint, ping_interval=10, ping_timeout=30) as ws:
+                    # 修复：这里不需要 self.toolscore_client = ws，因为这是转发到其他MCP服务器，而不是toolscore本身
                     logger.info(f"✅ 成功连接到 {endpoint}")
                     # 发送请求
                     await ws.send(json.dumps(payload))
                     logger.info(f"📤 已发送请求到 {tool_id}")
                     
                     # 等待响应
-                    response_str = await ws.recv()
+                    response_str = await asyncio.wait_for(ws.recv(), timeout=30.0) # 使用 wait_for 确保超时
                     logger.info(f"📥 收到响应: {response_str[:200]}...")
                     response_data = json.loads(response_str)
                     
@@ -362,12 +434,20 @@ class MCPServer:
                             "error_type": ErrorType.SYSTEM_ERROR.value
                         }
                         
-            except websockets.exceptions.ConnectionClosedError as e:
+            except ConnectionClosedError as e:
                 logger.error(f"❌ 连接到 {tool_id} 时关闭: {str(e)}")
                 return {
                     "success": False,
                     "result": None,
                     "error": f"Connection to {tool_id} closed: {str(e)}",
+                    "error_type": ErrorType.NETWORK_ERROR.value
+                }
+            except asyncio.TimeoutError: # 捕获 asyncio.TimeoutError
+                logger.error(f"❌ 连接到 {tool_id} 时超时")
+                return {
+                    "success": False,
+                    "result": None,
+                    "error": f"Connection to {tool_id} timed out",
                     "error_type": ErrorType.NETWORK_ERROR.value
                 }
             except Exception as e:
@@ -388,15 +468,14 @@ class MCPServer:
                 "error_type": ErrorType.SYSTEM_ERROR.value
             }
 
-    async def websocket_handler(self, websocket: websockets.WebSocketServerProtocol):
+    async def websocket_handler(self, websocket: WebSocketServerProtocol, path: str):
         """WebSocket连接处理函数"""
-        # 注意：在新版websockets中，ServerConnection对象没有path属性
-        # 如果需要路径信息，可以通过其他方式获取
-        logger.info(f"Client connected to {self.server_name} MCP Server: {websocket.remote_address}")
+        logger.info(f"Client connected to {self.server_name} MCP Server at path {path}: {websocket.remote_address}")
         try:
             async for message in websocket:
+                # _handle_message 现在接受 Union[str, bytes]，所以这里不需要额外的解码
                 await self._handle_message(websocket, message)
-        except websockets.exceptions.ConnectionClosedOK:
+        except ConnectionClosedOK:
             logger.info(f"Client disconnected from {self.server_name} MCP Server: {websocket.remote_address}")
         except Exception as e:
             logger.error(f"WebSocket error in {self.server_name} server: {e}", exc_info=True)
@@ -423,7 +502,7 @@ class MCPServer:
         while True:
             try:
                 logger.info(f"[{self.server_name}] Attempting to connect to toolscore at {self.toolscore_endpoint} for registration...")
-                async with websockets.connect(self.toolscore_endpoint, ping_interval=10, ping_timeout=20) as ws: # 添加 ping 参数
+                async with websockets_client.connect(self.toolscore_endpoint, ping_interval=10, ping_timeout=20) as ws: # 添加 ping 参数
                     self.toolscore_client = ws
                     logger.info(f"[{self.server_name}] Connected to toolscore at {self.toolscore_endpoint}")
                     
@@ -458,10 +537,10 @@ class MCPServer:
                     else:
                         logger.error(f"[{self.server_name}] Unexpected response from toolscore: {response_data}")
                 
-            except websockets.exceptions.InvalidURI:
+            except InvalidURI:
                 logger.error(f"[{self.server_name}] Invalid toolscore endpoint URI: {self.toolscore_endpoint}. Registration aborted.", exc_info=True)
                 break # 无效URI，停止重试
-            except (websockets.exceptions.ConnectionClosedOK, websockets.exceptions.ConnectionClosedError, ConnectionRefusedError) as e:
+            except (ConnectionClosedOK, ConnectionClosedError, ConnectionRefusedError) as e:
                 logger.warning(f"[{self.server_name}] Connection to toolscore failed: {e}. Retrying in 5 seconds...")
             except asyncio.TimeoutError:
                 logger.warning(f"[{self.server_name}] Timeout waiting for registration response from toolscore. Retrying in 5 seconds...")
@@ -473,37 +552,56 @@ class MCPServer:
     async def start(self):
         """启动MCP Server"""
         try:
-            if self.server_name == "toolscore" and self.unified_tool_library:
-                await self.unified_tool_library.initialize()
-                logger.info("UnifiedToolLibrary initialized for toolscore server.")
-
             # 解析监听地址和端口
-            # endpoint 示例: ws://localhost:8083
             _endpoint_without_scheme = self.endpoint.split('://', 1)[-1]
             host_part, port_part = _endpoint_without_scheme.split(':', 1)
-            port = int(port_part.split('/')[0])
+            
+            default_port = int(port_part.split('/')[0])
+            port = self.bind_port if self.bind_port is not None else default_port
  
-            # 对于 Python Executor 等特殊服务器，可通过环境变量覆盖绑定地址
-            bind_host = os.getenv("PYTHON_EXECUTOR_BIND_HOST", host_part or "0.0.0.0")
- 
+            env_bind_host_var = f"{self.server_name.upper()}_BIND_HOST"
+            bind_host = os.getenv(env_bind_host_var, host_part or "0.0.0.0")
+            
+            env_port_var = f"{self.server_name.upper()}_PORT"
+            port = int(os.getenv(env_port_var, str(port)))
+
             logger.info(f"Attempting to start {self.server_name} MCP Server on {bind_host}:{port}")
-            self.websocket_server = await websockets.serve(
+            
+            self.websocket_server = await websockets_server.serve(
                 self.websocket_handler,
                 bind_host,
                 port,
-                ping_interval=30,  # 设置 ping 间隔为30秒
-                ping_timeout=60    # 设置 ping 超时为60秒
+                ping_interval=30,
+                ping_timeout=60
             )
-            logger.info(f"{self.server_name} MCP Server started successfully on {self.endpoint} with ping_interval=30, ping_timeout=60")
- 
+            
+            # 确保 UnifiedToolLibrary 在服务器成功绑定端口后初始化
+            if self.server_name == "toolscore" and self.unified_tool_library:
+                logger.info(f"[{self.server_name}] Initializing UnifiedToolLibrary...")
+                await self.unified_tool_library.initialize()
+                logger.info(f"[{self.server_name}] UnifiedToolLibrary initialized.")
+
+            logger.info(f"{self.server_name} MCP Server started successfully on {bind_host}:{port} (Original endpoint: {self.endpoint}) with ping_interval=30, ping_timeout=60")
+            
+            # 服务器成功启动并初始化后设置事件，并标记为健康
+            if self.server_started_event:
+                self.server_started_event.set()
+                logger.info(f"{self.server_name} MCP Server started event set.")
+            self._is_healthy = True # 标记服务健康
+
             if self.toolscore_endpoint and self.server_name != "toolscore":
                 self.toolscore_registration_task = asyncio.create_task(self._register_with_toolscore())
 
-            # Keep the server running indefinitely
             await self.websocket_server.wait_closed()
+        except OSError as e: # 明确捕获端口占用错误
+            self._is_healthy = False
+            self._startup_error_message = f"Port {port} already in use or address unavailable: {e}"
+            logger.error(f"Failed to start {self.server_name} MCP Server due to port issue: {self._startup_error_message}", exc_info=True)
+            raise # 重新抛出异常，以便上层调用者感知
         except Exception as e:
-            logger.error(f"Failed to start {self.server_name} MCP Server: {e}", exc_info=True)
-            # Re-raise the exception to indicate startup failure
+            self._is_healthy = False
+            self._startup_error_message = f"An unexpected error occurred during startup: {e}"
+            logger.error(f"Failed to start {self.server_name} MCP Server: {self._startup_error_message}", exc_info=True)
             raise
 
     async def stop(self):

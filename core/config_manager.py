@@ -231,29 +231,73 @@ class ConfigManager:
                 json.dump(config_export, f, indent=2, ensure_ascii=False, default=str)
             
             logger.info(f"配置导出成功: {output_path}")
-            
+                
         except Exception as e:
             logger.error(f"配置导出失败: {e}")
+    
+    def get_redis_url(self) -> str:
+        """获取Redis连接URL"""
+        ports_config = self.load_ports_config()
+        redis_port = ports_config.get("core_services", {}).get("redis", {}).get("port", 6379)
+        return os.getenv("REDIS_URL", f"redis://localhost:{redis_port}")
+    
+    def get_task_file_path(self) -> str:
+        """获取任务文件路径"""
+        return os.getenv("TASK_FILE", "tasks.jsonl")
+    
+    def get_llm_config(self) -> Dict[str, Any]:
+        """获取LLM配置"""
+        try:
+            config_path = self.config_dir / "llm_config.yaml"
+            if not config_path.exists():
+                logger.warning(f"LLM 配置文件不存在: {config_path}")
+                return self._get_default_llm_config()
+            
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"加载 LLM 配置失败: {e}")
+            return self._get_default_llm_config()
+    
+    def _get_default_llm_config(self) -> Dict[str, Any]:
+        """获取默认LLM配置"""
+        return {
+            "default_provider": "openai",
+            "providers": {
+                "openai": {
+                    "api_key_env": "OPENAI_API_KEY",
+                    "base_url_env": "OPENAI_BASE_URL",
+                    "default_model": "gpt-4o",
+                    "models": {
+                        "gpt-4o": {"max_tokens": 4096, "temperature": 0.7},
+                        "gpt-3.5-turbo": {"max_tokens": 2048, "temperature": 0.7}
+                    }
+                },
+                "gemini": {
+                    "api_key_env": "GEMINI_API_KEY",
+                    "base_url_env": "GEMINI_API_URL",
+                    "default_model": "gemini-pro",
+                    "models": {
+                        "gemini-pro": {"max_tokens": 4096, "temperature": 0.7},
+                        "gemini-2.0-flash": {"max_tokens": 4096, "temperature": 0.1},
+                        "gemini-1.5-flash": {"max_tokens": 4096, "temperature": 0.1}
+                    }
+                },
+                "deepseek": {
+                    "api_key_env": "DEEPSEEK_API_KEY",
+                    "base_url_env": "DEEPSEEK_BASE_URL",
+                    "default_model": "deepseek-chat",
+                    "models": {
+                        "deepseek-chat": {"max_tokens": 4096, "temperature": 0.7}
+                    }
+                },
+                "vllm": {
+                    "base_url_env": "VLLM_BASE_URL",
+                    "default_model": "vllm-model",
+                    "models": {
+                        "vllm-model": {"max_tokens": 4096, "temperature": 0.7}
+                    }
+                }
+            }
+        }
 
-# 全局配置管理器实例
-config_manager = ConfigManager()
-
-def get_queue_mapping() -> Dict[str, str]:
-    """获取队列映射配置"""
-    return config_manager.get_queue_mapping()
-
-def get_tool_service_url() -> str:
-    """获取工具服务URL"""
-    return config_manager.get_tool_service_url()
-
-def get_ports_config() -> Dict[str, Any]:
-    """获取端口配置"""
-    return config_manager.load_ports_config()
-
-def get_fallback_tools_mapping() -> Dict[str, list]:
-    """获取备选工具映射"""
-    return config_manager.get_fallback_tools_mapping()
-
-def validate_config() -> Dict[str, list]:
-    """验证配置一致性"""
-    return config_manager.validate_config_consistency()

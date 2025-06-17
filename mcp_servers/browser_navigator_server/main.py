@@ -13,18 +13,33 @@ from uuid import uuid4
 from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
 from core.toolscore.mcp_server import MCPServer
 from .browser_tool import BrowserTool
+from core.config_manager import ConfigManager # 导入ConfigManager
 
 logger = logging.getLogger(__name__)
 
 class BrowserNavigatorMCPServer:
     """浏览器导航MCP服务器"""
     
-    def __init__(self):
+    def __init__(self, config_manager: ConfigManager):
         self.browser_tool = BrowserTool()
         self.server_name = "browser_navigator_server"
         self.server_id = "browser-navigator-mcp-server"
-        self.endpoint = "ws://0.0.0.0:8082/mcp"
-        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', 'ws://localhost:8081/websocket')
+        self.config_manager = config_manager
+        
+        # 从配置中获取端口
+        ports_config = self.config_manager.get_ports_config()
+        browser_port = ports_config['mcp_servers']['browser_navigator']['port']
+        toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
+
+        # 监听地址使用 0.0.0.0 以接受所有网卡，但 **注册给 ToolScore 的地址** 必须是客户端可访问的
+        listen_host = os.getenv("BROWSER_NAVIGATOR_LISTEN_HOST", "0.0.0.0")
+        public_host = os.getenv("BROWSER_NAVIGATOR_HOST", "localhost")
+        
+        self.endpoint = f"ws://{public_host}:{browser_port}/mcp"
+        self._listen_host = listen_host
+        self._listen_port = browser_port
+        
+        self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取浏览器工具的所有能力"""
@@ -204,7 +219,8 @@ class BrowserNavigatorMCPServer:
         # 注册工具动作处理器
         mcp_server.register_tool_action_handler(self.handle_tool_action)
         
-        # 启动服务器
+        # 在启动之前，覆盖其监听地址，防止绑定到不可用端口
+        os.environ["BROWSER_NAVIGATOR_BIND_HOST"] = self._listen_host
         await mcp_server.start()
 
 async def main():
@@ -214,7 +230,11 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    server = BrowserNavigatorMCPServer()
+    # 初始化ConfigManager
+    from core.config_manager import ConfigManager
+    config_manager = ConfigManager()
+    
+    server = BrowserNavigatorMCPServer(config_manager)
     await server.run()
 
 if __name__ == "__main__":

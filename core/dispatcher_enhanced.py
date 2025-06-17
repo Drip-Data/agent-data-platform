@@ -1,293 +1,110 @@
 import asyncio
-import json
 import logging
-import os
-import time
-import httpx
-from typing import Dict, Set
-import redis.asyncio as redis
-from .interfaces import TaskSpec, TaskType
-from .cache import TemplateCache
-from .metrics import EnhancedMetrics
-from .config_manager import ConfigManager
-
+import os # 重新引入os，因为TaskLoader需要它
+from typing import Dict, Any, Set # 引入Set
+import redis.asyncio as async_redis
+from core.interfaces import TaskSpec, TaskType
+from core.config_manager import ConfigManager
+from core.monitoring.queue_monitor import QueueMonitor
+from core.toolscore.toolscore_client import ToolScoreClient
+from core.task_processing.task_loader import TaskLoader
+from core.task_processing.task_enhancer import TaskEnhancer
+from core.task_processing.task_distributor import TaskDistributor
 logger = logging.getLogger(__name__)
 
-class EnhancedTaskDispatcher:
-    """增强版任务分发器 - 集成智能工具选择"""
+class TaskProcessingCoordinator:
+    """
+    任务处理协调器，负责协调任务的加载、增强和分发。
+    取代原有的 EnhancedTaskDispatcher，职责更单一。
+    """
     
-    def __init__(self, redis_url: str, task_file: str = "tasks.jsonl"):
-        self.redis = redis.from_url(redis_url)
-        self.task_file = task_file
-        self.cache = TemplateCache(self.redis)
-        self.metrics = EnhancedMetrics()
+    def __init__(self,
+                 redis_url: str,
+                 config_manager: ConfigManager, # 强制依赖注入
+                 toolscore_client: ToolScoreClient, # 强制依赖注入
+                 queue_monitor: QueueMonitor, # 强制依赖注入
+                 task_loader: TaskLoader, # 依赖注入 TaskLoader
+                 task_enhancer: TaskEnhancer, # 依赖注入 TaskEnhancer
+                 task_distributor: TaskDistributor, # 依赖注入 TaskDistributor
+                 queue_mapping: Dict[TaskType, str] # 直接注入队列映射
+                ):
+        self.config_manager = config_manager
+        self.toolscore_client = toolscore_client
+        self.queue_monitor = queue_monitor
+        self.task_loader = task_loader
+        self.task_enhancer = task_enhancer
+        self.task_distributor = task_distributor
+        self.queue_mapping = queue_mapping # 直接使用注入的队列映射
         
-        # 🔧 使用配置管理器替代硬编码
-        try:
-            self.config_manager = ConfigManager()
-            routing_config = self.config_manager.get_routing_config()
-            ports_config = self.config_manager.get_ports_config()
-            
-            # 从配置获取队列映射
-            self.queue_mapping = {}
-            task_type_mapping = routing_config['queue_mapping']['task_type_mapping']
-            for task_type_str, queue_name in task_type_mapping.items():
-                task_type = TaskType(task_type_str)
-                self.queue_mapping[task_type] = queue_name
-              # 从配置获取工具服务URL
-            toolscore_port = ports_config['mcp_servers']['toolscore_http']['port']
-            self.tool_service_url = f"http://localhost:{toolscore_port}"
-            
-            logger.info(f"✅ 配置加载完成 - 队列映射: {self.queue_mapping}")
-            logger.info(f"✅ 工具服务URL: {self.tool_service_url}")
-            
-        except Exception as e:
-            logger.warning(f"配置加载失败，使用默认配置: {e}")
-            # 回退到默认配置
-            self.tool_service_url = os.getenv("TOOL_SERVICE_URL", "http://localhost:8082")
-            self.queue_mapping = {
-                TaskType.CODE: "tasks:reasoning",
-                TaskType.WEB: "tasks:reasoning",
-                TaskType.REASONING: "tasks:reasoning"
-            }
+        logger.info(f"✅ TaskProcessingCoordinator 配置加载完成 - 队列映射: {self.queue_mapping}")
         
-    async def _call_tool_selector_service(self, task: TaskSpec) -> Dict:
-        """调用工具管理服务进行智能推荐"""
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(
-                    f"{self.tool_service_url}/api/tools/intelligent-recommend",
-                    json={
-                        "task_description": task.description,
-                        "task_type": task.task_type.value,
-                        "constraints": task.constraints,
-                        "max_steps": task.max_steps
-                    }
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.warning(f"工具推荐服务返回错误: {response.status_code}")
-                    return self._get_fallback_tools(task.task_type)
-        except Exception as e:
-            logger.error(f"调用工具推荐服务失败: {e}")
-            return self._get_fallback_tools(task.task_type)
-            
-    def _get_fallback_tools(self, task_type: TaskType) -> Dict:
-        """获取备选工具推荐 - 从配置文件读取"""
-        try:
-            # 从配置文件获取备选工具映射
-            routing_config = self.config_manager.get_routing_config()
-            fallback_mapping = routing_config['tool_recommendation']['fallback_mapping']
-            strategy_config = routing_config['tool_recommendation']['strategy']
-            
-            task_type_str = task_type.value
-            recommended_tools = fallback_mapping.get(task_type_str, ["python_executor"])
-            
-            return {
-                "recommended_tools": recommended_tools,
-                "confidence": strategy_config.get("default_confidence", 0.5),
-                "reason": "使用配置文件中的备选工具",
-                "strategy": "config_fallback"
-            }
-        except Exception as e:
-            logger.warning(f"读取配置失败，使用硬编码备选方案: {e}")
-            # 硬编码备选方案
-            default_fallback = {
-                TaskType.CODE: ["python_executor"],
-                TaskType.WEB: ["browser_navigator", "web_search"],
-                TaskType.REASONING: ["python_executor", "browser_navigator"]
-            }
-            
-            return {
-                "recommended_tools": default_fallback.get(task_type, ["python_executor"]),
-                "confidence": 0.5,
-                "reason": "使用硬编码备选工具配置",
-                "strategy": "hardcoded_fallback"
-            }
-    
-    async def _enhance_task_with_tools(self, task: TaskSpec) -> TaskSpec:
-        """为任务增强工具选择"""
-        # 如果已经有明确的工具指定，且不是auto，就保持不变
-        if task.expected_tools and task.expected_tools != ["auto"]:
-            logger.debug(f"任务 {task.task_id} 已有明确工具: {task.expected_tools}")
-            return task
+        # TemplateCache 已移除，待后续评估其职责并重新引入
+
+    async def _process_single_task(self, task: TaskSpec):
+        """处理单个任务的增强和分发流程"""
+        # 🔧 智能工具增强
+        task = await self.task_enhancer.enhance_task_with_tools(task) # 调用 TaskEnhancer
         
-        # 调用智能工具推荐
-        tool_recommendation = await self._call_tool_selector_service(task)
-        
-        # 更新任务的工具配置
-        task.expected_tools = tool_recommendation["recommended_tools"]
-        
-        # 添加推荐元数据
-        if "tool_metadata" not in task.constraints:
-            task.constraints["tool_metadata"] = {}
-            
-        task.constraints["tool_metadata"].update({
-            "recommendation_confidence": tool_recommendation.get("confidence", 0.0),
-            "recommended_at": time.time(),
-            "recommendation_reason": tool_recommendation.get("reason", ""),
-            "recommendation_strategy": tool_recommendation.get("strategy", "intelligent"),
-            "original_tools": task.expected_tools if task.expected_tools != ["auto"] else []
-        })
-        
-        logger.info(f"为任务 {task.task_id} 推荐工具: {task.expected_tools} (置信度: {tool_recommendation.get('confidence', 0.0)})")
-        
-        return task
-    
-    async def _load_and_dispatch_tasks(self):
-        """加载并按类型分发任务 - 集成智能工具选择"""
-        processed_tasks: Set[str] = set()
-        last_position = 0
-        
-        while True:
-            try:
-                if not os.path.exists(self.task_file):
-                    await asyncio.sleep(5)
-                    continue
-                
-                # 读取新任务
-                with open(self.task_file, 'r', encoding='utf-8') as f:
-                    for line_number, line in enumerate(f):
-                        if line_number <= last_position:
-                            continue
-                        
-                        line = line.strip()
-                        if not line:
-                            continue
-                        
-                        try:
-                            task_data = json.loads(line)
-                            task = TaskSpec.from_dict(task_data)
-                            
-                            if task.task_id in processed_tasks:
-                                continue
-                            
-                            # 🔧 智能工具增强
-                            task = await self._enhance_task_with_tools(task)
-                            
-                            # 分发到对应队列
-                            queue_name = self.queue_mapping.get(task.task_type)
-                            if queue_name:
-                                await self.redis.xadd(
-                                    queue_name,
-                                    {
-                                        "task": task.json(),
-                                        "submitted_at": time.time(),
-                                        "priority": task.priority,
-                                        "enhanced_with_tools": True  # 标记已进行工具增强
-                                    }
-                                )
-                                
-                                self.metrics.record_task_submitted(
-                                    task.task_type.value,
-                                    queue_name.split(":")[1]
-                                )
-                                processed_tasks.add(task.task_id)
-                                
-                                logger.info(f"分发增强任务 {task.task_id} 到 {queue_name}")
-                                
-                                # 记录工具推荐统计
-                                tool_metadata = task.constraints.get("tool_metadata", {})
-                                logger.debug(f"工具推荐日志: {json.dumps({
-                                    'task_id': task.task_id,
-                                    'recommended_tools': task.expected_tools,
-                                    'confidence': tool_metadata.get('recommendation_confidence', 0.0),
-                                    'strategy': tool_metadata.get('recommendation_strategy', 'unknown')
-                                })}")
-                                
-                            else:
-                                logger.error(f"未找到任务类型 {task.task_type} 对应的队列")
-                                
-                        except (json.JSONDecodeError, ValueError) as e:
-                            logger.error(f"第 {line_number} 行任务解析失败: {e}")
-                        
-                        last_position = line_number
-                
-                await asyncio.sleep(5)  # 检查新任务间隔
-                
-            except Exception as e:
-                logger.error(f"任务加载过程中出错: {e}")
-                await asyncio.sleep(10)
-    
-    # ... 其他方法保持与原Dispatcher相同 ...
+        # 分发到对应队列
+        queue_name = self.queue_mapping.get(task.task_type)
+        if queue_name:
+            await self.task_distributor.distribute_task(task, queue_name) # 调用 TaskDistributor
+            logger.info(f"分发增强任务 {task.task_id} 到 {queue_name}")
+        else:
+            logger.error(f"未找到任务类型 {task.task_type} 对应的队列")
+
+    async def _coordinate_task_processing(self):
+        """协调任务的加载、增强和分发"""
+        async for task in self.task_loader.load_new_tasks(): # 通过 TaskLoader 获取任务
+            await self._process_single_task(task)
+            await asyncio.sleep(0.1) # 短暂等待，避免CPU空转
+
     async def start(self):
-        """启动分发器"""
-        logger.info("启动增强版任务分发器（集成智能工具选择）...")
+        """启动协调器"""
+        logger.info("启动任务处理协调器...")
         
-        # 启动metrics服务器
-        self.metrics.start_server()
-        
-        # 并行启动各个组件
         await asyncio.gather(
-            self._load_and_dispatch_tasks(),
-            self._monitor_queues(),
-            self._monitor_pending_tasks()
+            self._coordinate_task_processing(),
+            self.queue_monitor.start()
         )
-    
-    async def _monitor_queues(self):
-        """监控队列状态"""
-        while True:
-            try:
-                for task_type, queue_name in self.queue_mapping.items():
-                    # 获取队列长度
-                    queue_length = await self.redis.xlen(queue_name)
-                    self.metrics.update_queue_size(queue_name, queue_length)
-                
-                await asyncio.sleep(30)  # 每30秒更新
-                
-            except Exception as e:
-                logger.error(f"监控队列时出错: {e}")
-                await asyncio.sleep(10)
-    
-    async def _monitor_pending_tasks(self):
-        """监控挂起任务延迟"""
-        while True:
-            try:
-                for task_type, queue_name in self.queue_mapping.items():
-                    runtime = queue_name.split(":")[1]
-                    
-                    # 检查挂起任务
-                    try:
-                        pending_info = await self.redis.xpending_range(
-                            queue_name, "workers", count=100
-                        )
-                        
-                        if pending_info:
-                            # 计算最大延迟
-                            current_time = time.time() * 1000  # Redis使用毫秒时间戳
-                            max_lag = 0
-                            
-                            for entry in pending_info:
-                                idle_time = current_time - entry['time_since_delivered']
-                                max_lag = max(max_lag, idle_time / 1000)  # 转换为秒
-                            
-                            self.metrics.pending_lag_seconds.labels(runtime=runtime).set(max_lag)
-                    except Exception:
-                        # 如果consumer group不存在，忽略错误
-                        pass
-                
-                await asyncio.sleep(60)  # 每分钟检查
-                
-            except Exception as e:
-                logger.error(f"监控挂起任务时出错: {e}")
-                await asyncio.sleep(30)
 
 async def main():
-    """增强分发器主程序"""
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    task_file = os.getenv("TASK_FILE", "tasks.jsonl")
+    """主程序入口，负责依赖注入和启动"""
+    # 这里将是依赖注入的核心区域，目前保持原样，待后续统一修改
+    # 实例化ConfigManager并获取配置
+    config_manager = ConfigManager()
+    redis_url = config_manager.get_redis_url() # 从ConfigManager获取
+    task_file = config_manager.get_task_file_path() # 从ConfigManager获取
+    routing_config = config_manager.load_routing_config()
+    queue_mapping = {
+        TaskType(task_type_str.lower()): queue_name
+        for task_type_str, queue_name in routing_config.task_type_mapping.items()
+    }
     
-    dispatcher = EnhancedTaskDispatcher(redis_url, task_file)
+    # 实例化所有依赖
+    toolscore_client = ToolScoreClient(config_manager) # 注入config_manager
+    queue_monitor = QueueMonitor(redis_url)
+    task_loader = TaskLoader(task_file)
+    task_enhancer = TaskEnhancer(toolscore_client) # TaskEnhancer 需要 ToolScoreClient
+    from core.metrics import EnhancedMetrics
+    metrics = EnhancedMetrics()
+    task_distributor = TaskDistributor(redis_url, metrics)
+
+    coordinator = TaskProcessingCoordinator(
+        redis_url=redis_url,
+        config_manager=config_manager,
+        toolscore_client=toolscore_client,
+        queue_monitor=queue_monitor,
+        task_loader=task_loader,
+        task_enhancer=task_enhancer,
+        task_distributor=task_distributor,
+        queue_mapping=queue_mapping # 注入队列映射
+    )
     
     try:
-        await dispatcher.start()
+        await coordinator.start()
     except KeyboardInterrupt:
         logger.info("收到中断信号")
     finally:
-        await dispatcher.redis.close()
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(main()) 
+        # Redis 连接现在由 RedisManager 管理，这里不再直接关闭
+        pass

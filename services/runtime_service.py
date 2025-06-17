@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 # 全局变量
 runtime_instances = []
 
-def initialize(config: Optional[Dict] = None):
+def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, toolscore_websocket_endpoint: Optional[str] = None):
     """初始化推理运行时服务"""
     global runtime_instances
     
@@ -18,6 +18,11 @@ def initialize(config: Optional[Dict] = None):
         config = {}
     
     logger.info("正在初始化推理运行时服务...")
+    
+    # 如果没有传入依赖，尝试从全局或者延迟到运行时创建
+    if not all([config_manager, llm_client, toolscore_client]):
+        logger.warning("运行时服务未收到必要的依赖，将延迟到启动时创建运行时实例")
+        return
     
     # 清空现有实例列表
     runtime_instances = []
@@ -29,15 +34,12 @@ def initialize(config: Optional[Dict] = None):
     for i in range(instance_count):
         instance_name = f"enhanced-runtime-{i+1}"
         logger.info(f"创建运行时实例: {instance_name}")
-          # 创建运行时实例
-        runtime = EnhancedReasoningRuntime()
+        # 创建运行时实例并传入依赖，包括新的websocket端点
+        runtime = EnhancedReasoningRuntime(config_manager, llm_client, toolscore_client, toolscore_websocket_endpoint)
         
         # 设置实例名称（如果运行时支持的话）
-        if hasattr(runtime, 'name'):
-            runtime.name = instance_name
-        else:
-            # 使用_runtime_id作为标识
-            runtime._runtime_id = f"enhanced-reasoning-{i+1}"
+        # 始终使用_runtime_id作为标识
+        runtime._runtime_id = f"enhanced-reasoning-{i+1}"
         
         runtime_instances.append(runtime)
     
@@ -47,16 +49,52 @@ def start():
     """启动推理运行时服务"""
     logger.info("正在启动推理运行时服务...")
     
-    # 启动所有运行时实例（只需异步初始化）
+    # 启动所有运行时实例（异步初始化和任务消费）
     import asyncio
-    for runtime in runtime_instances:
-        runtime_name = getattr(runtime, 'name', getattr(runtime, '_runtime_id', 'unknown'))
-        logger.info(f"启动运行时实例: {runtime_name}")
+    
+    async def start_all_runtimes():
+        # 初始化所有运行时实例
+        for runtime in runtime_instances:
+            runtime_name = getattr(runtime, 'name', getattr(runtime, '_runtime_id', 'unknown'))
+            logger.info(f"启动运行时实例: {runtime_name}")
+            try:
+                await runtime.initialize()
+            except Exception as e:
+                logger.error(f"运行时实例 {runtime_name} 初始化失败: {e}")
+        
+        # 启动所有运行时的任务消费服务
+        from core.task_manager import start_runtime_service
+        from core.redis_manager import RedisManager
+        
+        # 获取Redis管理器（需要从全局获取或创建）
+        redis_manager = None
         try:
-            asyncio.run(runtime.initialize())
+            # 尝试从环境变量获取Redis URL
+            import os
+            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
+            redis_manager = RedisManager(redis_url)
         except Exception as e:
-            logger.error(f"运行时实例 {runtime_name} 初始化失败: {e}")
-    logger.info(f"推理运行时服务已启动 {len(runtime_instances)} 个实例")
+            logger.warning(f"无法创建Redis管理器: {e}")
+        
+        # 为每个运行时实例启动任务消费协程
+        tasks = []
+        for runtime in runtime_instances:
+            runtime_name = getattr(runtime, 'name', getattr(runtime, '_runtime_id', 'unknown'))
+            logger.info(f"启动运行时任务消费: {runtime_name}")
+            task = asyncio.create_task(
+                start_runtime_service(runtime, redis_manager),
+                name=f"runtime-{runtime_name}"
+            )
+            tasks.append(task)
+        
+        logger.info(f"推理运行时服务已启动 {len(runtime_instances)} 个实例和 {len(tasks)} 个任务消费协程")
+        
+        # 等待所有任务消费协程
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 在新的事件循环中启动所有运行时
+    asyncio.create_task(start_all_runtimes())
 
 def stop():
     """停止推理运行时服务"""

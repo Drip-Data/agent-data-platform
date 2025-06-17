@@ -8,9 +8,9 @@ import logging
 from typing import Dict, Any, Optional
 from playwright.async_api import async_playwright, Browser, Page
 import json
-from core.browser_state_manager import state_manager
+from core.web.browser_state_manager import state_manager
 import uuid
-from core.path_utils import get_screenshots_dir # Import get_screenshots_dir
+from core.utils.path_utils import get_screenshots_dir # Import get_screenshots_dir
 
 logger = logging.getLogger(__name__)
 

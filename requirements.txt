@@ -1,24 +1,29 @@
-redis
-prometheus-client
-aiohttp
-pydantic
-httpx
+aiofiles>=0.8.0
+aiohttp>=3.8.0
+aiohttp_retry
+beautifulsoup4>=4.11.0
 fastapi>=0.100.0
+google-generativeai
+httpx
+matplotlib>=3.5.0
+numpy>=1.21.0
+openai
+pandas>=1.3.0
+Pillow>=9.0.0
+playwright>=1.20.0
+prometheus-client
+psutil>=5.9.0
+pydantic
+python-dotenv>=1.0.0
+PyYAML>=6.0
+redis
+requests>=2.28.0
+scikit-learn>=1.1.0
+scipy>=1.8.0
+selenium>=4.0.0
+tiktoken
 uvicorn>=0.20.0
 watchdog>=2.1.0
-aiofiles>=0.8.0
 websockets>=10.0
-aiohttp_retry
-PyYAML>=6.0
-requests>=2.28.0
-psutil>=5.9.0
-python-dotenv>=1.0.0
-
-
-beautifulsoup4>=4.11.0
-Pillow>=9.0.0
-
-# 注意：以下依赖已移至具体的MCP服务器或运行时模块中
-# - matplotlib, pandas, numpy, scikit-learn -> runtimes/reasoning/requirements.txt
-# - playwright -> 已移至主依赖 (browser_navigator_server 需要)
-# - selenium, webdriver-manager -> 已删除，不再使用
+websockets>=10.4
+python-socks>=2.4.3

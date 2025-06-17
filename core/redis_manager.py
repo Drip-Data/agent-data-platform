@@ -11,9 +11,69 @@ import sys
 import time
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+import redis.asyncio as redis # 导入redis.asyncio
+from redis.asyncio.client import Redis # 导入Redis类型提示
 
 logger = logging.getLogger(__name__)
+
+class MockRedisClient:
+    """模拟Redis客户端，用于内存fallback模式"""
+    def __init__(self, manager: 'RedisManager'):
+        self.manager = manager
+
+    async def xlen(self, name: str) -> int:
+        """模拟Xlen"""
+        return len(self.manager.memory_storage.get(name, []))
+
+    async def xpending_range(self, name: str, consumer_group: str, min_id: str = '-', max_id: str = '+', count: int = 10) -> List[Dict[str, Any]]:
+        """模拟XpendingRange，简化实现"""
+        # 内存模式下不模拟复杂的XPENDING，直接返回空列表
+        return []
+
+    async def xadd(self, name: str, fields: Dict[str, Any], id: str = '*') -> str:
+        """模拟XADD，简化为lpush"""
+        message = json.dumps(fields)
+        await self.manager.memory_lpush(name, message)
+        return f"{int(time.time() * 1000)}-0" # 模拟一个ID
+
+    async def lpush(self, key: str, *values: str) -> int:
+        """模拟LPUSH"""
+        count = 0
+        for value in values:
+            count = await self.manager.memory_lpush(key, value)
+        return count
+
+    async def rpop(self, key: str) -> Optional[str]:
+        """模拟RPOP"""
+        return await self.manager.memory_rpop(key)
+
+    async def set(self, key: str, value: str) -> bool:
+        """模拟SET"""
+        return await self.manager.memory_set(key, value)
+
+    async def get(self, key: str) -> Optional[str]:
+        """模拟GET"""
+        return await self.manager.memory_get(key)
+
+    async def delete(self, *keys: str) -> int:
+        """模拟DELETE"""
+        count = 0
+        for key in keys:
+            count += await self.manager.memory_delete(key)
+        return count
+
+    async def publish(self, channel: str, message: str) -> int:
+        """模拟PUBLISH"""
+        return await self.manager.memory_publish(channel, message)
+
+    async def ping(self) -> bool:
+        """模拟PING"""
+        return True
+
+    async def close(self):
+        """模拟CLOSE"""
+        pass
 
 class RedisManager:
     """Redis管理器，支持自动启动和fallback到内存模式"""
@@ -23,10 +83,12 @@ class RedisManager:
         self.redis_process: Optional[subprocess.Popen] = None
         self.redis_available = False
         self.fallback_mode = False
+        self._redis_client: Optional[Redis] = None # 存储真实的Redis客户端
+        self._mock_client: Optional[MockRedisClient] = None # 存储模拟客户端
         
         # 内存存储 - 作为Redis的fallback
         self.memory_storage: Dict[str, Any] = {}
-        self.memory_queues: Dict[str, asyncio.Queue] = {}
+        self.memory_queues: Dict[str, asyncio.Queue] = {} # 实际未使用，因为lpush/rpop直接操作memory_storage
         self.memory_pubsub: Dict[str, list] = {}
         
         # 数据持久化路径
@@ -41,24 +103,27 @@ class RedisManager:
         if await self._check_redis_connection():
             logger.info("发现运行中的Redis服务")
             self.redis_available = True
+            self._redis_client = redis.from_url(self.redis_url)
             return True
         
         # 2. 尝试启动Redis
         if await self._try_start_redis():
             logger.info("成功启动Redis服务")
             self.redis_available = True
+            self._redis_client = redis.from_url(self.redis_url)
             return True
         
         # 3. Fallback到内存模式
         logger.warning("Redis不可用，启用内存存储模式")
         self.fallback_mode = True
+        self._mock_client = MockRedisClient(self)
         await self._load_backup_data()
         return True
     
     async def _check_redis_connection(self) -> bool:
         """检查Redis连接"""
         try:
-            import redis.asyncio as redis
+            # 不在这里实例化客户端，只检查连接
             client = redis.from_url(self.redis_url)
             await client.ping()
             await client.close()
@@ -182,6 +247,7 @@ class RedisManager:
                     pass
     
     # ============ 内存存储API (Redis fallback) ============
+    # 这些方法现在由MockRedisClient调用
     
     async def memory_set(self, key: str, value: str) -> bool:
         """内存模式: 设置键值"""
@@ -233,3 +299,14 @@ class RedisManager:
     def is_fallback_mode(self) -> bool:
         """是否处于fallback模式"""
         return self.fallback_mode
+
+    def get_client(self) -> Any: # 返回类型可以是Redis或MockRedisClient
+        """获取Redis客户端实例，如果fallback模式则返回模拟客户端"""
+        if self.fallback_mode:
+            if not self._mock_client:
+                self._mock_client = MockRedisClient(self)
+            return self._mock_client
+        else:
+            if not self._redis_client:
+                self._redis_client = redis.from_url(self.redis_url)
+            return self._redis_client

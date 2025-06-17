@@ -10,10 +10,10 @@ import logging
 import os
 import sys
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Any, cast
 from pathlib import Path
 
-import redis.asyncio as redis
+import redis.asyncio as async_redis
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -22,7 +22,7 @@ from pydantic import BaseModel
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.path_utils import get_output_dir, get_trajectories_dir
+from core.utils.path_utils import get_output_dir, get_trajectories_dir
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +44,13 @@ app = FastAPI(
 )
 
 # Redis连接
-redis_client: Optional[redis.Redis] = None
+redis_client: Optional[async_redis.Redis] = None
 
 @app.on_event("startup")
 async def startup_event():
     global redis_client
     redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
-    redis_client = redis.from_url(redis_url)
+    redis_client = async_redis.from_url(redis_url)
     logger.info(f"Connected to Redis: {redis_url}")
 
 @app.on_event("shutdown")
@@ -62,10 +62,19 @@ async def shutdown_event():
 async def send_synthesis_command(command: str, **kwargs) -> Dict:
     """发送命令到synthesis服务"""
     try:
+        if redis_client is None:
+            raise HTTPException(status_code=503, detail="Redis client not initialized")
+        
         command_data = {"command": command}
         command_data.update(kwargs)
         
-        await redis_client.xadd("synthesis:commands", command_data)
+        # 将所有键和值编码为字节串，因为redis.asyncio.Redis.xadd期望字节串
+        # 确保键是字节串，值保持原始类型，让redis-py自动处理值的编码
+        # 将所有键编码为字节串，值保持原始类型（通常是字符串），让redis-py处理值的编码。
+        # 使用 type: ignore 抑制 Pylance 对 redis.asyncio.Redis.xadd 类型提示的误报。
+        encoded_command_data = {k.encode('utf-8'): v for k, v in command_data.items()}
+        
+        await redis_client.xadd(b"synthesis:commands", encoded_command_data)  # type: ignore
         
         return {
             "success": True,
@@ -109,6 +118,8 @@ async def root():
 async def health_check():
     """健康检查端点"""
     try:
+        if redis_client is None:
+            raise HTTPException(status_code=503, detail="Redis client not initialized")
         await redis_client.ping()
         return {"status": "healthy", "redis": "connected", "storage": "json_files"}
     except Exception as e:
@@ -125,6 +136,8 @@ async def get_synthesis_status():
         await asyncio.sleep(2)
         
         # 读取最新状态
+        if redis_client is None:
+            raise HTTPException(status_code=503, detail="Redis client not initialized")
         result = await redis_client.xrevrange("synthesis:status", count=1)
         if result:
             message_id, fields = result[0]

@@ -12,7 +12,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.path_utils import (
+from core.utils.path_utils import (
     get_project_root, 
     get_output_dir, 
     get_trajectories_dir,

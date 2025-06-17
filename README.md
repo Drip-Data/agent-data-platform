@@ -36,8 +36,11 @@ export GEMINI_API_KEY=你的_Gemini_API_Key
 python main.py              # 一条命令启动全部核心组件
 ```
 
-3. 提交测试任务  
+3. 提交测试任务
 ```bash
+# 任务API端口现在是自动分配的，请根据实际启动日志获取端口
+# 默认情况下，Task API 会尝试使用 8000 端口，如果被占用则自动分配
+# 假设Task API运行在 http://localhost:8000 (或自动分配的端口)
 curl -X POST "http://localhost:8000/api/v1/tasks" \
      -H "Content-Type: application/json" \
      -d '{"input": "请计算1+2+...+100的和", "description": "首个测试任务"}'
@@ -46,6 +49,7 @@ curl -X POST "http://localhost:8000/api/v1/tasks" \
 几秒后，你将收到包含 `task_id` 的响应。随后运行：
 
 ```bash
+# 假设Task API运行在 http://localhost:8000 (或自动分配的端口)
 curl http://localhost:8000/api/v1/tasks/<task_id>
 ```
 

@@ -20,7 +20,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.path_utils import get_python_execution_dir
+from core.utils.path_utils import get_python_execution_dir
 
 # Delay matplotlib imports to avoid import errors in other containers
 def _get_matplotlib():
@@ -106,11 +106,18 @@ class PythonExecutorTool:
                 f.write(code)
             
             # 执行代码
+            # 复制当前环境，并移除可能导致SOCKS代理问题的环境变量
+            env = os.environ.copy()
+            for var in ['http_proxy', 'https_proxy', 'all_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'SOCKS_PROXY', 'socks_proxy']:
+                if var in env:
+                    del env[var]
+
             process = await asyncio.create_subprocess_exec(
                 sys.executable, script_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=self.temp_dir
+                cwd=self.temp_dir,
+                env=env # 传递修改后的环境变量
             )
             
             try:
@@ -169,22 +176,26 @@ class PythonExecutorTool:
                 return {"success": False, "error": "Unsupported data type"}
             
             if operation == "describe":
-                result = df.describe()
+                result_obj = df.describe()
+                result_str = result_obj.to_string()
             elif operation == "info":
-                # 使用StringIO而不是list作为缓冲区
                 buffer = StringIO()
                 df.info(buf=buffer)
-                result = buffer.getvalue()
+                result_str = buffer.getvalue()
+                result_obj = None # info方法不返回DataFrame，所以这里设置为None
             elif operation == "head":
-                result = df.head()
+                result_obj = df.head()
+                result_str = result_obj.to_string()
             elif operation == "tail":
-                result = df.tail()
+                result_obj = df.tail()
+                result_str = result_obj.to_string()
             else:
-                result = df
+                result_obj = df
+                result_str = df.to_string()
             
             return {
                 "success": True,
-                "result": result.to_string() if hasattr(result, 'to_string') else str(result),
+                "result": result_str,
                 "data_shape": df.shape,
                 "columns": df.columns.tolist()
             }

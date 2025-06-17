@@ -6,7 +6,7 @@
 import asyncio
 import json
 import logging
-import websockets
+import websockets.legacy.client as websockets_client
 import time
 from typing import Dict, Any, List, Callable, Optional
 
@@ -42,7 +42,7 @@ class RealTimeToolClient:
             try:
                 # 首选 websockets 库客户端
                 try:
-                    self.websocket = await websockets.connect(
+                    self.websocket = await websockets_client.connect(
                         websocket_url,
                         extra_headers={
                             "User-Agent": "Enhanced-Reasoning-Runtime/1.0"
@@ -50,7 +50,7 @@ class RealTimeToolClient:
                     )
                 except TypeError:
                     # 兼容旧版本websockets，不支持 extra_headers
-                    self.websocket = await websockets.connect(websocket_url)
+                    self.websocket = await websockets_client.connect(websocket_url)
             except Exception as ws_err:
                 logger.warning(f"websockets.connect 失败: {ws_err}，尝试使用 aiohttp ClientSession 作为后备方案")
                 try:
@@ -113,7 +113,7 @@ class RealTimeToolClient:
                 except Exception as e:
                     logger.error(f"处理工具事件失败: {e}")
                     
-        except websockets.exceptions.ConnectionClosed:
+        except websockets_client.ConnectionClosed:
             logger.warning("🔌 WebSocket连接已断开")
             self.is_connected = False
             # 尝试重连
@@ -262,26 +262,18 @@ class RealTimeToolClient:
         if fallback_client:
             try:
                 registered_tools = await fallback_client.get_available_tools()
-                if registered_tools and registered_tools.get("available_tools"):
+                # registered_tools 现在是一个工具ID列表
+                if registered_tools:
                     tool_descriptions.append("# 已注册的工具")
-                    for tool in registered_tools["available_tools"]:
-                        tool_id = tool.get("tool_id", "unknown")
-                        name = tool.get("name", tool_id)
-                        tool_type = tool.get("tool_type", "unknown")
-                        description = tool.get("description", f"Tool {name}")
-                        capabilities = tool.get("capabilities", [])
-                        
-                        desc = f"- {tool_id} ({name}): {description}"
-                        if capabilities:
-                            cap_names = []
-                            for cap in capabilities:
-                                if isinstance(cap, dict):
-                                    cap_names.append(cap.get("name", ""))
-                                elif isinstance(cap, str):
-                                    cap_names.append(cap)
-                            if cap_names:
-                                desc += f" (能力: {', '.join(cap_names)})"
-                        desc += f" [{tool_type}类型]"
+                    for tool_id in registered_tools:
+                        # tool_id 现在是字符串，提供正确的操作名称
+                        desc = f"- {tool_id}: 可用工具"
+                        if tool_id == "python-executor-mcp-server" or "python" in tool_id:
+                            desc += " (操作: python_execute, python_analyze, python_visualize, python_install_package)"
+                        elif tool_id == "browser-navigator-mcp-server" or "browser" in tool_id:
+                            desc += " (操作: navigate_to_url, get_page_content, click_element, fill_form)"
+                        elif tool_id == "mcp-search-tool" or "search" in tool_id:
+                            desc += " (操作: analyze_tool_needs, search_and_install_tools)"
                         tool_descriptions.append(desc)
             except Exception as e:
                 logger.error(f"获取已注册工具列表失败: {e}")

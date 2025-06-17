@@ -30,14 +30,14 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 import aiofiles
-import redis
+import redis  # For synchronous operations in threading contexts
 import redis.asyncio as async_redis
 
-from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType
+from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType, LLMInteraction
 from ..llm_client import LLMClient
 from ..toolscore.unified_tool_library import UnifiedToolLibrary
 from ..toolscore.interfaces import ToolType, FunctionToolSpec, ToolCapability
-from ..path_utils import get_output_dir, get_trajectories_dir
+from ..utils.path_utils import get_output_dir, get_trajectories_dir
 
 logger = logging.getLogger(__name__)
 
@@ -578,8 +578,9 @@ class SynthesisService:
         while True:
             try:
                 # 监听synthesis:commands队列，使用$表示从当前最新位置开始读取新消息
-                streams = {"synthesis:commands": "$"}
-                result = await self.redis.xread(streams, count=1, block=5000)  # 5秒超时
+                # 使用 type: ignore 抑制 Pylance 对 redis.asyncio.Redis.xread 类型提示的误报。
+                streams = {b"synthesis:commands": b"$"}
+                result = await self.redis.xread(streams, count=1, block=5000)  # type: ignore # 5秒超时
                 
                 if result:
                     for stream_name, messages in result:
@@ -596,7 +597,8 @@ class SynthesisService:
         """处理队列中现有的待处理命令"""
         try:
             # 读取队列中所有现有命令
-            result = await self.redis.xread({"synthesis:commands": "0"}, count=100)
+            # 使用 type: ignore 抑制 Pylance 对 redis.asyncio.Redis.xread 类型提示的误报。
+            result = await self.redis.xread({b"synthesis:commands": b"0"}, count=100)  # type: ignore
             
             if result:
                 for stream_name, messages in result:
@@ -1060,27 +1062,37 @@ class SynthesisService:
 
             for i, step_data in enumerate(steps_list):
                 logger.debug(f"Processing step {i} for task_id: {data.get('task_id', 'Unknown')}: type={type(step_data)}, content='{str(step_data)[:200]}...'")
-                if not isinstance(step_data, dict):
-                    logger.error(f"Skipping step {i} for task_id: {data.get('task_id', 'Unknown')} due to unexpected format. Expected dict, got {type(step_data)}. Content: {str(step_data)[:200]}")
+                
+                # 处理ExecutionStep对象
+                if hasattr(step_data, 'to_dict'):
+                    # 如果是ExecutionStep对象，直接使用
+                    converted_steps.append(step_data)
                     continue
-
-                # 映射字段名称
-                converted_step = ExecutionStep(
-                    step_id=step_data.get('step_id', 0),
-                    action_type=ActionType(step_data.get('action_type', 'code_generation')), # 确保是ActionType枚举
-                    action_params=step_data.get('action_params', step_data.get('tool_input', {})), # 优先action_params，兼容tool_input
-                    observation=step_data.get('observation', step_data.get('tool_output', '')), # 优先observation，兼容tool_output
-                    success=step_data.get('success', True),
-                    thinking=step_data.get('thinking'),
-                    execution_code=step_data.get('execution_code'),
-                    error_type=ErrorType(step_data['error_type']) if step_data.get('error_type') else None, # 确保是ErrorType枚举
-                    error_message=step_data.get('error_message'),
-                    timestamp=step_data.get('timestamp', time.time()),
-                    duration=step_data.get('duration', 0.0),
-                    # llm_interactions 字段在 ExecutionStep 定义中，但原始数据中可能没有，需要处理
-                    llm_interactions=[LLMInteraction(**interaction_dict) for interaction_dict in step_data.get('llm_interactions', []) if isinstance(interaction_dict, dict)]
-                )
-                converted_steps.append(converted_step)
+                elif isinstance(step_data, str) and step_data.startswith('ExecutionStep('):
+                    # 如果是ExecutionStep的字符串表示，跳过（无法安全解析）
+                    logger.warning(f"Skipping ExecutionStep string representation for step {i} in task_id: {data.get('task_id', 'Unknown')}")
+                    continue
+                elif isinstance(step_data, dict):
+                    # 如果是字典，转换为ExecutionStep对象
+                    converted_step = ExecutionStep(
+                        step_id=step_data.get('step_id', 0),
+                        action_type=ActionType(step_data.get('action_type', 'code_generation')),
+                        action_params=step_data.get('action_params', step_data.get('tool_input', {})),
+                        observation=step_data.get('observation', step_data.get('tool_output', '')),
+                        success=step_data.get('success', True),
+                        thinking=step_data.get('thinking'),
+                        execution_code=step_data.get('execution_code'),
+                        error_type=self._safe_parse_error_type(step_data.get('error_type')), # 确保是ErrorType枚举
+                        error_message=step_data.get('error_message'),
+                        timestamp=step_data.get('timestamp', time.time()),
+                        duration=step_data.get('duration', 0.0),
+                        # llm_interactions 字段在 ExecutionStep 定义中，但原始数据中可能没有，需要处理
+                        llm_interactions=[LLMInteraction(**interaction_dict) for interaction_dict in step_data.get('llm_interactions', []) if isinstance(interaction_dict, dict)]
+                    )
+                    converted_steps.append(converted_step)
+                else:
+                    logger.error(f"Skipping step {i} for task_id: {data.get('task_id', 'Unknown')} due to unexpected format. Expected dict or ExecutionStep, got {type(step_data)}. Content: {str(step_data)[:200]}")
+                    continue
             
             # 创建TrajectoryResult对象
             return TrajectoryResult(
@@ -1091,7 +1103,7 @@ class SynthesisService:
                 success=data.get('success', False),
                 steps=converted_steps,
                 final_result=data.get('final_result', ''),
-                error_type=ErrorType(data['error_type']) if data.get('error_type') else None,
+                error_type=self._safe_parse_error_type(data.get('error_type')),
                 error_message=data.get('error_message'),
                 total_duration=data.get('total_duration', 0.0),
                 metadata=data.get('metadata', {}),
@@ -1102,6 +1114,33 @@ class SynthesisService:
             logger.error(f"Error converting trajectory format: {e}")
             return None
     
+    def _safe_parse_error_type(self, error_type_data) -> Optional[ErrorType]:
+        """安全解析错误类型"""
+        if not error_type_data:
+            return None
+        
+        try:
+            # 如果已经是ErrorType实例
+            if isinstance(error_type_data, ErrorType):
+                return error_type_data
+            
+            # 如果是字符串
+            if isinstance(error_type_data, str):
+                # 处理错误序列化的情况，如 'ErrorType.SYSTEM_ERROR'
+                if error_type_data.startswith('ErrorType.'):
+                    enum_name = error_type_data.replace('ErrorType.', '')
+                    # 将大写转换为小写下划线格式
+                    error_type_value = enum_name.lower()
+                    return ErrorType(error_type_value)
+                else:
+                    # 直接是枚举值
+                    return ErrorType(error_type_data)
+            
+            return None
+        except (ValueError, KeyError):
+            logger.warning(f"无法解析错误类型: {error_type_data}")
+            return None
+    
     async def _extract_essence(self, trajectory: TrajectoryResult) -> Optional[TaskEssence]:
         """使用LLM提取轨迹本质"""
         try:
@@ -1109,7 +1148,8 @@ class SynthesisService:
             prompt = self._build_extraction_prompt(trajectory)
             
             # 调用LLM
-            response = await self.llm_client._call_api(prompt)
+            messages = [{"role": "user", "content": prompt}]
+            response = await self.llm_client._call_api(messages)
             
             # 解析响应
             return self._parse_extraction_response(response, trajectory)
@@ -1624,7 +1664,8 @@ class SynthesisService:
 
 注意：确保生成的任务既保持原有特征，又具有创新性和实用价值。"""
             
-            response = await self.llm_client._call_api(prompt)
+            messages = [{"role": "user", "content": prompt}]
+            response = await self.llm_client._call_api(messages)
             
             # 解析响应
             import re
@@ -1705,7 +1746,7 @@ async def main():
         "synthesis_enabled": os.getenv("SYNTHESIS_ENABLED", "false").lower() == "true",
         "auto_monitor_trajectories": os.getenv("AUTO_MONITOR_TRAJECTORIES", "true").lower() == "true",
         "auto_export_seeds": os.getenv("AUTO_EXPORT_SEEDS", "true").lower() == "true",
-        "vllm_url": os.getenv("VLLM_URL", "http://vllm:8000")
+        # "vllm_url": os.getenv("VLLM_URL", "http://vllm:8000") # 用户不使用vLLM，注释掉此配置
     }
     
     # 输出配置信息

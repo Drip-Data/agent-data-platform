@@ -14,30 +14,25 @@ from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, Execut
 from core.llm_client import LLMClient
 from core.metrics import EnhancedMetrics
 from core.toolscore.mcp_client import MCPToolClient
-from core.path_utils import get_trajectories_dir
-from core.config_manager import get_ports_config
+from core.utils.path_utils import get_trajectories_dir
 from runtimes.reasoning.toolscore_client import ToolScoreClient
 from runtimes.reasoning.real_time_tool_client import RealTimeToolClient
+from core.local_python_executor import LocalPythonExecutor
 
 logger = logging.getLogger(__name__)
 
 class EnhancedReasoningRuntime(RuntimeInterface):
     """增强推理运行时 - 简化版本，专注LLM推理和执行"""
-    def __init__(self):
+    def __init__(self, config_manager, llm_client, toolscore_client, toolscore_websocket_endpoint: Optional[str] = None):
         self._runtime_id = f"enhanced-reasoning-{uuid.uuid4()}"
-        self.config = {
-            'vllm_url': os.getenv('VLLM_URL', 'http://vllm:8000'),
-            'gemini_api_key': os.getenv('GEMINI_API_KEY', ''),
-            'gemini_api_url': os.getenv('GEMINI_API_URL', ''),
-            'provider': 'gemini',
-            'save_individual_trajectories': os.getenv("SAVE_INDIVIDUAL_TRAJECTORIES", "").lower() in ("1", "true", "yes")
-        }
-        self.client = LLMClient(self.config)
+        self.config_manager = config_manager
+        self.client = llm_client
+        self.toolscore_client = toolscore_client
         self.metrics = EnhancedMetrics(port=8003)
         
         # 使用配置管理器获取服务端点
         try:
-            ports_config = get_ports_config()
+            ports_config = self.config_manager.get_ports_config()
             toolscore_http_port = ports_config['mcp_servers']['toolscore_http']['port']
             toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
             logger.info(f"DEBUG: Loaded toolscore_http_port: {toolscore_http_port}, toolscore_mcp_port: {toolscore_mcp_port}")
@@ -50,14 +45,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.warning(f"配置加载失败，使用默认端口: {e}")
             self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
             # 如果配置加载失败，也应该考虑一个更合适的默认MCP WS端口，或者确保环境变量TOOLSCORE_WS_URL被设置
-            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8081') # 默认为8081，与ports_config一致
+            self.toolscore_websocket_endpoint = toolscore_websocket_endpoint or os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8081') # 默认为8081，与ports_config一致
         
         # 轻量级客户端
-        self.toolscore_client = ToolScoreClient(self.toolscore_endpoint)
         self.real_time_client = RealTimeToolClient(self.toolscore_websocket_endpoint)
         
         # 保留MCP客户端用于直接工具调用
-        toolscore_url = os.getenv('TOOLSCORE_URL', 'ws://toolscore:8080/websocket')
+        toolscore_url = os.getenv('TOOLSCORE_URL', f'ws://localhost:{toolscore_mcp_port}/websocket')
         self.mcp_client = MCPToolClient(toolscore_url)
         
         # 等待工具安装的任务
@@ -153,7 +147,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if required_cap.lower() in tool_cap.lower() or tool_cap.lower() in required_cap.lower():
                     return True
         
-            return False
+        return False
             
     async def _periodic_cleanup(self):
         """定期清理过期请求"""
@@ -221,6 +215,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             fallback_client=self.toolscore_client
         )
         logger.info(f"📋 获取到工具描述长度: {len(available_tools_description)} 字符")
+        logger.info(f"📋 工具描述内容预览: {available_tools_description[:500]}...")
+        
+        # 检查是否有可用工具
+        if "暂无可用工具" in available_tools_description or len(available_tools_description.strip()) == 0:
+            logger.warning("⚠️ 检测到暂无可用工具，可能存在工具注册问题")
 
         # === 记录首次暴露给 LLM 的工具集合 ===
         expose_step = ExecutionStep(
@@ -243,17 +242,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             response = await original_call_api(prompt)
             
             from core.interfaces import LLMInteraction
-            interaction = LLMInteraction(
-                provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
-                model=getattr(self.client, 'model', 'unknown'),
-                context="task_requirements_analysis",
-                prompt=prompt,
-                prompt_length=len(prompt),
-                prompt_type="task_analysis",
-                response=response,
-                response_length=len(response),
-                response_time=time.time() - interaction_start
-            )
+            interaction = LLMInteraction()
+            interaction.provider = self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider)
+            interaction.model = getattr(self.client, 'model', 'unknown')
+            interaction.context = "task_requirements_analysis"
+            interaction.prompt = prompt
+            interaction.prompt_length = len(prompt)
+            interaction.prompt_type = "task_analysis"
+            interaction.response = response
+            interaction.response_length = len(response)
+            interaction.response_time = time.time() - interaction_start
             task_analysis_interactions.append(interaction)
             return response
         
@@ -275,9 +273,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
         """### 自动缺口检测 & 修复 ###"""
         try:
-            # 拉取当前已注册工具（字典列表形式）
-            tools_resp = await self.toolscore_client.get_available_tools()
-            current_tools_meta = tools_resp.get("available_tools", [])
+            # 拉取当前已注册工具（列表形式）
+            current_tools_meta = await self.toolscore_client.get_available_tools()
 
             gap_result = await self.toolscore_client.analyze_tool_gap(
                 task_description=task.description,
@@ -312,9 +309,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         # 判断是否已满足能力
                         fresh_tools = await self.toolscore_client.get_available_tools()
                         fresh_caps_ok = False
-                        for tool in fresh_tools.get("available_tools", []):
-                            caps = [c.get("name") if isinstance(c, dict) else c for c in tool.get("capabilities", [])]
-                            if any(any(mc.lower() in (cap or "").lower() for cap in caps) for mc in missing_caps):
+                        # fresh_tools 现在是一个工具名称列表
+                        for tool_id in fresh_tools:
+                            # 简单检查工具名称是否包含所需能力
+                            if any(mc.lower() in tool_id.lower() for mc in missing_caps):
                                 fresh_caps_ok = True
                                 break
                         if fresh_caps_ok:
@@ -352,17 +350,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 
                 # 记录LLM交互
                 from core.interfaces import LLMInteraction
-                interaction = LLMInteraction(
-                    provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
-                    model=getattr(self.client, 'model', 'unknown'),
-                    context=f"step_{step_id}_reasoning",
-                    prompt=prompt,
-                    prompt_length=len(prompt),
-                    prompt_type="task_execution",
-                    response=response,
-                    response_length=len(response),
-                    response_time=time.time() - interaction_start
-                )
+                interaction = LLMInteraction()
+                interaction.provider = self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider)
+                interaction.model = getattr(self.client, 'model', 'unknown')
+                interaction.context = f"step_{step_id}_reasoning"
+                interaction.prompt = prompt
+                interaction.prompt_length = len(prompt)
+                interaction.prompt_type = "task_execution"
+                interaction.response = response
+                interaction.response_length = len(response)
+                interaction.response_time = time.time() - interaction_start
                 current_step_llm_interactions.append(interaction)
                 return response
             
@@ -374,8 +371,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 serializable_steps = [s.to_dict() if hasattr(s, 'to_dict') else s.__dict__ for s in steps]
                 
                 # 获取已注册工具ID列表和描述
-                registered_tools = await self.toolscore_client.get_available_tools()
-                available_tool_ids = [tool.get('tool_id') for tool in registered_tools.get('available_tools', [])]
+                available_tool_ids = await self.toolscore_client.get_available_tools()
+                # available_tool_ids现在是一个工具ID列表
                 available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
                     fallback_client=self.toolscore_client
                 )
@@ -423,17 +420,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         response = await original_call_api_complete(prompt)
                         
                         from core.interfaces import LLMInteraction
-                        interaction = LLMInteraction(
-                            provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
-                            model=getattr(self.client, 'model', 'unknown'),
-                            context=f"step_{step_id}_complete_task_summary",
-                            prompt=prompt,
-                            prompt_length=len(prompt),
-                            prompt_type="complete_task_summary",
-                            response=response,
-                            response_length=len(response),
-                            response_time=time.time() - interaction_start
-                        )
+                        interaction = LLMInteraction()
+                        interaction.provider = self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider)
+                        interaction.model = getattr(self.client, 'model', 'unknown')
+                        interaction.context = f"step_{step_id}_complete_task_summary"
+                        interaction.prompt = prompt
+                        interaction.prompt_length = len(prompt)
+                        interaction.prompt_type = "complete_task_summary"
+                        interaction.response = response
+                        interaction.response_length = len(response)
+                        interaction.response_time = time.time() - interaction_start
                         complete_summary_interactions.append(interaction)
                         return response
                     
@@ -512,8 +508,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             )
                             
                             # 更新工具列表
-                            registered_tools = await self.toolscore_client.get_available_tools()
-                            available_tool_ids = [tool.get('tool_id') for tool in registered_tools.get('available_tools', [])]
+                            available_tool_ids = await self.toolscore_client.get_available_tools()
                             available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
                                 fallback_client=self.toolscore_client
                             )
@@ -607,117 +602,49 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     logger.info(f"🔧 执行工具调用: tool_id={tool_id}, action={action}")
                     logger.debug(f"Attempt {attempt + 1}: Executing action '{action}' with tool_id '{tool_id}'")
                     
-                    # 🔍 首先尝试通过ToolScore API执行工具
+                    # 清理参数
+                    cleaned_params = {k: v for k, v in params.items()
+                                    if k not in ['action', 'tool_id', 'tool']}
+
+                    # 优先尝试直接通过MCP客户端调用 python-executor-mcp-server
+                    # 🔍 统一通过ToolScore HTTP API执行所有工具
                     try:
-                        # 清理参数
-                        cleaned_params = {k: v for k, v in params.items() 
-                                        if k not in ['action', 'tool_id', 'tool']}
+                        logger.info(f"🌐 通过ToolScore HTTP API执行工具: {tool_id}/{action}")
                         
-                        logger.info(f"🌐 通过ToolScore API执行工具: {tool_id}/{action}")
-                        
-                        # 调用ToolScore的工具执行API
                         execution_result = await self.toolscore_client.execute_tool(
                             tool_id=tool_id,
                             action=action,
                             parameters=cleaned_params
                         )
                         
-                        if execution_result.get("success"):
-                            tool_success = True
-                            result_data = execution_result.get("result", {})
-                            
-                            # 处理执行结果
-                            if isinstance(result_data, dict):
-                                if result_data.get("stdout"):
-                                    output = result_data["stdout"].strip()
-                                    observation = f"工具 '{tool_id}/{action}' 执行成功。输出: {output[:300]}{'...' if len(output) > 300 else ''}"
-                                    current_outputs.append(output)
+                        tool_success = execution_result.get('success', False)
+                        
+                        if tool_success:
+                            result_data = execution_result.get('result', {})
+                            if tool_id == 'python-executor-mcp-server' and isinstance(result_data, dict):
+                                stdout = result_data.get('stdout', '').strip()
+                                if stdout:
+                                    observation = f"Python代码执行成功。输出:\n{stdout[:200]}{'...' if len(stdout) > 200 else ''}"
+                                    current_outputs.append(stdout)
                                 else:
-                                    observation = f"工具 '{tool_id}/{action}' 执行成功。"
+                                    observation = "Python代码执行成功，无输出。"
                             else:
-                                output_str = str(result_data)
-                                observation = f"工具 '{tool_id}/{action}' 执行成功。结果: {output_str[:300]}{'...' if len(output_str) > 300 else ''}"
-                                current_outputs.append(output_str)
-                                
-                            logger.info(f"✅ 工具执行成功: {tool_id}")
-                            
+                                observation = f"工具执行成功: {str(result_data)[:200]}{'...' if len(str(result_data)) > 200 else ''}"
+                                current_outputs.append(str(result_data))
                         else:
-                            # ToolScore执行失败，尝试直接MCP调用
-                            error_msg = execution_result.get("message", "执行失败")
-                            logger.warning(f"ToolScore执行失败: {error_msg}，尝试直接MCP调用")
-                            
-                            # 映射工具ID到实际的MCP服务器ID
-                            actual_server_id = self._map_tool_id_to_server(tool_id)
-                            
-                            logger.info(f"🔧 直接调用MCP服务器: {actual_server_id}, 动作: {action}")
-                            
-                            # 调用MCP客户端
-                            result = await self.mcp_client.execute_tool(actual_server_id, action, cleaned_params)
-                            tool_success = result.success
-                            
-                            # 处理结果 - 修复数据截断问题
-                            if tool_success and result.data:
-                                # 安全处理响应数据，避免截断
-                                try:
-                                    if isinstance(result.data, dict):
-                                        # 对于字典类型，生成简化但完整的观察结果
-                                        data_summary = {}
-                                        for key, value in result.data.items():
-                                            if isinstance(value, (str, int, float, bool)):
-                                                data_summary[key] = value
-                                            elif isinstance(value, dict):
-                                                # 嵌套字典，只保留关键字段
-                                                data_summary[key] = {k: v for k, v in list(value.items())[:3]}
-                                            elif isinstance(value, list):
-                                                # 列表，只保留长度信息
-                                                data_summary[key] = f"List[{len(value)} items]"
-                                            else:
-                                                data_summary[key] = str(type(value).__name__)
-                                        
-                                        observation = f"Tool '{tool_id}/{action}' executed successfully. Summary: {json.dumps(data_summary, ensure_ascii=False)}"
-                                    else:
-                                        # 对于非字典类型，转换为字符串并限制长度
-                                        data_str = str(result.data)
-                                        if len(data_str) > 500:
-                                            data_str = data_str[:500] + "...[truncated]"
-                                        observation = f"Tool '{tool_id}/{action}' executed successfully. Data: {data_str}"
-                                    
-                                except Exception as e:
-                                    logger.warning(f"Error processing tool result: {e}")
-                                    observation = f"Tool '{tool_id}/{action}' executed successfully, but response processing failed: {str(e)}"
-                                
-                                # 根据工具类型生成特定的观察结果
-                                if 'python' in actual_server_id.lower():
-                                    if isinstance(result.data, dict):
-                                        stdout = result.data.get('stdout', '').strip()
-                                        if stdout:
-                                            observation = f"Python代码执行成功。输出:\n{stdout[:200]}{'...' if len(stdout) > 200 else ''}"
-                                            current_outputs.append(stdout)
-                                        else:
-                                            observation = "Python代码执行成功，无输出。"
-                                    elif 'browser' in actual_server_id.lower():
-                                        if isinstance(result.data, dict):
-                                            url = result.data.get('url', 'N/A')
-                                            title = result.data.get('title', 'N/A')
-                                            observation = f"浏览器操作成功。当前页面: {url}, 标题: {title}"
-                                            
-                                            if action == 'browser_get_text':
-                                                text = result.data.get('text', '')
-                                                if text:
-                                                    preview = text[:300] + ('...' if len(text) > 300 else '')
-                                                    observation += f"\n页面内容预览:\n{preview}"
-                            else:
-                                if tool_success:
-                                    observation = f"Tool '{tool_id}/{action}' executed successfully."
-                                else:
-                                    observation = f"Tool '{tool_id}/{action}' execution failed: {result.error_message or 'Unknown error'}"
-
+                            error_msg = execution_result.get('error', 'Unknown error')
+                            observation = f"工具执行失败: {error_msg}"
+                            current_attempt_err_type = ErrorType.TOOL_ERROR
+                            current_attempt_err_msg = error_msg
+                        
+                        logger.info(f"✅ 工具执行完成: {tool_id}, 成功: {tool_success}")
+                    
                     except Exception as e:
                         logger.error(f"工具执行异常: {e}")
                         tool_success = False
                         current_attempt_err_type = ErrorType.TOOL_ERROR
                         current_attempt_err_msg = str(e)
-                        observation = f"工具 '{tool_id}' 执行失败: {str(e)}"
+                        observation = f"工具执行失败: {str(e)}"
 
                 else:
                     # 无效的工具调用
@@ -786,17 +713,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 response = await original_call_api(prompt)
                 
                 from core.interfaces import LLMInteraction
-                interaction = LLMInteraction(
-                    provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
-                    model=getattr(self.client, 'model', 'unknown'),
-                    context=f"step_{step_id}_completion_check",
-                    prompt=prompt,
-                    prompt_length=len(prompt),
-                    prompt_type="completion_check",
-                    response=response,
-                    response_length=len(response),
-                    response_time=time.time() - interaction_start
-                )
+                interaction = LLMInteraction()
+                interaction.provider = self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider)
+                interaction.model = getattr(self.client, 'model', 'unknown')
+                interaction.context = f"step_{step_id}_completion_check"
+                interaction.prompt = prompt
+                interaction.prompt_length = len(prompt)
+                interaction.prompt_type = "completion_check"
+                interaction.response = response
+                interaction.response_length = len(response)
+                interaction.response_time = time.time() - interaction_start
                 completion_interactions.append(interaction)
                 return response
             
@@ -868,17 +794,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         response = await original_call_api(prompt)
                         
                         from core.interfaces import LLMInteraction
-                        interaction = LLMInteraction(
-                            provider=self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider),
-                            model=getattr(self.client, 'model', 'unknown'),
-                            context="final_task_summary",
-                            prompt=prompt,
-                            prompt_length=len(prompt),
-                            prompt_type="task_summary",
-                            response=response,
-                            response_length=len(response),
-                            response_time=time.time() - interaction_start
-                        )
+                        interaction = LLMInteraction()
+                        interaction.provider = self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider)
+                        interaction.model = getattr(self.client, 'model', 'unknown')
+                        interaction.context = "final_task_summary"
+                        interaction.prompt = prompt
+                        interaction.prompt_length = len(prompt)
+                        interaction.prompt_type = "task_summary"
+                        interaction.response = response
+                        interaction.response_length = len(response)
+                        interaction.response_time = time.time() - interaction_start
                         summary_interactions.append(interaction)
                         return response
                     
@@ -999,17 +924,3 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         if self.mcp_client:
             await self.mcp_client.cleanup()
 
-# 运行服务
-if __name__ == '__main__':
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    
-    async def main():
-        runtime = EnhancedReasoningRuntime()
-        await runtime.initialize()
-        
-        from core.task_manager import start_runtime_service
-        # 启动服务
-        await start_runtime_service(runtime)
-    
-    asyncio.run(main())

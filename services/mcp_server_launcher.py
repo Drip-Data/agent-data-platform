@@ -2,44 +2,69 @@ import logging
 import os
 import threading
 import subprocess
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any # 导入Any
 import time
 import json
+import socket # 导入socket模块
+from core.config_manager import ConfigManager # 导入ConfigManager
 
 logger = logging.getLogger(__name__)
 
 # 全局变量
-mcp_servers = []
-mcp_processes = {}
-server_statuses = {}
+mcp_servers: List[str] = []
+mcp_processes: Dict[str, subprocess.Popen] = {}
+server_statuses: Dict[str, Dict[str, Any]] = {}
+_config_manager: Optional[ConfigManager] = None # 新增一个私有变量来存储ConfigManager实例
 
-def initialize(config: Optional[Dict] = None):
+def find_available_port(start_port: int, end_port: int) -> Optional[int]:
+    """
+    在指定范围内查找一个可用的端口。
+    """
+    for port in range(start_port, end_port + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("0.0.0.0", port))
+                return port
+            except OSError:
+                continue
+    return None
+
+def initialize(config_manager: ConfigManager):
     """初始化MCP服务器启动器"""
-    global mcp_servers
+    global mcp_servers, _config_manager
     
-    if config is None:
-        config = {}
+    _config_manager = config_manager # 存储ConfigManager实例
     
     logger.info("正在初始化MCP服务器启动器...")
     
-    # 从环境变量或配置中获取MCP服务器列表
-    mcp_servers_env = os.getenv('MCP_SERVERS', '')
-    mcp_servers_config = config.get('MCP_SERVERS', [])
-    
-    if mcp_servers_env:
-        # 从环境变量解析服务器列表
-        mcp_servers = mcp_servers_env.split(',')
-    elif mcp_servers_config:
-        # 从配置中获取服务器列表
-        mcp_servers = mcp_servers_config
-    else:
-        # 默认服务器列表
+    # 从ConfigManager加载运行时配置，获取MCP服务器列表
+    try:
+        routing_config = _config_manager.load_routing_config()
+        # 假设运行时配置中包含mcp_servers的列表
+        # 这里需要根据实际的routing_config结构来获取mcp_servers
+        # 暂时先使用一个默认的逻辑，后续根据实际配置调整
         mcp_servers = [
-            'python_executor_server',  # Changed hyphen to underscore
-            'browser_navigator_server' # Changed hyphen to underscore
+            runtime_name for runtime_name, runtime_config in routing_config.runtimes.items()
+            if "mcp_server" in runtime_config.capabilities # 假设通过capabilities判断是否是mcp_server
+        ]
+        # 确保包含python_executor_server和browser_navigator_server
+        if "python_executor_server" not in mcp_servers:
+            mcp_servers.append("python_executor_server")
+        if "browser_navigator_server" not in mcp_servers:
+            mcp_servers.append("browser_navigator_server")
+        # 添加 search_tool_server
+        if "search_tool_server" not in mcp_servers:
+            mcp_servers.append("search_tool_server")
+
+    except Exception as e:
+        logger.warning(f"从ConfigManager加载MCP服务器列表失败: {e}，使用默认列表")
+        mcp_servers = [
+            'python_executor_server',
+            'browser_navigator_server',
+            'search_tool_server' # 添加 search_tool_server 到默认列表
         ]
     
-    logger.info(f"MCP服务器启动器初始化完成，配置了 {len(mcp_servers)} 个服务器")
+    logger.info(f"MCP服务器启动器初始化完成，配置了 {len(mcp_servers)} 个服务器: {mcp_servers}")
 
 def start():
     """启动所有MCP服务器"""
@@ -57,28 +82,29 @@ def start():
     
     # 遍历所有服务器并启动
     for server_name in mcp_servers:
-        _start_server(server_name)
+        _start_server(server_name) # _start_server现在可以访问_config_manager
     
     logger.info(f"已启动 {len(mcp_processes)} 个MCP服务器")
 
-def _start_server(server_name):
+def _start_server(server_name: str):
     """启动单个MCP服务器"""
     global mcp_processes, server_statuses
     
+    if _config_manager is None:
+        logger.error("ConfigManager未初始化，无法启动MCP服务器")
+        server_statuses[server_name] = {'status': 'error', 'message': 'ConfigManager not initialized'}
+        return
+
     logger.info(f"正在启动MCP服务器: {server_name}")
     
     # 构建服务器目录路径
-    mcp_servers_dir_env = os.getenv('MCP_SERVERS_DIR', './mcp_servers')
-    # server_dir_relative is the path as constructed, potentially relative
-    server_dir_relative = os.path.join(mcp_servers_dir_env, server_name)
-    # server_dir_absolute is the canonical absolute path we'll use for checks and operations
-    server_dir_absolute = os.path.abspath(server_dir_relative)
+    # 假设mcp_servers都在项目根目录下的mcp_servers目录中
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    server_dir_absolute = os.path.join(project_root, 'mcp_servers', server_name)
 
-    # 调试日志，输出环境变量、CWD、路径信息
+    # 调试日志，输出CWD、路径信息
     logger.debug(f"[MCP启动器] 当前工作目录: {os.getcwd()}")
-    logger.debug(f"[MCP启动器] MCP_SERVERS_DIR 环境变量: {mcp_servers_dir_env}")
     logger.debug(f"[MCP启动器] server_name: {server_name}")
-    logger.debug(f"[MCP启动器] server_dir (相对构造): {server_dir_relative}")
     logger.debug(f"[MCP启动器] server_dir (绝对用于操作): {server_dir_absolute}")
 
     # More detailed checks for the absolute path
@@ -121,9 +147,9 @@ def _start_server(server_name):
         return
     
     try:
+        env = os.environ.copy() # 将env初始化移到try块的开头
+        
         # Determine the project root to add to PYTHONPATH
-        # server_dir_absolute is like D:\Code\Agent_mcp_dev\agent-data-platform\mcp_servers\python_executor_server
-        # Project root is two levels up from server_dir_absolute
         project_root_for_pythonpath = os.path.abspath(os.path.join(server_dir_absolute, '..', '..'))
         logger.debug(f"[MCP启动器] Setting PYTHONPATH for subprocess to: {project_root_for_pythonpath}")
         
@@ -132,14 +158,60 @@ def _start_server(server_name):
             cmd = ['sh', start_script] # start_script is now absolute
         else:
             # 对于Python脚本，使用模块格式运行
-            # 将绝对路径转换为相对于项目根目录的模块路径
             relative_script_path = os.path.relpath(start_script, project_root_for_pythonpath)
             module_path_parts = list(os.path.splitext(relative_script_path)[0].split(os.sep))
             module_str = ".".join(module_path_parts)
+            
+            ports_config = _config_manager.get_ports_config()
+            server_config = None
+            # 尝试从ports_config中找到对应服务器的配置
+            if 'mcp_servers' in ports_config:
+                for key, value in ports_config['mcp_servers'].items():
+                    # 移除 '_server' 后缀进行匹配
+                    normalized_server_name = server_name.replace('_server', '')
+                    if normalized_server_name == key:
+                        if isinstance(value, dict):
+                            server_config = value
+                            break
+            
             cmd = ['python', '-m', module_str]
+            
+            # 处理端口分配逻辑
+            if server_config and server_config.get('auto_start', True): # 默认auto_start为True
+                port_management_config = ports_config.get('port_management', {})
+                auto_detect = port_management_config.get('auto_detect', False)
+                
+                target_port = server_config.get('port')
+                
+                # 无论auto_detect是否为True，都优先使用配置文件中指定的端口
+                if target_port:
+                    logger.info(f"[MCP启动器] 为 {server_name} 使用配置文件指定端口: {target_port}")
+                elif auto_detect:
+                    # 如果配置文件中没有指定端口，并且启用了自动检测，则查找可用端口
+                    start_range = port_management_config.get('port_range_start', 8088)
+                    end_range = port_management_config.get('port_range_end', 8200)
+                    
+                    available_port = find_available_port(start_range, end_range)
+                    if available_port:
+                        target_port = available_port
+                        logger.info(f"[MCP启动器] 为 {server_name} 动态分配端口: {target_port}")
+                    else:
+                        logger.warning(f"[MCP启动器] 未能为 {server_name} 找到可用端口，将不设置端口环境变量。")
+                
+                if target_port:
+                    # 将端口作为环境变量传递给子进程
+                    # 不同的MCP服务器可能通过不同的环境变量名获取端口
+                    # 这里根据server_name动态设置环境变量名
+                    env_var_name = f"{server_name.upper()}_PORT"
+                    env[env_var_name] = str(target_port)
+                    logger.debug(f"[MCP启动器] 设置环境变量 {env_var_name}={target_port} 给 {server_name}")
+                else:
+                    logger.warning(f"[MCP启动器] {server_name} 没有配置端口，也未能动态分配。")
+            else:
+                logger.info(f"[MCP启动器] {server_name} 未配置 auto_start 或 auto_start 为 false，跳过端口分配。")
+            
             logger.debug(f"[MCP启动器] 使用模块格式启动: python -m {module_str}")
-
-        env = os.environ.copy()
+ 
         current_pythonpath = env.get('PYTHONPATH')
         if current_pythonpath:
             env['PYTHONPATH'] = f"{project_root_for_pythonpath}{os.pathsep}{current_pythonpath}"
