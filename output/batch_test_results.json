@@ -1,0 +1,20 @@
+{
+  "test_time": "2025-06-17T15:52:57.270444",
+  "total_tasks": 1,
+  "successful_tasks": 1,
+  "failed_tasks": 0,
+  "results": [
+    {
+      "task_id": "b6373276-b439-4048-87fc-aa4a86af7cda",
+      "original_task_id": "new_test",
+      "description": "请计算1+2+...+150的和的2次方",
+      "status": "completed",
+      "success": true,
+      "final_result": "任务完成。生成结果：\n128255625\n128255625",
+      "error_message": null,
+      "total_duration": 107.96331906318665,
+      "submit_time": "2025-06-17T15:51:07.378051",
+      "complete_time": "2025-06-17T15:52:57.252292"
+    }
+  ]
+}

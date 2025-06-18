@@ -41,6 +41,35 @@ from services import (
 )
 
 from core.utils.path_utils import ensure_output_structure
+import subprocess
+
+def cleanup_ports():
+    """清理可能被占用的端口"""
+    ports = [8088, 8089, 8090, 8091, 8092, 5555, 8081, 8082, 8080]
+    
+    print("🧹 开始清理端口...")
+    for port in ports:
+        try:
+            result = subprocess.run(
+                ['lsof', '-ti', f':{port}'], 
+                capture_output=True, text=True, timeout=5
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    try:
+                        subprocess.run(['kill', '-9', pid], timeout=3, check=False)
+                        print(f"🔥 清理端口 {port} 的进程 {pid}")
+                    except Exception as e:
+                        print(f"⚠️ 清理进程 {pid} 失败: {e}")
+            else:
+                print(f"✅ 端口 {port} 空闲")
+                
+        except Exception as e:
+            print(f"⚠️ 检查端口 {port} 时出错: {e}")
+    
+    print("✅ 端口清理完成")
 
 # 创建必要的目录结构
 ensure_output_structure()
@@ -182,6 +211,9 @@ def setup_signal_handlers(service_manager):
 
 async def main_async():
     """异步主函数，应用入口点"""
+    # 启动前先清理端口
+    cleanup_ports()
+    
     logger.info("=== Agent Data Platform 启动中 ===")
     
     args = parse_arguments()

@@ -1,6 +1,6 @@
 # Agent Data Platform
 
-🚀 **智能代理数据平台** - 基于MCP协议的企业级AI任务执行与学习框架
+🚀 **智能代理数据平台** - 基于MCP协议的企业级AI任务执行与学习框架，现已集成**MicroSandbox安全执行环境**
 
 ---
 
@@ -14,7 +14,7 @@
 - **🔧 工具生态**: 基于MCP协议的可扩展工具服务器架构  
 - **📚 轨迹学习**: 从执行轨迹中学习并生成新的训练任务
 - **⚡ 高性能**: Redis驱动的异步任务队列和并发处理
-- **🔒 安全执行**: 沙箱化代码执行环境，确保系统安全
+- **🔒 安全执行**: **MicroSandbox**沙箱化代码执行环境，确保系统安全
 - **📊 全链路追踪**: 完整的任务执行轨迹记录和分析
 - **🌐 标准化接口**: RESTful API和WebSocket支持
 
@@ -29,9 +29,9 @@
 ├─────────────────────────────────────────────────────────────────┤
 │              ToolScore System (统一工具管理)                    │
 ├─────────────────────────────────────────────────────────────────┤
-│  Python      │  Browser      │  Search       │  Custom MCP     │
-│  Executor    │  Navigator    │  Tool         │  Servers        │
-│  Server      │  Server       │  Server       │                 │
+│  MicroSandbox │  Browser      │  Search       │  Custom MCP     │
+│  Server       │  Navigator    │  Tool         │  Servers        │
+│  (安全执行)   │  Server       │  Server       │                 │
 ├─────────────────────────────────────────────────────────────────┤
 │         Redis队列 & 配置管理 & 监控系统                        │
 └─────────────────────────────────────────────────────────────────┘
@@ -47,64 +47,146 @@
 - **Redis**: 6.0+ (用于任务队列和缓存)
 - **内存**: 最少 4GB (推荐 8GB+)
 - **操作系统**: Linux/macOS/Windows (Linux 生产环境推荐)
+- **Docker**: 可选，用于MicroSandbox容器化执行
 
 ### 🚀 一键启动
 
+#### 第一步：克隆仓库和基础安装
 ```bash
 # 1. 克隆仓库
 git clone <your-repo-url>
 cd agent-data-platform
 
-# 2. 安装依赖
+# 2. 创建虚拟环境 (推荐)
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# 或 venv\Scripts\activate  # Windows
+
+# 3. 安装基础依赖
 pip install -r requirements.txt
+```
 
-# 3. 启动Redis (如果尚未运行)
-# macOS: brew services start redis
-# Ubuntu: sudo systemctl start redis-server
-# Windows: 手动启动 Redis 服务
+#### 第二步：安装MicroSandbox (必需)
+```bash
+# 安装MicroSandbox - 安全代码执行环境
+pip install microsandbox
 
-# 4. 配置环境变量
-export GEMINI_API_KEY=your_gemini_api_key_here
-# 可选: export OPENAI_API_KEY=your_openai_key (作为备用)
+# 验证安装
+python -c "from microsandbox import PythonSandbox; print('✅ MicroSandbox安装成功')"
+```
 
-# 5. 启动平台 (所有服务将自动启动)
+#### 第三步：启动Redis服务
+```bash
+# macOS (使用Homebrew)
+brew install redis
+brew services start redis
+
+# Ubuntu/Debian
+sudo apt update
+sudo apt install redis-server
+sudo systemctl start redis-server
+sudo systemctl enable redis-server
+
+# Windows
+# 下载并安装Redis for Windows，或使用WSL
+
+# 验证Redis运行
+redis-cli ping  # 应该返回 PONG
+```
+
+#### 第四步：配置环境变量
+```bash
+# 创建环境变量文件
+cat > .env << EOF
+# 必需的API密钥
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# 可选配置
+OPENAI_API_KEY=your_openai_api_key  # 备用LLM
+REDIS_URL=redis://localhost:6379    # Redis连接
+LOG_LEVEL=INFO                      # 日志级别
+EOF
+
+# 加载环境变量
+source .env  # Linux/macOS
+# 或手动设置: export GEMINI_API_KEY=your_key
+```
+
+#### 第五步：启动平台
+```bash
+# 启动所有服务 (会自动清理端口并启动)
 python main.py
+
+# 查看启动日志，确保所有服务正常
+# 应该看到类似输出：
+# ✅ 端口清理完成
+# === Agent Data Platform 启动中 ===
+# ✅ ToolScore服务已就绪
+# ✅ MicroSandbox MCP服务器启动成功
+# ✅ 所有服务已启动
 ```
 
-### 🧪 提交测试任务
+### 🧪 验证安装和提交测试任务
 
+#### 检查系统健康状态
 ```bash
-# 等待服务启动完成 (通常 10-30 秒)
-# 查看启动日志获取 Task API 端口 (通常是 8000)
+# 等待服务完全启动 (通常 15-30 秒)
+sleep 20
 
-# 示例任务 1: 数学计算
+# 检查核心服务
+curl http://localhost:8000/health
+# 期望输出: {"status":"healthy","redis":"connected"}
+
+# 检查ToolScore服务
+curl http://localhost:8088/health
+# 期望输出: 健康状态信息
+```
+
+#### 提交测试任务
+
+**示例1：基础计算任务**
+```bash
 curl -X POST "http://localhost:8000/api/v1/tasks" \
      -H "Content-Type: application/json" \
      -d '{
+       "task_type": "code",
+       "input": "请使用microsandbox执行: print(\"Hello, MicroSandbox!\")",
+       "priority": "high"
+     }'
+
+# 期望输出: {"task_id": "xxx-xxx-xxx", "status": "queued", ...}
+```
+
+**示例2：数学计算任务**
+```bash
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "reasoning",
        "input": "计算1到100的平方和",
-       "description": "数学计算任务"
+       "priority": "medium"
      }'
+```
 
-# 示例任务 2: 代码生成
+**示例3：代码生成任务**
+```bash
 curl -X POST "http://localhost:8000/api/v1/tasks" \
      -H "Content-Type: application/json" \
      -d '{
-       "input": "创建一个Python函数，实现快速排序算法",
-       "description": "代码生成任务"
+       "task_type": "code", 
+       "input": "创建一个Python函数实现快速排序算法，并在microsandbox中测试",
+       "priority": "medium"
      }'
-
-# 查看任务结果 (使用返回的 task_id)
-curl "http://localhost:8000/api/v1/tasks/{task_id}"
 ```
 
-### 📊 批量测试
-
+#### 查看任务结果
 ```bash
-# 运行预定义的测试任务集
-python scripts/batch_test_tasks.py --tasks-file tasks.jsonl
+# 使用上述返回的task_id查看结果
+TASK_ID="your-task-id-here"
+curl "http://localhost:8000/api/v1/tasks/${TASK_ID}"
 
-# 验证系统健康状态
-python test_system_validation.py
+# 查看任务状态变化
+watch -n 2 "curl -s http://localhost:8000/api/v1/tasks/${TASK_ID} | jq '.status'"
 ```
 
 ---
@@ -114,34 +196,79 @@ python test_system_validation.py
 ### 🔧 核心组件
 
 #### 1. **Task API Service** (任务接口服务)
-- **端口**: 8000 (自动分配)
+- **端口**: 8000
 - **功能**: RESTful API，任务提交、状态查询、结果获取
 - **特性**: 支持并发请求、实时状态更新、错误处理
+- **API端点**:
+  - `POST /api/v1/tasks` - 提交新任务
+  - `GET /api/v1/tasks/{task_id}` - 查看任务状态
+  - `GET /health` - 健康检查
 
 #### 2. **Enhanced Reasoning Runtime** (增强推理运行时)
 - **作用**: 统一任务执行引擎，处理所有类型任务
 - **能力**: LLM推理、工具调用、多步工作流编排
 - **特性**: 智能工具选择、错误恢复、轨迹记录
+- **集成**: 与MicroSandbox无缝集成，确保安全执行
 
 #### 3. **ToolScore System** (工具评分系统)
 - **端口**: 8089 (WebSocket), 8088 (HTTP监控)
 - **功能**: 统一工具管理、动态工具注册、能力匹配
 - **特性**: 实时工具发现、负载均衡、健康检查
 
-#### 4. **Synthesis System** (合成学习系统)
+#### 4. **MicroSandbox Integration** (MicroSandbox集成) 🆕
+- **端口**: 8090
+- **功能**: 安全的Python代码执行环境
+- **特性**: 
+  - 容器化沙箱执行
+  - 会话管理和状态保持
+  - 包安装和依赖管理
+  - 超时和资源限制
+- **安全性**: 完全隔离的执行环境，防止恶意代码
+
+#### 5. **Synthesis System** (合成学习系统)
 - **功能**: 轨迹分析、模式提取、种子任务生成
 - **特性**: 自动学习、任务合成、质量评估
 - **输出**: 新的训练任务和改进建议
 
 ### 🛠️ MCP 工具服务器
 
-#### Python Executor Server (端口: 8081)
+#### MicroSandbox Server (端口: 8090) 🆕
 ```python
 # 支持的工具
-- python_execute: 安全的Python代码执行
-- python_analyze: 代码静态分析
-- python_visualize: 数据可视化
-- python_install_package: 动态包安装
+- microsandbox_execute: 安全的Python代码执行
+- microsandbox_install_package: 在沙箱中安装Python包
+- microsandbox_list_sessions: 列出活跃的执行会话
+- microsandbox_close_session: 关闭指定会话
+- microsandbox_cleanup_expired: 清理过期会话
+```
+
+**使用示例**:
+```python
+# 简单代码执行
+{
+  "action": "microsandbox_execute",
+  "parameters": {
+    "code": "print('Hello from secure sandbox!')"
+  }
+}
+
+# 会话化执行 (保持状态)
+{
+  "action": "microsandbox_execute", 
+  "parameters": {
+    "code": "x = 42; print(f'Variable x = {x}')",
+    "session_id": "my-session"
+  }
+}
+
+# 安装包并使用
+{
+  "action": "microsandbox_install_package",
+  "parameters": {
+    "package_name": "numpy",
+    "session_id": "data-analysis"
+  }
+}
 ```
 
 #### Browser Navigator Server (端口: 8082)
@@ -173,8 +300,8 @@ python test_system_validation.py
 ▼
 ┌─────────────────┐    ┌──────────────┐    ┌─────────────────┐
 │ Enhanced        │ -> │ ToolScore    │ -> │ MCP Servers     │
-│ Reasoning       │    │ System       │    │ (Python/Web/... )│
-│ Runtime         │    │              │    │                 │
+│ Reasoning       │    │ System       │    │ (MicroSandbox   │
+│ Runtime         │    │              │    │  Browser/Search)│
 └─────────────────┘    └──────────────┘    └─────────────────┘
           │
           ▼
@@ -188,7 +315,7 @@ python test_system_validation.py
 
 ## 🚀 部署与配置
 
-### 📁 配置文件说明
+### 📁 核心配置文件
 
 #### `config/llm_config.yaml` - LLM配置
 ```yaml
@@ -197,23 +324,46 @@ providers:
   gemini:
     model: "gemini-2.5-flash-preview-05-20"
     api_key_env: "GEMINI_API_KEY"
+    max_tokens: 8192
+    temperature: 0.7
   openai:
-    model: "gpt-4"
+    model: "gpt-4o"
     api_key_env: "OPENAI_API_KEY"
+    max_tokens: 4096
+    temperature: 0.7
 ```
 
 #### `config/ports_config.yaml` - 端口配置
 ```yaml
-services:
-  task_api: 8000
-  redis: 6379
-  
+core_services:
+  task_api:
+    port: 8000
+    description: "任务提交和查询API"
+  redis:
+    port: 6379
+    description: "Redis任务队列和缓存"
+    
 mcp_servers:
-  toolscore_mcp: 8089
-  toolscore_http: 8088
-  python_executor: 8081
-  browser_navigator: 8082
-  search_tool: 8080
+  toolscore_mcp:
+    port: 8089
+    description: "ToolScore MCP协议服务器"
+    auto_detect_port: false
+  toolscore_http:
+    port: 8088
+    description: "ToolScore HTTP监控API"
+  microsandbox_mcp:        # 🆕 MicroSandbox配置
+    port: 8090
+    description: "MicroSandbox MCP服务器 - 安全代码执行"
+    auto_start: true
+    type: "internal"
+  browser_navigator:
+    port: 8082
+    description: "浏览器导航器MCP服务器"
+    auto_start: true
+  search_tool:
+    port: 8080
+    description: "搜索工具MCP服务器"
+    auto_start: true
 ```
 
 #### `config/routing_config.yaml` - 路由配置
@@ -222,216 +372,412 @@ task_routing:
   mode: "unified"
   default_queue: "tasks:reasoning"
   runtime: "enhanced-reasoning-runtime"
+  
+# 任务类型路由
+task_types:
+  code: "tasks:reasoning"      # 代码任务统一处理
+  web: "tasks:reasoning"       # Web任务统一处理  
+  reasoning: "tasks:reasoning" # 推理任务统一处理
 ```
 
-### 🔧 环境变量
+### 🔧 环境变量详解
 
 ```bash
-# 必需的环境变量
-export GEMINI_API_KEY=your_gemini_api_key
+# === 必需环境变量 ===
+export GEMINI_API_KEY=your_gemini_api_key_here
+# 获取方式: https://aistudio.google.com/app/apikey
 
-# 可选的环境变量
+# === 可选环境变量 ===
 export OPENAI_API_KEY=your_openai_api_key        # 备用LLM
 export REDIS_URL=redis://localhost:6379          # Redis连接
-export LOG_LEVEL=INFO                            # 日志级别
-export WORKER_THREADS=4                          # 工作线程数
+export LOG_LEVEL=INFO                            # 日志级别: DEBUG/INFO/WARNING/ERROR
+export MICROSANDBOX_TIMEOUT=30                   # MicroSandbox执行超时(秒)
+export MAX_CONCURRENT_TASKS=10                   # 最大并发任务数
+
+# === 高级配置 ===
+export PYTHONPATH=/path/to/agent-data-platform:$PYTHONPATH
+export TOOL_DISCOVERY_INTERVAL=60                # 工具发现间隔(秒)
+export TRAJECTORY_RETENTION_DAYS=30              # 轨迹保留天数
 ```
 
-### 🐳 Docker 部署
+### 🐳 Docker 部署 (可选)
+
+#### 创建Dockerfile
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    redis-server \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制代码和依赖
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# 安装MicroSandbox
+RUN pip install microsandbox
+
+COPY . .
+
+# 暴露端口
+EXPOSE 8000 8088 8089 8090 8082 8080
+
+# 启动脚本
+CMD ["python", "main.py"]
+```
+
+#### Docker Compose 部署
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  agent-platform:
+    build: .
+    ports:
+      - "8000:8000"
+      - "8088:8088"  
+      - "8089:8089"
+      - "8090:8090"
+      - "8082:8082"
+      - "8080:8080"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+
+volumes:
+  redis_data:
+```
 
 ```bash
-# 构建镜像
-docker build -t agent-data-platform .
+# 使用Docker Compose启动
+export GEMINI_API_KEY=your_key
+docker-compose up -d
 
-# 运行容器
-docker run -d \
-  --name agent-platform \
-  -p 8000:8000 \
-  -e GEMINI_API_KEY=your_key \
-  -v $(pwd)/output:/app/output \
-  agent-data-platform
+# 查看日志
+docker-compose logs -f agent-platform
 ```
 
 ---
 
 ## 🧪 测试指南
 
-### 📋 测试类型
+### 📋 系统验证测试
 
-#### 1. **单元测试**
+#### 快速健康检查
 ```bash
-# 运行所有单元测试
-python -m pytest tests/ -v
+# 检查所有核心服务
+curl http://localhost:8000/health      # Task API
+curl http://localhost:8088/health      # ToolScore HTTP
+curl http://localhost:6379/ping        # Redis (如果直接暴露)
 
-# 运行特定模块测试
-python -m pytest tests/test_synthesis_focus.py -v
-
-# 运行带覆盖率的测试
-python -m pytest tests/ --cov=core --cov=services
+# 检查MCP服务器连接 (通过ToolScore)
+curl http://localhost:8088/api/v1/tools/available
 ```
 
-#### 2. **集成测试**
+#### 运行完整系统验证
 ```bash
-# 测试核心组件集成
-python -m pytest tests/test_synthesis_focus.py -m integration
-
-# 测试安全功能
-python -m pytest tests/test_security_critical.py -m security
-```
-
-#### 3. **系统验证测试**
-```bash
-# 全面系统健康检查
+# 如果存在验证脚本
 python test_system_validation.py
 
-# 检查所有服务状态
-python -c "
-from services.service_manager import ServiceManager
-sm = ServiceManager()
-print('✅ 所有核心服务可用')
-"
+# 期望输出:
+# ✅ Redis连接正常
+# ✅ ToolScore服务可用  
+# ✅ MicroSandbox集成正常
+# ✅ 任务API响应正常
+# ✅ 所有MCP服务器在线
+# 🎉 系统验证通过！
 ```
 
-#### 4. **性能测试**
+### 🔥 功能测试示例
+
+#### 1. **MicroSandbox安全执行测试**
 ```bash
-# 批量任务测试
-python scripts/batch_test_tasks.py --tasks-file tasks.jsonl --concurrent 5
+# 测试基础代码执行
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code",
+       "input": "请在microsandbox中执行以下代码并返回结果: import math; print(f\"π的值是: {math.pi}\")",
+       "priority": "high"
+     }'
 
-# 压力测试
-python scripts/stress_test.py --requests 100 --duration 60
+# 测试包安装和使用
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code", 
+       "input": "在microsandbox中安装numpy包，然后创建一个1-10的数组并计算平均值",
+       "priority": "high"
+     }'
+
+# 测试会话保持
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code",
+       "input": "在microsandbox中定义变量x=100，然后在同一会话中计算x的平方根",
+       "priority": "high"
+     }'
 ```
 
-### 🔍 测试结果说明
+#### 2. **复合任务测试**
+```bash
+# 数据分析任务
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code",
+       "input": "使用microsandbox创建一个包含100个随机数的列表，计算统计信息(均值、方差、标准差)，并生成直方图",
+       "priority": "medium"
+     }'
 
-运行 `python test_system_validation.py` 应该显示:
+# Web数据获取 + 代码处理
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "web",
+       "input": "访问https://httpbin.org/json获取示例数据，然后在microsandbox中解析JSON并提取关键信息",
+       "priority": "medium"
+     }'
 ```
-🎉 SYSTEM VALIDATION: SUCCESS
-Your agent data platform is ready for operation!
-Total: 7/7 components validated
+
+#### 3. **错误处理和安全测试**
+```bash
+# 测试超时处理
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code",
+       "input": "在microsandbox中执行一个可能长时间运行的任务，测试超时处理",
+       "priority": "low"
+     }'
+
+# 测试错误恢复
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code", 
+       "input": "在microsandbox中故意执行有语法错误的代码，测试错误处理机制",
+       "priority": "low"
+     }'
 ```
 
-### 📊 测试覆盖的功能
+### 📊 批量测试
+```bash
+# 创建批量测试文件
+cat > batch_test_tasks.jsonl << EOF
+{"task_type": "code", "input": "使用microsandbox计算1+1", "priority": "high"}
+{"task_type": "reasoning", "input": "解释什么是递归算法", "priority": "medium"}
+{"task_type": "code", "input": "在microsandbox中创建一个简单的计算器函数", "priority": "medium"}
+{"task_type": "web", "input": "获取一个公开API的数据", "priority": "low"}
+EOF
 
-- ✅ **Synthesis System**: 轨迹学习和任务合成
-- ✅ **Task Execution**: 任务执行和工具调用  
-- ✅ **MCP Servers**: Python执行器、浏览器导航、搜索工具
-- ✅ **Service Management**: 服务生命周期管理
-- ✅ **Configuration**: 配置加载和验证
-- ✅ **Security**: 沙箱执行和权限控制
+# 如果有批量测试脚本
+python scripts/batch_test_tasks.py --tasks-file batch_test_tasks.jsonl --concurrent 3
+
+# 手动批量提交
+for i in {1..5}; do
+  curl -X POST "http://localhost:8000/api/v1/tasks" \
+       -H "Content-Type: application/json" \
+       -d "{\"task_type\": \"code\", \"input\": \"测试任务 ${i}: 在microsandbox中计算 ${i} 的阶乘\", \"priority\": \"medium\"}"
+  sleep 1
+done
+```
 
 ---
 
-## 📚 使用示例
+## 📚 API 参考
 
-### 🔥 基础任务示例
+### 🔥 Task API 端点
 
-#### 数学计算任务
-```python
-import requests
+#### POST /api/v1/tasks - 提交新任务
+```json
+// 请求体
+{
+  "task_type": "code|reasoning|web",    // 任务类型
+  "input": "任务描述",                   // 任务内容
+  "priority": "high|medium|low",        // 优先级(可选)
+  "context": {                          // 额外上下文(可选)
+    "session_id": "my-session",
+    "timeout": 60,
+    "tags": ["test", "demo"]
+  }
+}
 
-response = requests.post(
-    "http://localhost:8000/api/v1/tasks",
-    json={
-        "input": "使用Python计算斐波那契数列的前20项",
-        "description": "数学计算任务"
+// 响应
+{
+  "task_id": "uuid-string",
+  "status": "queued|processing|completed|failed",
+  "message": "Task submitted successfully",
+  "timestamp": "2024-01-01T12:00:00Z",
+  "result": null  // 任务完成后包含结果
+}
+```
+
+#### GET /api/v1/tasks/{task_id} - 查看任务状态
+```json
+// 响应 - 进行中的任务
+{
+  "task_id": "uuid-string",
+  "status": "processing", 
+  "message": "Task is being processed",
+  "timestamp": "2024-01-01T12:00:00Z",
+  "result": null,
+  "progress": {
+    "current_step": 2,
+    "total_steps": 5,
+    "description": "Executing code in MicroSandbox"
+  }
+}
+
+// 响应 - 完成的任务
+{
+  "task_id": "uuid-string",
+  "status": "completed",
+  "message": "Task completed successfully", 
+  "timestamp": "2024-01-01T12:00:30Z",
+  "result": {
+    "success": true,
+    "final_result": "π的值是: 3.141592653589793",
+    "execution_time": 2.5,
+    "steps_completed": 3,
+    "tools_used": ["microsandbox-mcp-server.microsandbox_execute"]
+  }
+}
+```
+
+#### GET /health - 健康检查
+```json
+{
+  "status": "healthy",
+  "redis": "connected", 
+  "services": {
+    "task_api": "running",
+    "toolscore": "healthy",
+    "microsandbox": "available"
+  },
+  "timestamp": "2024-01-01T12:00:00Z"
+}
+```
+
+### 🔧 ToolScore API 端点
+
+#### GET /api/v1/tools/available - 获取可用工具
+```json
+{
+  "tools": [
+    {
+      "tool_id": "microsandbox-mcp-server",
+      "name": "MicroSandbox",
+      "description": "安全的Python代码执行环境",
+      "capabilities": [
+        "microsandbox_execute",
+        "microsandbox_install_package", 
+        "microsandbox_list_sessions",
+        "microsandbox_close_session"
+      ],
+      "status": "available"
     }
-)
-task_id = response.json()["task_id"]
-print(f"任务ID: {task_id}")
-```
-
-#### 数据分析任务
-```python
-response = requests.post(
-    "http://localhost:8000/api/v1/tasks", 
-    json={
-        "input": "生成一个随机数据集，并创建散点图可视化",
-        "description": "数据可视化任务"
-    }
-)
-```
-
-#### Web自动化任务
-```python
-response = requests.post(
-    "http://localhost:8000/api/v1/tasks",
-    json={
-        "input": "访问https://example.com并提取页面标题",
-        "description": "网页信息提取"
-    }
-)
-```
-
-### 🚀 高级功能示例
-
-#### 批量任务处理
-```python
-# 创建任务文件 batch_tasks.jsonl
-tasks = [
-    {"input": "计算质数", "description": "数学任务1"},
-    {"input": "数据可视化", "description": "图表任务1"},
-    {"input": "网页爬取", "description": "Web任务1"}
-]
-
-# 批量提交
-python scripts/batch_test_tasks.py --tasks-file batch_tasks.jsonl
-```
-
-#### 轨迹分析和学习
-```python
-# 查看生成的轨迹文件
-cat output/trajectories/trajectories_collection.json
-
-# 触发合成学习
-curl -X POST "http://localhost:8000/api/v1/synthesis/trigger"
-
-# 查看生成的种子任务
-cat output/seed_tasks.jsonl
+  ],
+  "total_count": 3
+}
 ```
 
 ---
 
 ## 🔧 开发指南
 
-### 📂 项目结构
+### 📂 项目结构详解
 
 ```
 agent-data-platform/
-├── main.py                     # 主入口，启动所有服务
-├── config/                     # 配置文件目录
-│   ├── llm_config.yaml         # LLM提供商配置
-│   ├── ports_config.yaml       # 端口分配配置
-│   └── routing_config.yaml     # 任务路由配置
-├── core/                       # 核心模块
-│   ├── config_manager.py       # 配置管理器
-│   ├── task_manager.py         # 任务管理器
-│   ├── llm_client.py          # LLM客户端
-│   ├── interfaces.py          # 数据结构定义
-│   ├── synthesiscore/         # 合成学习系统
-│   │   ├── synthesis.py       # 轨迹学习核心
-│   │   └── synthesis_api.py   # 合成API
-│   └── toolscore/             # 工具管理系统
-│       ├── unified_tool_library.py  # 统一工具库
-│       ├── mcp_server.py            # MCP服务器基类
-│       └── mcp_connector.py         # MCP连接器
-├── services/                   # 服务层
-│   ├── service_manager.py      # 服务管理器
-│   ├── task_api_service.py     # 任务API服务
-│   └── toolscore_service.py    # ToolScore服务
-├── mcp_servers/               # MCP工具服务器
-│   ├── python_executor_server/ # Python执行服务器
-│   ├── browser_navigator_server/ # 浏览器导航服务器
-│   └── search_tool_server/     # 搜索工具服务器
-├── runtimes/                  # 运行时系统
+├── main.py                     # 🚀 主入口，集成端口清理和服务启动
+├── cleanup_ports.py            # 🧹 端口清理工具
+├── requirements.txt            # 📦 Python依赖（不含microsandbox）
+├── .env.example               # 🔧 环境变量模板
+├── docker-compose.yml         # 🐳 Docker编排文件
+│
+├── config/                     # ⚙️ 配置文件目录
+│   ├── llm_config.yaml         # 🤖 LLM提供商配置
+│   ├── ports_config.yaml       # 🌐 端口分配配置
+│   └── routing_config.yaml     # 🔀 任务路由配置
+│
+├── core/                       # 🏗️ 核心模块
+│   ├── config_manager.py       # ⚙️ 配置管理器
+│   ├── task_manager.py         # 📋 任务管理器  
+│   ├── llm_client.py          # 🤖 LLM客户端
+│   ├── interfaces.py          # 📋 数据结构定义
+│   ├── redis_manager.py       # 📊 Redis连接管理
+│   ├── tool_usage_tracker.py  # 📈 工具使用跟踪 (新增)
+│   │
+│   ├── synthesiscore/         # 🧠 合成学习系统
+│   │   ├── synthesis.py       # 🔬 轨迹学习核心
+│   │   └── synthesis_api.py   # 🌐 合成API
+│   │
+│   └── toolscore/             # 🔧 工具管理系统
+│       ├── unified_tool_library.py    # 📚 统一工具库
+│       ├── mcp_server.py              # 🔌 MCP服务器基类
+│       ├── mcp_connector.py           # 🔗 MCP连接器
+│       ├── external_mcp_manager.py    # 🌐 外部MCP管理 (新增)
+│       └── mcp_search_tool.py         # 🔍 MCP搜索工具
+│
+├── services/                   # 🛠️ 服务层
+│   ├── service_manager.py      # 👔 服务管理器
+│   ├── task_api_service.py     # 🌐 任务API服务
+│   ├── toolscore_service.py    # 🔧 ToolScore服务
+│   ├── mcp_server_launcher.py  # 🚀 MCP服务器启动器
+│   ├── runtime_service.py      # ⚡ 运行时服务管理
+│   └── synthesis_service.py    # 🧠 合成服务管理
+│
+├── mcp_servers/               # 🔌 MCP工具服务器
+│   ├── microsandbox_server/   # 🛡️ MicroSandbox服务器 (新增)
+│   │   ├── main.py             # 主服务器实现
+│   │   ├── enhanced_sandbox_executor.py  # 增强执行器
+│   │   └── microsandbox_executor.py      # 基础执行器
+│   ├── browser_navigator_server/  # 🌐 浏览器导航服务器
+│   └── search_tool_server/        # 🔍 搜索工具服务器
+│
+├── runtimes/                  # ⚡ 运行时系统
 │   └── reasoning/
-│       └── enhanced_runtime.py # 增强推理运行时
-├── tests/                     # 测试套件
-│   ├── test_synthesis_focus.py # 合成系统测试
-│   └── test_system_validation.py # 系统验证测试
-├── output/                    # 输出目录
-│   ├── trajectories/          # 轨迹文件
-│   └── seed_tasks.jsonl       # 生成的种子任务
-└── requirements.txt           # Python依赖
+│       ├── enhanced_runtime.py       # 🧠 增强推理运行时
+│       ├── real_time_tool_client.py  # 🔄 实时工具客户端 (已修复)
+│       └── toolscore_client.py       # 🔧 ToolScore客户端
+│
+├── tests/                     # 🧪 测试套件
+│   ├── test_synthesis_focus.py       # 🔬 合成系统测试
+│   ├── test_system_validation.py     # ✅ 系统验证测试
+│   ├── test_microsandbox_*.py        # 🛡️ MicroSandbox测试 (新增)
+│   └── test_tool_tracking*.py        # 📈 工具跟踪测试 (新增)
+│
+├── output/                    # 📊 输出目录
+│   ├── trajectories/          # 📈 轨迹文件
+│   │   └── trajectories_collection.json
+│   ├── seed_tasks.jsonl       # 🌱 生成的种子任务
+│   └── batch_test_results.json # 📊 批量测试结果
+│
+├── logs/                      # 📝 日志目录
+│   └── main_test.log          # 主要日志文件
+│
+└── scripts/                   # 🔧 工具脚本
+    ├── batch_test_tasks.py     # 📊 批量任务测试
+    └── stress_test.py          # 💪 压力测试
 ```
 
 ### 🛠️ 开发工作流
@@ -441,67 +787,125 @@ agent-data-platform/
 # 1. 创建新服务器目录
 mkdir mcp_servers/my_new_server
 
-# 2. 实现工具类
-class MyNewTool:
-    def __init__(self):
-        self.name = "my_new_tool"
-    
-    async def execute(self, params):
-        # 实现工具逻辑
-        return {"result": "success"}
+# 2. 实现工具类 (继承MCPServer基类)
+from core.toolscore.mcp_server import MCPServer
 
-# 3. 注册到配置
-# 在 config/mcp_servers.json 中添加服务器配置
+class MyNewMCPServer:
+    def __init__(self, config_manager):
+        self.server_name = "my_new_server" 
+        self.server_id = "my-new-mcp-server"
+        
+    async def execute_tool_action(self, action: str, parameters: Dict[str, Any]):
+        if action == "my_action":
+            return {"result": "success", "data": parameters}
+        return {"error": "Unknown action"}
+
+# 3. 注册到配置文件
+# 在 config/ports_config.yaml 中添加:
+# my_new_server:
+#   port: 8091
+#   description: "我的新工具服务器"
+#   auto_start: true
 ```
 
-#### 2. **扩展任务类型**
+#### 2. **扩展MicroSandbox功能**
+```python
+# 在 mcp_servers/microsandbox_server/main.py 中添加新方法
+async def microsandbox_custom_action(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """自定义MicroSandbox动作"""
+    code = parameters.get("code", "")
+    session_id = parameters.get("session_id")
+    
+    # 实现自定义逻辑
+    result = await self._execute_with_session(code, session_id)
+    return result
+
+# 在工具注册中添加新功能
+capabilities = [
+    # ... 现有功能
+    ToolCapability(
+        name="microsandbox_custom_action",
+        description="执行自定义MicroSandbox操作",
+        parameters={
+            "code": {"type": "string", "description": "要执行的代码"},
+            "session_id": {"type": "string", "description": "会话ID", "required": False}
+        }
+    )
+]
+```
+
+#### 3. **自定义任务类型**
 ```python
 # 1. 在 core/interfaces.py 添加新任务类型
 class TaskType(Enum):
     CODE = "code"
     WEB = "web" 
     REASONING = "reasoning"
-    MY_NEW_TYPE = "my_new_type"  # 新增
+    DATA_ANALYSIS = "data_analysis"  # 新增数据分析类型
 
 # 2. 在运行时处理新类型
 # 修改 runtimes/reasoning/enhanced_runtime.py
-```
-
-#### 3. **自定义LLM提供商**
-```python
-# 1. 创建新提供商类
-class MyLLMProvider(LLMProvider):
-    def __init__(self, config):
-        self.config = config
+async def process_task(self, task_data: Dict[str, Any]):
+    task_type = task_data.get("task_type", "reasoning")
     
-    async def generate(self, prompt, **kwargs):
-        # 实现LLM调用逻辑
-        return response
-
-# 2. 注册到 core/llm_providers/
+    if task_type == "data_analysis":
+        # 专门处理数据分析任务的逻辑
+        return await self._process_data_analysis_task(task_data)
+    # ... 其他类型处理
 ```
 
 ### 🔧 调试技巧
 
 #### 启用详细日志
 ```bash
+# 设置调试级别日志
 export LOG_LEVEL=DEBUG
 python main.py
+
+# 或在运行时启用调试
+python main.py --debug
 ```
 
-#### 查看服务状态
-```python
-from services.service_manager import ServiceManager
-sm = ServiceManager()
-# 检查各服务状态
+#### 查看MCP服务器状态
+```bash
+# 检查所有MCP服务器健康状态
+curl http://localhost:8088/api/v1/tools/available | jq '.'
+
+# 检查特定MicroSandbox状态
+curl http://localhost:8088/api/v1/tools/microsandbox-mcp-server | jq '.'
+
+# 测试MicroSandbox直接连接
+nc -z localhost 8090 && echo "MicroSandbox端口可达" || echo "MicroSandbox端口不可达"
 ```
 
 #### 监控任务队列
 ```bash
-# 连接Redis查看队列
+# 连接Redis查看队列状态
 redis-cli
-LLEN tasks:reasoning  # 查看队列长度
-LRANGE tasks:reasoning 0 -1  # 查看队列内容
+
+# 查看任务队列长度
+XLEN tasks:reasoning
+
+# 查看队列中的任务
+XRANGE tasks:reasoning - + COUNT 5
+
+# 查看消费者组状态
+XINFO GROUPS tasks:reasoning
+
+# 查看未确认的任务
+XPENDING tasks:reasoning workers
+```
+
+#### 实时监控轨迹生成
+```bash
+# 监控轨迹文件变化
+tail -f output/trajectories/trajectories_collection.json
+
+# 监控主要日志文件
+tail -f logs/main_test.log | grep -E "(ERROR|MicroSandbox|任务|执行)"
+
+# 监控系统资源
+watch -n 2 "ps aux | grep -E '(main.py|microsandbox|redis)' | grep -v grep"
 ```
 
 ---
@@ -510,63 +914,188 @@ LRANGE tasks:reasoning 0 -1  # 查看队列内容
 
 ### 常见问题与解决方案
 
-#### 🔧 服务启动失败
-```bash
-# 问题: Redis连接失败
-# 解决: 确保Redis服务运行
-brew services start redis  # macOS
-sudo systemctl start redis-server  # Ubuntu
+#### 🔧 MicroSandbox相关问题
 
-# 问题: 端口占用
-# 解决: 修改config/ports_config.yaml中的端口配置
+**问题**: MicroSandbox安装失败
+```bash
+# 解决方案1: 升级pip并重新安装
+pip install --upgrade pip
+pip install microsandbox
+
+# 解决方案2: 使用特定版本
+pip install microsandbox==0.1.7
+
+# 解决方案3: 从源码安装
+pip install git+https://github.com/codelion/microsandbox.git
+
+# 验证安装
+python -c "from microsandbox import PythonSandbox; print('✅ 安装成功')"
+```
+
+**问题**: MicroSandbox服务器启动失败
+```bash
+# 检查端口8090是否被占用
+lsof -ti :8090
+
+# 如果被占用，杀死占用进程
+lsof -ti :8090 | xargs kill -9
+
+# 或者修改配置文件使用不同端口
+# 编辑 config/ports_config.yaml 中的 microsandbox_mcp.port
+```
+
+**问题**: 代码执行超时
+```bash
+# 增加超时配置
+export MICROSANDBOX_TIMEOUT=60  # 60秒超时
+
+# 或在任务中指定超时
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code",
+       "input": "长时间运行的代码",
+       "context": {"timeout": 120}
+     }'
+```
+
+#### 🔧 服务启动失败
+
+**问题**: Redis连接失败
+```bash
+# 检查Redis服务状态
+redis-cli ping
+# 期望输出: PONG
+
+# 启动Redis服务
+# macOS:
+brew services start redis
+
+# Ubuntu:
+sudo systemctl start redis-server
+sudo systemctl enable redis-server
+
+# 检查Redis配置
+redis-cli CONFIG GET "*"
+```
+
+**问题**: API Key未配置
+```bash
+# 检查环境变量
+echo $GEMINI_API_KEY
+echo $OPENAI_API_KEY
+
+# 设置API Key
+export GEMINI_API_KEY=your_actual_key_here
+
+# 验证API Key
+curl -H "Authorization: Bearer $GEMINI_API_KEY" \
+     https://generativelanguage.googleapis.com/v1/models
+```
+
+**问题**: 端口冲突
+```bash
+# 查看所有占用的端口
+lsof -i :8000,8088,8089,8090,8082,8080
+
+# 批量清理端口 (已集成到main.py)
+python cleanup_ports.py
+
+# 或手动清理特定端口
+lsof -ti :8090 | xargs kill -9
 ```
 
 #### 🔧 任务执行失败
-```bash
-# 问题: LLM API调用失败
-# 解决: 检查API密钥和网络连接
-export GEMINI_API_KEY=your_valid_key
 
-# 问题: MCP服务器无响应
-# 解决: 检查MCP服务器状态
-curl http://localhost:8088/health  # ToolScore健康检查
+**问题**: 任务一直处于queued状态
+```bash
+# 检查运行时服务状态
+curl http://localhost:8000/health
+
+# 检查Redis队列
+redis-cli XLEN tasks:reasoning
+
+# 检查消费者组
+redis-cli XINFO GROUPS tasks:reasoning
+
+# 重启运行时消费者 (通常重启整个系统)
+# Ctrl+C 停止main.py，然后重新启动
+python main.py
 ```
 
-#### 🔧 测试失败
+**问题**: MCP服务器无响应
 ```bash
-# 问题: 导入错误
-# 解决: 确保PYTHONPATH设置正确
-export PYTHONPATH=/path/to/agent-data-platform:$PYTHONPATH
+# 检查ToolScore健康状态
+curl http://localhost:8088/health
 
-# 问题: 权限错误
-# 解决: 检查文件权限
-chmod +x scripts/*.py
+# 检查MCP服务器列表
+curl http://localhost:8088/api/v1/tools/available
+
+# 检查特定服务器连接
+telnet localhost 8090  # MicroSandbox
+
+# 重启特定MCP服务器 (需要重启整个系统)
 ```
 
-### 📊 监控和诊断
-
-#### 查看服务健康状态
+**问题**: 轨迹文件未生成
 ```bash
-# 检查所有服务端点
-curl http://localhost:8000/health      # Task API
-curl http://localhost:8088/health      # ToolScore
-curl http://localhost:8081/health      # Python Executor (如果实现)
-```
-
-#### 查看任务执行轨迹
-```bash
-# 查看最新轨迹文件
+# 检查输出目录权限
 ls -la output/trajectories/
-cat output/trajectories/trajectories_collection.json | jq .
+
+# 检查合成服务状态
+curl http://localhost:8088/api/v1/synthesis/status 2>/dev/null || echo "合成服务API不可用"
+
+# 手动触发轨迹处理
+curl -X POST http://localhost:8088/api/v1/synthesis/trigger 2>/dev/null || echo "无法触发合成"
 ```
 
-#### 系统性能监控
-```bash
-# Redis性能监控
-redis-cli info stats
+### 📊 系统监控和诊断
 
-# 系统资源监控  
-top -p $(pgrep -f main.py)
+#### 全面健康检查脚本
+```bash
+#!/bin/bash
+# health_check.sh - 系统健康检查脚本
+
+echo "🔍 Agent Data Platform 健康检查"
+echo "================================"
+
+# 检查核心服务
+echo "📊 核心服务状态:"
+curl -s http://localhost:8000/health | jq '.' 2>/dev/null && echo "✅ Task API 正常" || echo "❌ Task API 异常"
+curl -s http://localhost:8088/health >/dev/null 2>&1 && echo "✅ ToolScore 正常" || echo "❌ ToolScore 异常"
+redis-cli ping >/dev/null 2>&1 && echo "✅ Redis 正常" || echo "❌ Redis 异常"
+
+# 检查MCP服务器
+echo -e "\n🔌 MCP服务器状态:"
+nc -z localhost 8090 2>/dev/null && echo "✅ MicroSandbox (8090) 正常" || echo "❌ MicroSandbox (8090) 异常"
+nc -z localhost 8082 2>/dev/null && echo "✅ Browser Navigator (8082) 正常" || echo "❌ Browser Navigator (8082) 异常"
+nc -z localhost 8080 2>/dev/null && echo "✅ Search Tool (8080) 正常" || echo "❌ Search Tool (8080) 异常"
+
+# 检查队列状态
+echo -e "\n📋 任务队列状态:"
+queue_len=$(redis-cli XLEN tasks:reasoning 2>/dev/null)
+echo "队列长度: ${queue_len:-'无法获取'}"
+
+# 检查可用工具
+echo -e "\n🔧 可用工具:"
+curl -s http://localhost:8088/api/v1/tools/available 2>/dev/null | jq -r '.tools[].tool_id' 2>/dev/null || echo "无法获取工具列表"
+
+echo -e "\n🎉 健康检查完成!"
+```
+
+#### 性能监控
+```bash
+# 监控系统资源使用
+top -p $(pgrep -f "main.py")
+
+# 监控Redis性能
+redis-cli --latency-history -i 1
+
+# 监控网络连接
+netstat -an | grep -E ":(8000|8088|8089|8090|8082|8080)"
+
+# 监控日志错误
+tail -f logs/main_test.log | grep -i error
 ```
 
 ---
@@ -576,9 +1105,24 @@ top -p $(pgrep -f main.py)
 ### 🚀 参与开发
 
 1. **Fork 项目** 并创建特性分支
-2. **编写测试** 确保新功能正确工作
-3. **更新文档** 包括README和代码注释
-4. **提交PR** 并等待代码审查
+2. **设置开发环境**:
+   ```bash
+   git clone your-fork-url
+   cd agent-data-platform
+   python -m venv dev-env
+   source dev-env/bin/activate
+   pip install -r requirements.txt
+   pip install microsandbox
+   pip install pytest pytest-cov  # 开发依赖
+   ```
+3. **编写测试** 确保新功能正确工作
+4. **运行测试套件**:
+   ```bash
+   python -m pytest tests/ -v
+   python test_system_validation.py
+   ```
+5. **更新文档** 包括README和代码注释
+6. **提交PR** 并等待代码审查
 
 ### 📝 代码规范
 
@@ -586,14 +1130,47 @@ top -p $(pgrep -f main.py)
 - **注释**: 中英文混合，关键部分必须有注释
 - **测试**: 新功能必须包含单元测试
 - **文档**: 更新相关的README和API文档
+- **MicroSandbox**: 所有代码执行必须通过MicroSandbox进行
 
 ### 🐛 问题报告
 
 请在GitHub Issues中报告问题，包含：
 - 详细的错误信息和堆栈跟踪
 - 复现步骤
-- 系统环境信息
-- 日志文件 (如果适用)
+- 系统环境信息 (OS, Python版本, Redis版本)
+- 日志文件 (logs/main_test.log)
+- MicroSandbox版本信息
+
+**问题报告模板**:
+```markdown
+## 问题描述
+[简要描述问题]
+
+## 环境信息
+- OS: [操作系统]
+- Python版本: [python --version]
+- MicroSandbox版本: [pip show microsandbox]
+- Redis版本: [redis-cli --version]
+
+## 复现步骤
+1. [步骤1]
+2. [步骤2]
+3. [错误出现]
+
+## 期望行为
+[描述期望的正确行为]
+
+## 实际行为  
+[描述实际发生的错误行为]
+
+## 错误日志
+```
+[粘贴相关的错误日志]
+```
+
+## 额外信息
+[任何其他相关信息]
+```
 
 ---
 
@@ -608,6 +1185,7 @@ top -p $(pgrep -f main.py)
 - **项目主页**: [GitHub Repository](https://github.com/your-username/agent-data-platform)
 - **问题报告**: [GitHub Issues](https://github.com/your-username/agent-data-platform/issues)
 - **功能请求**: [GitHub Discussions](https://github.com/your-username/agent-data-platform/discussions)
+- **文档Wiki**: [项目Wiki](https://github.com/your-username/agent-data-platform/wiki)
 
 ---
 
@@ -617,9 +1195,38 @@ top -p $(pgrep -f main.py)
 
 - **MCP协议团队** - 提供标准化的工具通信协议
 - **Google Gemini团队** - 提供强大的LLM推理能力  
+- **MicroSandbox团队** - 提供安全的代码执行环境
 - **Redis团队** - 提供高性能的消息队列解决方案
 - **开源社区** - 提供丰富的工具和库支持
 
 ---
 
-*Agent Data Platform - 让AI代理更智能，让任务执行更高效* 🚀
+## 🚀 快速命令参考
+
+```bash
+# === 安装和启动 ===
+pip install -r requirements.txt && pip install microsandbox
+export GEMINI_API_KEY=your_key
+python main.py
+
+# === 健康检查 ===
+curl http://localhost:8000/health
+
+# === 提交任务 ===
+curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{"task_type":"code","input":"测试MicroSandbox: print(\"Hello!\")"}'
+
+# === 查看任务 ===
+curl http://localhost:8000/api/v1/tasks/TASK_ID
+
+# === 监控 ===
+tail -f logs/main_test.log
+redis-cli XLEN tasks:reasoning
+
+# === 清理 ===
+python cleanup_ports.py
+redis-cli FLUSHDB
+```
+
+---
+
+*Agent Data Platform - 让AI代理更智能，让任务执行更安全* 🚀🛡️

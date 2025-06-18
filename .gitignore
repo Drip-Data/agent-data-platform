@@ -94,7 +94,7 @@ pids/
 .platform.pid
 
 # Output directories
-output/
+# output/
 data/
 temp/
 tmp/
@@ -103,6 +103,8 @@ tmp/
 .cache/
 __pycache__/
 .pytest_cache/
+.claude/
+.vscode/
 
 # Jupyter Notebook
 .ipynb_checkpoints
