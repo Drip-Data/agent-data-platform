@@ -1,1 +1,131 @@
-[]
+{
+  "version": "1.0.0",
+  "last_updated": "2024-12-18",
+  "servers": [
+    {
+      "tool_id": "database-server",
+      "name": "Database MCP Server",
+      "description": "Provides database query and manipulation capabilities for MySQL, PostgreSQL, and SQLite",
+      "author": "executeautomation",
+      "version": "1.2.0",
+      "capabilities": ["sql_query", "database_admin", "data_analysis", "schema_management"],
+      "tags": ["database", "sql", "mysql", "postgresql", "sqlite"],
+      "installation": {
+        "npm": "npx @mcp/database-server@1.2.0",
+        "python": "pip install mcp-database-server==1.2.0"
+      },
+      "install_method": "npm",
+      "github_url": "https://github.com/executeautomation/database-server",
+      "runtime": {
+        "default_port": 8080,
+        "protocol": "http",
+        "endpoint": "/mcp"
+      },
+      "security": {
+        "verified": true,
+        "sandbox_mode": true,
+        "risk_level": "low"
+      }
+    },
+    {
+      "tool_id": "file-operations-server",
+      "name": "File Operations MCP Server",
+      "description": "Comprehensive file system operations including read, write, search, and manipulation",
+      "author": "anthropic",
+      "version": "2.1.0",
+      "capabilities": ["file_read", "file_write", "file_search", "directory_operations", "file_manipulation"],
+      "tags": ["filesystem", "files", "io", "search"],
+      "installation": {
+        "npm": "npx @mcp/file-operations@2.1.0",
+        "python": "pip install mcp-file-operations==2.1.0"
+      },
+      "install_method": "npm",
+      "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "runtime": {
+        "default_port": 8083,
+        "protocol": "http",
+        "endpoint": "/mcp"
+      },
+      "security": {
+        "verified": true,
+        "sandbox_mode": false,
+        "risk_level": "medium"
+      }
+    },
+    {
+      "tool_id": "web-scraper-server",
+      "name": "Web Scraper MCP Server",
+      "description": "Advanced web scraping and data extraction from websites",
+      "author": "wong2",
+      "version": "1.5.3",
+      "capabilities": ["web_scraping", "html_parsing", "data_extraction", "url_fetching"],
+      "tags": ["web", "scraping", "html", "data", "extraction"],
+      "installation": {
+        "npm": "npx @mcp/web-scraper@1.5.3",
+        "python": "pip install mcp-web-scraper==1.5.3"
+      },
+      "install_method": "python",
+      "github_url": "https://github.com/wong2/mcp-web-scraper",
+      "runtime": {
+        "default_port": 8084,
+        "protocol": "http",
+        "endpoint": "/mcp"
+      },
+      "security": {
+        "verified": true,
+        "sandbox_mode": true,
+        "risk_level": "low"
+      }
+    },
+    {
+      "tool_id": "email-server",
+      "name": "Email MCP Server",
+      "description": "Send and receive emails, manage email accounts and folders",
+      "author": "community",
+      "version": "1.0.8",
+      "capabilities": ["email_send", "email_receive", "email_management", "smtp", "imap"],
+      "tags": ["email", "smtp", "imap", "communication"],
+      "installation": {
+        "npm": "npx @mcp/email-server@1.0.8",
+        "python": "pip install mcp-email-server==1.0.8"
+      },
+      "install_method": "npm",
+      "github_url": "https://github.com/mcp-community/email-server",
+      "runtime": {
+        "default_port": 8085,
+        "protocol": "http",
+        "endpoint": "/mcp"
+      },
+      "security": {
+        "verified": false,
+        "sandbox_mode": false,
+        "risk_level": "high"
+      }
+    },
+    {
+      "tool_id": "data-analysis-server",
+      "name": "Data Analysis MCP Server",
+      "description": "Statistical analysis, data visualization, and machine learning tools",
+      "author": "anthropic",
+      "version": "2.0.0",
+      "capabilities": ["data_analysis", "statistics", "visualization", "machine_learning", "pandas"],
+      "tags": ["data", "analysis", "statistics", "ml", "pandas", "numpy"],
+      "installation": {
+        "npm": "npx @mcp/data-analysis@2.0.0",
+        "python": "pip install mcp-data-analysis==2.0.0"
+      },
+      "install_method": "python",
+      "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/data-analysis",
+      "runtime": {
+        "default_port": 8086,
+        "protocol": "http",
+        "endpoint": "/mcp"
+      },
+      "security": {
+        "verified": true,
+        "sandbox_mode": true,
+        "risk_level": "low"
+      }
+    }
+  ]
+}

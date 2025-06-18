@@ -18,6 +18,7 @@ from core.utils.path_utils import get_trajectories_dir
 from runtimes.reasoning.toolscore_client import ToolScoreClient
 from runtimes.reasoning.real_time_tool_client import RealTimeToolClient
 from core.local_python_executor import LocalPythonExecutor
+from core.tool_usage_tracker import ToolUsageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -201,13 +202,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         final_trajectory_error_message = None
         
         steps: List[ExecutionStep] = []
-        max_steps = 10
+        max_steps = 2
         max_retries = 1
         retry_delay_seconds = 2
         current_outputs = []  # 用于存储每步的输出
         
         # 🔍 新增：收集LLM交互信息
         current_step_llm_interactions = []
+        
+        # 🔧 新增：工具使用跟踪器
+        tool_tracker = ToolUsageTracker()
         
         # 获取可用工具描述
         logger.info("📋 从ToolScore获取可用工具...")
@@ -216,6 +220,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         )
         logger.info(f"📋 获取到工具描述长度: {len(available_tools_description)} 字符")
         logger.info(f"📋 工具描述内容预览: {available_tools_description[:500]}...")
+        
+        # 🔧 记录可用工具信息
+        tool_tracker.set_available_tools(available_tools_description)
         
         # 检查是否有可用工具
         if "暂无可用工具" in available_tools_description or len(available_tools_description.strip()) == 0:
@@ -485,11 +492,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             required_caps = ['web_scraping']
                     
                     # 调用ToolScore API
+                    execution_start_time = time.time()
                     capability_result = await self.toolscore_client.request_tool_capability(
                         task_description=task_desc,
                         required_capabilities=required_caps,
                         auto_install=True
                     )
+                    execution_duration = time.time() - execution_start_time
                     
                     if capability_result.get("success"):
                         # 工具安装成功
@@ -499,6 +508,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         if installed_tools:
                             tool_names = [tool.get("name", tool.get("tool_id", "unknown")) for tool in installed_tools]
                             observation = f"成功安装了 {len(installed_tools)} 个新工具: {', '.join(tool_names)}。处理时间: {processing_time}ms。新工具现在可以使用。"
+                            result_summary = f"安装了工具: {', '.join(tool_names)}"
                             
                             # 注册等待新工具的回调
                             await self.real_time_client.register_pending_request(
@@ -514,6 +524,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             )
                         else:
                             observation = "工具安装请求已处理，但未安装新工具。现有工具可能已满足需求。"
+                            result_summary = "未安装新工具"
                         
                         tool_success = True
                     else:
@@ -523,12 +534,28 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         tool_success = False
                         current_attempt_err_type = ErrorType.TOOL_ERROR
                         current_attempt_err_msg = error_msg
+                        result_summary = f"失败: {error_msg}"
+                    
+                    # 🔧 记录工具使用 - mcp-search-tool via capability request
+                    tool_tracker.record_tool_usage(
+                        tool_server_id='mcp-search-tool',
+                        action=action if action != 'request_tool_capability' else 'analyze_tool_needs',
+                        parameters={
+                            "task_description": task_desc,
+                            "required_capabilities": required_caps,
+                            "reason": reason
+                        },
+                        result=result_summary,
+                        success=tool_success,
+                        duration=execution_duration
+                    )
                 
                 # 🔍 新增：处理mcp-search-tool的调用
                 elif tool_id == 'mcp-search-tool' or action in ['search_and_install_tools', 'analyze_tool_needs']:
                     logger.info(f"🛠️ 检测到mcp-search-tool调用: action={action}")
                     
                     try:
+                        execution_start_time = time.time()
                         # 🔍 通过ToolScore API调用mcp-search-tool
                         if action == 'analyze_tool_needs':
                             # 分析工具需求
@@ -538,6 +565,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             analysis_result = await self.toolscore_client.analyze_tool_needs(
                                 task_description=task_desc
                             )
+                            execution_duration = time.time() - execution_start_time
                             
                             if analysis_result.get("success"):
                                 analysis = analysis_result.get("analysis", {})
@@ -546,10 +574,22 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                 
                                 observation = f"工具需求分析完成。需要的工具类型: {', '.join(needed_tools)}。建议: {recommendations}"
                                 tool_success = True
+                                result_summary = f"需要工具: {', '.join(needed_tools)}"
                             else:
                                 error_msg = analysis_result.get("message", "分析失败")
                                 observation = f"工具需求分析失败: {error_msg}"
                                 tool_success = False
+                                result_summary = f"分析失败: {error_msg}"
+                            
+                            # 🔧 记录工具使用
+                            tool_tracker.record_tool_usage(
+                                tool_server_id='mcp-search-tool',
+                                action=action,
+                                parameters={"task_description": task_desc},
+                                result=result_summary,
+                                success=tool_success,
+                                duration=execution_duration
+                            )
                                 
                         elif action == 'search_and_install_tools':
                             # 搜索并安装工具
@@ -561,6 +601,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                 task_description=task_desc,
                                 reason=reason
                             )
+                            execution_duration = time.time() - execution_start_time
                             
                             if search_result.get("success"):
                                 installed_tools = search_result.get("installed_tools", [])
@@ -568,23 +609,38 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                 if installed_tools:
                                     tool_names = [tool.get("name", tool.get("tool_id", "unknown")) for tool in installed_tools]
                                     observation = f"成功搜索并安装了 {len(installed_tools)} 个新工具: {', '.join(tool_names)}。"
+                                    result_summary = f"安装了工具: {', '.join(tool_names)}"
                                     
                                     # 更新可用工具描述
                                     try:
                                         available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
                                             fallback_client=self.toolscore_client
                                         )
+                                        # 🔧 更新工具跟踪器的可用工具信息
+                                        tool_tracker.set_available_tools(available_tools_description)
                                         logger.info("✅ 已更新可用工具列表")
                                     except Exception as e:
                                         logger.warning(f"更新工具列表失败: {e}")
                                 else:
                                     observation = "搜索完成，但未找到合适的新工具。"
+                                    result_summary = "未找到合适的新工具"
                                 
                                 tool_success = True
                             else:
                                 error_msg = search_result.get("message", "搜索失败")
                                 observation = f"工具搜索失败: {error_msg}"
                                 tool_success = False
+                                result_summary = f"搜索失败: {error_msg}"
+                            
+                            # 🔧 记录工具使用
+                            tool_tracker.record_tool_usage(
+                                tool_server_id='mcp-search-tool',
+                                action=action,
+                                parameters={"task_description": task_desc, "reason": reason},
+                                result=result_summary,
+                                success=tool_success,
+                                duration=execution_duration
+                            )
                         else:
                             # 未知的mcp-search-tool动作
                             observation = f"不支持的mcp-search-tool动作: {action}"
@@ -596,6 +652,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         tool_success = False
                         current_attempt_err_type = ErrorType.TOOL_ERROR
                         current_attempt_err_msg = str(e)
+                        
+                        # 🔧 即使异常也要记录工具使用
+                        execution_duration = time.time() - execution_start_time if 'execution_start_time' in locals() else 0.0
+                        tool_tracker.record_tool_usage(
+                            tool_server_id='mcp-search-tool',
+                            action=action if 'action' in locals() else 'unknown',
+                            parameters=params if 'params' in locals() else {},
+                            result=f"异常: {str(e)}",
+                            success=False,
+                            duration=execution_duration
+                        )
 
                 # 常规工具调用
                 elif tool_id and action:
@@ -611,11 +678,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     try:
                         logger.info(f"🌐 通过ToolScore HTTP API执行工具: {tool_id}/{action}")
                         
+                        execution_start_time = time.time()
                         execution_result = await self.toolscore_client.execute_tool(
                             tool_id=tool_id,
                             action=action,
                             parameters=cleaned_params
                         )
+                        execution_duration = time.time() - execution_start_time
                         
                         tool_success = execution_result.get('success', False)
                         
@@ -626,16 +695,30 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                                 if stdout:
                                     observation = f"Python代码执行成功。输出:\n{stdout[:200]}{'...' if len(stdout) > 200 else ''}"
                                     current_outputs.append(stdout)
+                                    result_summary = stdout
                                 else:
                                     observation = "Python代码执行成功，无输出。"
+                                    result_summary = "无输出"
                             else:
                                 observation = f"工具执行成功: {str(result_data)[:200]}{'...' if len(str(result_data)) > 200 else ''}"
                                 current_outputs.append(str(result_data))
+                                result_summary = str(result_data)
                         else:
                             error_msg = execution_result.get('error', 'Unknown error')
                             observation = f"工具执行失败: {error_msg}"
                             current_attempt_err_type = ErrorType.TOOL_ERROR
                             current_attempt_err_msg = error_msg
+                            result_summary = f"错误: {error_msg}"
+                        
+                        # 🔧 记录工具使用
+                        tool_tracker.record_tool_usage(
+                            tool_server_id=tool_id,
+                            action=action,
+                            parameters=cleaned_params,
+                            result=result_summary,
+                            success=tool_success,
+                            duration=execution_duration
+                        )
                         
                         logger.info(f"✅ 工具执行完成: {tool_id}, 成功: {tool_success}")
                     
@@ -852,8 +935,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             error_message=final_trajectory_error_message,
             metadata={
                 'runtime_id': self.runtime_id,
-                'original_task_id': task.task_id
-            }
+                'original_task_id': task.task_id,
+                # 🔧 添加工具使用统计
+                'tool_usage_stats': tool_tracker.get_usage_statistics()
+            },
+            # 🔧 新增：工具使用跟踪信息
+            available_tools=tool_tracker.get_available_tools_summary(),
+            used_tools=tool_tracker.get_used_tools_summary()
         )
         
         # 保存轨迹
@@ -874,10 +962,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         return trajectory
     
     def _create_tool_available_callback(self, trajectory_id: str, step_id: int):
-        """创建工具可用时的回调函数"""
-        async def callback(tool_event: Dict[str, Any]):
-            tool_name = tool_event.get("name", tool_event.get("tool_id", "unknown"))
-            logger.info(f"🎉 任务 {trajectory_id} 步骤 {step_id}: 新工具 {tool_name} 现已可用")
+        """创建工具可用时的回调函数（不接受参数）"""
+        async def callback(): # 不接受任何参数
+            # 这个回调只是一个触发器，实际的工具事件处理在 _on_new_tool_available 中进行
+            logger.info(f"🎉 任务 {trajectory_id} 步骤 {step_id}: 检测到新工具可用，正在检查...")
         return callback
     
     def _map_tool_id_to_server(self, tool_id: str) -> str:

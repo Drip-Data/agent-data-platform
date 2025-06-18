@@ -196,4 +196,5 @@ class InstallationResult:
     endpoint: Optional[str] = None
     error_message: Optional[str] = None
     container_id: Optional[str] = None
-    port: Optional[int] = None 
+    port: Optional[int] = None
+    process_id: Optional[int] = None 

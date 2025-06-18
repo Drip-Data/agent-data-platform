@@ -47,26 +47,29 @@ def initialize(config_manager: ConfigManager):
             runtime_name for runtime_name, runtime_config in routing_config.runtimes.items()
             if "mcp_server" in runtime_config.capabilities # 假设通过capabilities判断是否是mcp_server
         ]
-        # 确保包含python_executor_server和browser_navigator_server
-        if "python_executor_server" not in mcp_servers:
-            mcp_servers.append("python_executor_server")
+        # 确保包含必要的MCP服务器
+        if "microsandbox_server" not in mcp_servers:
+            mcp_servers.append("microsandbox_server")  # 添加MicroSandbox MCP Server
         if "browser_navigator_server" not in mcp_servers:
             mcp_servers.append("browser_navigator_server")
         # 添加 search_tool_server
         if "search_tool_server" not in mcp_servers:
             mcp_servers.append("search_tool_server")
+        # 移除已弃用的 python_executor_server
+        if "python_executor_server" in mcp_servers:
+            mcp_servers.remove("python_executor_server")
 
     except Exception as e:
         logger.warning(f"从ConfigManager加载MCP服务器列表失败: {e}，使用默认列表")
         mcp_servers = [
-            'python_executor_server',
+            'microsandbox_server',  # MicroSandbox MCP服务器
             'browser_navigator_server',
             'search_tool_server' # 添加 search_tool_server 到默认列表
         ]
     
     logger.info(f"MCP服务器启动器初始化完成，配置了 {len(mcp_servers)} 个服务器: {mcp_servers}")
 
-def start():
+async def start():
     """启动所有MCP服务器"""
     global mcp_processes, server_statuses
     
@@ -82,11 +85,11 @@ def start():
     
     # 遍历所有服务器并启动
     for server_name in mcp_servers:
-        _start_server(server_name) # _start_server现在可以访问_config_manager
+        await _start_server(server_name) # _start_server现在可以访问_config_manager
     
     logger.info(f"已启动 {len(mcp_processes)} 个MCP服务器")
 
-def _start_server(server_name: str):
+async def _start_server(server_name: str):
     """启动单个MCP服务器"""
     global mcp_processes, server_statuses
     
@@ -96,6 +99,20 @@ def _start_server(server_name: str):
         return
 
     logger.info(f"正在启动MCP服务器: {server_name}")
+    
+    # 检查是否是外部服务器
+    ports_config = _config_manager.get_ports_config()
+    server_config = None
+    if 'mcp_servers' in ports_config:
+        for key, value in ports_config['mcp_servers'].items():
+            if key == server_name and isinstance(value, dict):
+                server_config = value
+                break
+    
+    # 如果是外部服务器，验证连接而不启动进程
+    if server_config and server_config.get('type') == 'external':
+        await _verify_external_server(server_name, server_config)
+        return
     
     # 构建服务器目录路径
     # 假设mcp_servers都在项目根目录下的mcp_servers目录中
@@ -167,6 +184,11 @@ def _start_server(server_name: str):
             # 尝试从ports_config中找到对应服务器的配置
             if 'mcp_servers' in ports_config:
                 for key, value in ports_config['mcp_servers'].items():
+                    # 特殊映射处理
+                    if server_name == 'microsandbox_server' and key == 'microsandbox_mcp':
+                        if isinstance(value, dict):
+                            server_config = value
+                            break
                     # 移除 '_server' 后缀进行匹配
                     normalized_server_name = server_name.replace('_server', '')
                     if normalized_server_name == key:
@@ -270,6 +292,116 @@ def _start_server(server_name: str):
     except Exception as e:
         logger.error(f"启动MCP服务器时出错: {server_name} - {str(e)}")
         server_statuses[server_name] = {'status': 'error', 'message': str(e)}
+
+async def _verify_external_server(server_name: str, server_config: Dict[str, Any]):
+    """验证外部MCP服务器连接"""
+    global server_statuses
+    
+    host = server_config.get('host', 'localhost')
+    port = server_config.get('port')
+    endpoint = server_config.get('endpoint', '')
+    protocol = server_config.get('protocol', 'http')
+    
+    if not port:
+        logger.error(f"外部服务器 {server_name} 缺少端口配置")
+        server_statuses[server_name] = {'status': 'error', 'message': 'Missing port configuration'}
+        return
+    
+    # 构建URL
+    if protocol == 'http':
+        url = f"http://{host}:{port}{endpoint}"
+    else:
+        url = f"ws://{host}:{port}{endpoint}"
+    
+    logger.info(f"验证外部MCP服务器连接: {server_name} at {url}")
+    
+    try:
+        # 对于HTTP协议，进行简单的连接测试
+        if protocol == 'http':
+            # 使用同步方式进行简单的连接测试
+            import requests
+            try:
+                # 设置较短的超时时间
+                requests.get(f"http://{host}:{port}", timeout=5)
+                logger.info(f"外部MCP服务器连接成功: {server_name}")
+                server_statuses[server_name] = {'status': 'external_running', 'url': url}
+            except requests.exceptions.RequestException:
+                # 即使HTTP GET失败，也可能是MCP服务器正常运行（因为它可能不响应普通GET请求）
+                # 尝试检查端口是否开放
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                
+                if result == 0:
+                    logger.info(f"外部MCP服务器端口开放: {server_name}")
+                    server_statuses[server_name] = {'status': 'external_running', 'url': url}
+                    # 注册到ToolScore
+                    await _register_external_server_to_toolscore(server_name, server_config, url)
+                else:
+                    logger.error(f"外部MCP服务器连接失败: {server_name}")
+                    server_statuses[server_name] = {'status': 'external_error', 'message': 'Connection failed'}
+        else:
+            # 对于WebSocket协议，检查端口是否开放
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            
+            if result == 0:
+                logger.info(f"外部MCP服务器连接成功: {server_name}")
+                server_statuses[server_name] = {'status': 'external_running', 'url': url}
+                # 注册到ToolScore
+                await _register_external_server_to_toolscore(server_name, server_config, url)
+            else:
+                logger.error(f"外部MCP服务器连接失败: {server_name}")
+                server_statuses[server_name] = {'status': 'external_error', 'message': 'Connection failed'}
+                
+    except Exception as e:
+        logger.error(f"验证外部MCP服务器时出错: {server_name} - {str(e)}")
+        server_statuses[server_name] = {'status': 'external_error', 'message': str(e)}
+
+async def _register_external_server_to_toolscore(server_name: str, server_config: Dict[str, Any], url: str):
+    """将外部MCP服务器注册到ToolScore"""
+    try:
+        # 导入必要的类
+        from core.toolscore.interfaces import MCPServerSpec, ToolType
+        
+        # 创建MCP服务器规范
+        server_spec = MCPServerSpec(
+            tool_id=f"{server_name}-mcp-server",
+            name=server_name,
+            description=server_config.get('description', f'{server_name} MCP Server'),
+            tool_type=ToolType.MCP_SERVER,
+            capabilities=[],  # 能力列表，将从MCP服务器动态获取
+            tags=['python', 'sandbox', 'execution'] if server_name == 'microsandbox' else ['external'],
+            version=server_config.get('version', '1.0.0'),
+            endpoint=url,
+            server_config=server_config,
+            connection_params={}
+        )
+        
+        # 获取ToolScore服务的UnifiedToolLibrary实例
+        from services.toolscore_service import get_tool_library
+        tool_library = get_tool_library()
+        
+        if tool_library:
+            # 注册外部MCP服务器
+            result = await tool_library.register_external_mcp_server(server_spec)
+            
+            if result.success:
+                logger.info(f"✅ 外部MCP服务器已成功注册到ToolScore: {server_name}")
+                server_statuses[server_name]['toolscore_registered'] = True
+            else:
+                logger.error(f"❌ 外部MCP服务器注册到ToolScore失败: {server_name} - {result.error}")
+                server_statuses[server_name]['toolscore_registered'] = False
+        else:
+            logger.warning(f"⚠️ ToolScore工具库未可用，无法注册: {server_name}")
+            server_statuses[server_name]['toolscore_registered'] = False
+            
+    except Exception as e:
+        logger.error(f"注册外部MCP服务器到ToolScore时出错: {server_name} - {str(e)}")
+        server_statuses[server_name]['toolscore_registered'] = False
 
 def _monitor_server(server_name, process):
     """监控MCP服务器进程"""

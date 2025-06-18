@@ -338,7 +338,7 @@ async def main_async():
     
     try:
         service_manager.initialize_all({}) # config参数可能不再需要，因为组件已直接实例化
-        service_manager.start_all()
+        await service_manager.start_all()
         
         logger.info("所有服务已启动，按 Ctrl+C 停止")
         

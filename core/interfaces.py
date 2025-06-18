@@ -123,6 +123,10 @@ class TrajectoryResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     
+    # 🔍 新增：工具使用跟踪
+    available_tools: List[Dict[str, Any]] = field(default_factory=list)  # 任务开始时可用的MCP服务器
+    used_tools: Dict[str, bool] = field(default_factory=dict)           # 实际使用的工具: {tool_key: success_status}
+    
     def to_dict(self) -> Dict:
         # 安全处理error_type
         error_type_value = None
@@ -144,7 +148,10 @@ class TrajectoryResult:
             'error_message': self.error_message,
             'total_duration': self.total_duration,
             'metadata': self.metadata,
-            'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.created_at))
+            'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.created_at)),
+            # 🔍 新增：工具使用跟踪
+            'available_tools': self.available_tools,
+            'used_tools': self.used_tools
         }
     
     @classmethod
@@ -178,7 +185,10 @@ class TrajectoryResult:
             error_message=data.get('error_message'),
             total_duration=data.get('total_duration', 0.0),
             metadata=data.get('metadata', {}),
-            created_at=data.get('created_at', time.time())
+            created_at=data.get('created_at', time.time()),
+            # 🔍 新增：工具使用跟踪
+            available_tools=data.get('available_tools', []),
+            used_tools=data.get('used_tools', {})
         )
     
     def json(self) -> str:

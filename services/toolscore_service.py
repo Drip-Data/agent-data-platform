@@ -29,10 +29,14 @@ def initialize(config_manager: ConfigManager):
     
     logger.info("正在初始化ToolScore服务...")
     
-    tool_library = UnifiedToolLibrary()
+    tool_library = UnifiedToolLibrary(config_manager=_config_manager)
     core_manager = tool_library.core_manager
     
     logger.info("ToolScore服务初始化完成（异步初始化将在start()中进行）")
+
+def get_tool_library() -> Optional[UnifiedToolLibrary]:
+    """获取ToolScore工具库实例"""
+    return tool_library
 
 def start():
     """启动ToolScore服务"""

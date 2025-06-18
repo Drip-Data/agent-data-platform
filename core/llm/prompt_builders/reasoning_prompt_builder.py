@@ -32,24 +32,7 @@ class ReasoningPromptBuilder(IPromptBuilder):
         """构建基础推理提示"""
         tool_descriptions = []
         for tool_name in available_tools:
-            logger.debug("构建推理提示：应用严格的工具使用规则和示例")
-            if tool_name == 'browser':
-                browser_desc = (
-                    f"- browser: 用于与网页交互的工具。支持以下主要 ACTION:\n"
-                    f"    - `browser_navigate`: 导航到指定URL。PARAMETERS: `{{ \"url\": \"<完整的HTTP/HTTPS URL>\" }}`\n"
-                    f"    - `browser_get_text`: 提取页面文本。PARAMETERS: `{{ \"selector\": \"<CSS选择器(可选)>\" }}` (若无selector，则提取body文本)\n"
-                    f"    - `browser_click`: 点击指定元素。PARAMETERS: `{{ \"selector\": \"<CSS选择器>\" }}`\n"
-                    f"    (更多操作如 browser_fill_form, browser_extract_links 等请参考工具文档，并确保 PARAMETERS 格式正确)"
-                )
-                tool_descriptions.append(browser_desc)
-            elif tool_name == 'python_executor':
-                python_desc = (
-                    f"- python_executor: 用于执行Python代码。主要 ACTION:\n"
-                    f"    - `python_execute`: 执行Python代码。PARAMETERS: `{{ \"code\": \"<Python代码字符串>\" }}`"
-                )
-                tool_descriptions.append(python_desc)
-            else:
-                tool_descriptions.append(f"- {tool_name}")
+            tool_descriptions.append(f"- {tool_name}")
         tools_desc = "\n".join(tool_descriptions)
         
         browser_context_str = ""
@@ -103,13 +86,9 @@ class ReasoningPromptBuilder(IPromptBuilder):
 
 ## 🎯 关键规则
 
-### 工具参数规范:
-1. **browser_navigate**: `{{"url": "完整HTTP/HTTPS URL"}}`
-2. **browser_click**: `{{"selector": "CSS选择器"}}`
-3. **browser_get_text**: `{{"selector": "CSS选择器"}}` 或 `{{}}`
-4. **python_execute**: `{{"code": "Python代码字符串"}}`
-5. **complete_task**: `{{}}`
-6. **error**: `{{}}`
+### 工具参数规范: (请参考可用工具部分的详细描述)
+1. **complete_task**: `{{}}`
+2. **error**: `{{}}`
 
 ### 决策优先级:
 - 优先使用现有工具完成任务

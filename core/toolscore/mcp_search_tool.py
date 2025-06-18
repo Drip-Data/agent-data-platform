@@ -311,7 +311,16 @@ Return format:
             
             logger.info(f"📖 首次加载工具定义文件: {self._mcp_tools_path}")
             with open(self._mcp_tools_path, 'r', encoding='utf-8') as f:
-                self._mcp_tools_data = json.load(f)
+                json_data = json.load(f)
+            
+            # 提取服务器列表
+            if isinstance(json_data, dict) and "servers" in json_data:
+                self._mcp_tools_data = json_data["servers"]
+            elif isinstance(json_data, list):
+                self._mcp_tools_data = json_data
+            else:
+                logger.error(f"❌ 工具定义文件格式错误: 期望包含'servers'键的字典或列表")
+                self._mcp_tools_data = []
             
             logger.info(f"✅ 工具定义已缓存，共 {len(self._mcp_tools_data)} 个工具")
         

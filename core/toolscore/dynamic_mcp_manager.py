@@ -18,6 +18,7 @@ import time
 
 from .interfaces import InstallationResult
 from .runners import BaseRunner, ProcessRunner
+from .external_mcp_manager import ExternalMCPManager
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,11 @@ class MCPSearchResult:
 class DynamicMCPManager:
     """动态MCP服务器管理器 - 无Docker版本"""
     
-    def __init__(self, runner: BaseRunner = None):
+    def __init__(self, runner: BaseRunner = None, config_manager=None):
         self.runner = runner or ProcessRunner()
         self.installed_servers: Dict[str, InstallationResult] = {}
         self.registry_cache: Dict[str, List[MCPServerCandidate]] = {}
+        self.external_manager = ExternalMCPManager(config_manager) if config_manager else None
         
         # MCP服务器注册中心配置
         self.registries = {
@@ -71,6 +73,11 @@ class DynamicMCPManager:
         logger.info("启动动态MCP管理器...")
         try:
             await self._restore_persistent_servers()
+            
+            # 🔧 新增：自动启动关键外部服务器
+            if self.external_manager:
+                await self._auto_start_external_servers()
+            
             logger.info("动态MCP管理器启动完成")
         except Exception as e:
             logger.error(f"启动动态MCP管理器失败: {e}")
@@ -629,4 +636,51 @@ class DynamicMCPManager:
             "running_servers": len(running_servers),
             "cached_registries": len(self.registry_cache),
             "runner_type": type(self.runner).__name__
-        } 
+        }
+    
+    async def _auto_start_external_servers(self):
+        """自动启动关键外部服务器"""
+        logger.info("🚀 开始自动启动外部MCP服务器...")
+        
+        # 启动MicroSandbox
+        try:
+            logger.info("尝试启动MicroSandbox...")
+            result = await self.external_manager.start_microsandbox_server()
+            
+            if result["success"]:
+                logger.info(f"✅ MicroSandbox启动成功: {result['endpoint']}")
+                
+                # 注册到工具库
+                try:
+                    from .unified_tool_library import UnifiedToolLibrary
+                    # 这里需要获取unified_tool_library实例来注册
+                    # 暂时记录到installed_servers中
+                    self.installed_servers["microsandbox"] = InstallationResult(
+                        success=True,
+                        server_id="microsandbox",
+                        endpoint=result["endpoint"],
+                        container_id=result.get("container_id"),
+                        process_id=result.get("container_id"),
+                        port=result["port"],
+                        error_message=None
+                    )
+                    
+                except Exception as e:
+                    logger.warning(f"注册MicroSandbox到工具库失败: {e}")
+            else:
+                logger.warning(f"MicroSandbox启动失败: {result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            logger.error(f"启动MicroSandbox时出错: {e}")
+        
+        logger.info("外部MCP服务器自动启动完成")
+    
+    async def ensure_external_server_available(self, server_type: str) -> Dict[str, Any]:
+        """确保指定类型的外部服务器可用"""
+        if not self.external_manager:
+            return {"success": False, "error": "外部管理器未初始化"}
+        
+        if server_type == "microsandbox":
+            return await self.external_manager.start_microsandbox_server()
+        
+        return {"success": False, "error": f"不支持的服务器类型: {server_type}"} 

@@ -87,6 +87,9 @@ class RealTimeToolClient:
         """监听工具更新事件"""
         try:
             import aiohttp
+            if self.websocket is None:
+                logger.error("WebSocket连接未建立")
+                return
             async for message in self.websocket:
                 try:
                     # websockets 库 -> str / bytes
@@ -246,7 +249,7 @@ class RealTimeToolClient:
     
     async def register_pending_request(self, request_id: str, 
                                      required_capabilities: List[str],
-                                     callback: Callable = None):
+                                     callback: Optional[Callable[[], Any]] = None):
         """注册等待工具的请求"""
         self.pending_tool_requests[request_id] = {
             "required_capabilities": required_capabilities,
@@ -271,6 +274,8 @@ class RealTimeToolClient:
                         desc = f"- {tool_id}: 可用工具"
                         if tool_id == "python-executor-mcp-server" or "python" in tool_id:
                             desc += " (操作: python_execute, python_analyze, python_visualize, python_install_package)"
+                        elif tool_id == "microsandbox-mcp-server" or "microsandbox" in tool_id:
+                            desc += " (操作: microsandbox_execute, microsandbox_install_package, microsandbox_list_sessions, microsandbox_close_session, microsandbox_cleanup_expired)"
                         elif tool_id == "browser-navigator-mcp-server" or "browser" in tool_id:
                             desc += " (操作: navigate_to_url, get_page_content, click_element, fill_form)"
                         elif tool_id == "mcp-search-tool" or "search" in tool_id:

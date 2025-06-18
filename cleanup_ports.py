@@ -1,42 +1,35 @@
-#!/usr/bin/env python3
-"""
-快速清理端口脚本
-"""
-
+#\!/usr/bin/env python3
 import subprocess
-import sys
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def cleanup_ports():
-    """清理所有相关端口"""
-    ports = [8088, 8089, 8100, 8081, 8082, 8080]
-    
-    print("🧹 开始清理端口...")
+    ports = [8088, 8089, 8090, 8091, 8092, 5555, 8081, 8082, 8080]
     
     for port in ports:
         try:
-            # 查找占用端口的进程
+            logger.info(f"Cleaning up port {port}...")
             result = subprocess.run(
                 ['lsof', '-ti', f':{port}'], 
-                capture_output=True, text=True, timeout=3
+                capture_output=True, text=True, timeout=5
             )
             
             if result.returncode == 0 and result.stdout.strip():
                 pids = result.stdout.strip().split('\n')
-                print(f"🔍 端口 {port} 被进程占用: {pids}")
-                
                 for pid in pids:
                     try:
-                        subprocess.run(['kill', '-9', pid], timeout=2)
-                        print(f"   ✅ 已终止进程 {pid}")
+                        subprocess.run(['kill', '-9', pid], timeout=3, check=False)
+                        logger.info(f"Killed process {pid} using port {port}")
                     except Exception as e:
-                        print(f"   ❌ 终止进程 {pid} 失败: {e}")
+                        logger.warning(f"Failed to kill process {pid}: {e}")
             else:
-                print(f"✅ 端口 {port} 未被占用")
+                logger.info(f"Port {port} is free")
                 
         except Exception as e:
-            print(f"❌ 检查端口 {port} 失败: {e}")
-    
-    print("🎉 端口清理完成")
+            logger.warning(f"Error checking port {port}: {e}")
 
 if __name__ == "__main__":
     cleanup_ports()
+    logger.info("Port cleanup completed")

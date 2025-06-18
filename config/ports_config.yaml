@@ -28,12 +28,31 @@ mcp_servers:
     protocol: "http"
     health_endpoint: "/health"
     
-  python_executor:
-    port: 8081 # 初始配置端口，但会受auto_detect影响
-    description: "Python代码执行器"
+  # python_executor:  # 已替换为microsandbox
+  #   port: 8081
+  #   description: "Python代码执行器（已弃用）"
+  #   protocol: "websocket"
+  #   health_endpoint: "/health"
+  #   auto_start: false
+    
+  microsandbox_mcp:
+    port: 8090
+    description: "MicroSandbox MCP服务器 - 安全代码执行"
     protocol: "websocket"
     health_endpoint: "/health"
     auto_start: true
+    type: "internal"  # 内部MCP服务器
+    
+  # microsandbox_service:  # 保留外部microsandbox服务配置供参考
+  #   port: 5555
+  #   description: "MicroSandbox外部服务（由msb server管理）"
+  #   protocol: "http"
+  #   type: "external"
+  #   auto_start: true
+  #   startup_method: "process"
+  #   start_command: "msb server start --detach --dev"
+  #   stop_command: "msb server stop"
+  #   health_endpoint: "/health"
     
   browser_navigator:
     port: 8082 # 初始配置端口，但会受auto_detect影响

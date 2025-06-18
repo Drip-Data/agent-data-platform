@@ -30,9 +30,9 @@ class UnifiedToolLibrary:
     - 无硬编码规则：不使用关键词匹配等硬编码逻辑
     """
     
-    def __init__(self, mcp_client: Optional[Any] = None, redis_url: str = "redis://localhost:6379", redis_manager=None): # 修改默认 Redis URL
+    def __init__(self, mcp_client: Optional[Any] = None, redis_url: str = "redis://localhost:6379", redis_manager=None, config_manager=None): # 修改默认 Redis URL
         # 使用新的核心管理器整合分散功能
-        self.core_manager = CoreManager(redis_url, redis_manager=redis_manager)
+        self.core_manager = CoreManager(redis_url, redis_manager=redis_manager, config_manager=config_manager)
         
         # 初始化核心组件
         self.tool_registry = ToolRegistry()
@@ -361,9 +361,10 @@ class UnifiedToolLibrary:
                 descriptions = []
                 for tool in tools:
                     capabilities_desc = "\n".join([
-                        f"  - {cap.name}: {cap.description}"
-                        f"\n    参数: {self._format_parameters(cap.parameters)}"
-                        f"\n    示例: {cap.examples[0] if cap.examples else 'N/A'}"
+                        f"  - **动作**: `{cap.name}`\n"
+                        f"    描述: {cap.description}\n"
+                        f"    参数: {self._format_parameters(cap.parameters)}\n"
+                        f"    示例: {cap.examples[0] if cap.examples else 'N/A'}"
                         for cap in tool.capabilities
                     ])
                     

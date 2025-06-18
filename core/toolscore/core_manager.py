@@ -31,10 +31,11 @@ class CoreManager:
     - 简化的持久化存储 (原persistent_storage)
     """
     
-    def __init__(self, redis_url: str = "redis://localhost:6379", redis_manager=None):
+    def __init__(self, redis_url: str = "redis://localhost:6379", redis_manager=None, config_manager=None):
         self.redis_url = redis_url
         self.redis_client: Optional[redis.Redis] = None
         self.redis_manager = redis_manager  # 新增：Redis管理器实例
+        self.config_manager = config_manager  # 新增：配置管理器
 
         # === Runner 选择 ===
         # 强制注入 ProcessRunner 实例
@@ -118,7 +119,7 @@ class CoreManager:
             from core.toolscore.dynamic_mcp_manager import DynamicMCPManager
             from core.toolscore.monitoring_api import ToolScoreMonitoringAPI
             
-            self.dynamic_mcp_manager = DynamicMCPManager(runner=self.runner)
+            self.dynamic_mcp_manager = DynamicMCPManager(runner=self.runner, config_manager=self.config_manager)
             # 暂时不传入工具库，稍后通过设置方法注入
             self.monitoring_api = ToolScoreMonitoringAPI()
             

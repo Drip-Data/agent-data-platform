@@ -65,13 +65,19 @@ class ServiceManager:
             logger.info(f"初始化服务: {name}")
             self.services[name]['initialize'](config)
     
-    def start_all(self):
+    async def start_all(self):
         """按依赖顺序启动所有服务"""
         logger.info("正在启动所有服务...")
         
         for name in self.start_order:
             logger.info(f"启动服务: {name}")
-            self.services[name]['start']()
+            start_fn = self.services[name]['start']
+            
+            # 检查是否是异步函数
+            if asyncio.iscoroutinefunction(start_fn):
+                await start_fn()
+            else:
+                start_fn()
             
         logger.info("所有服务已启动")
     
