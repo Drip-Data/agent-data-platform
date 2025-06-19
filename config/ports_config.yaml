@@ -62,7 +62,7 @@ mcp_servers:
     auto_start: true
     
   browser_use:
-    port: 8083
+    port: 8084
     description: "Browser-Use AI浏览器自动化服务器"
     protocol: "websocket" 
     health_endpoint: "/health"

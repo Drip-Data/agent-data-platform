@@ -77,34 +77,26 @@ class MCPSearchTool:
                 install_result = await self.dynamic_mcp_manager.install_mcp_server(candidate)
                 
                 if install_result.success:
-                    # 注册到工具库
-                    registration_result = await self.dynamic_mcp_manager.register_installed_server(
-                        candidate, install_result
-                    )
-                    
-                    if registration_result.success:
-                        logger.info(f"✅ 成功安装并注册工具: {candidate.name}")
-                        return MCPSearchResult(
-                            success=True,
-                            message=f"成功安装工具: {candidate.name}",
-                            installed_tools=[{
+                    logger.info(f"✅ 成功安装工具: {candidate.name}")
+                    return MCPSearchResult(
+                        success=True,
+                        message=f"成功安装工具: {candidate.name}",
+                        installed_tools=[{
                             "name": candidate.name,
                             "description": candidate.description,
                             "capabilities": candidate.capabilities,
-                                "server_id": install_result.server_id,
-                                "selection_reason": tool_info.get('reason', 'LLM推荐')
-                            }]
-                        )
-                    else:
-                        logger.warning(f"⚠️ 工具安装成功但注册失败: {candidate.name}")
+                            "server_id": install_result.server_id,
+                            "selection_reason": tool_info.get('reason', 'LLM推荐')
+                        }]
+                    )
                 else:
                     logger.warning(f"❌ 工具安装失败: {tool_info.get('name')} - {install_result.error_message}")
             
-                return MCPSearchResult(
-                    success=False,
+            return MCPSearchResult(
+                success=False,
                 message="所有推荐工具安装均失败",
-                    installed_tools=[]
-                )
+                installed_tools=[]
+            )
         
         except Exception as e:
             logger.error(f"❌ MCP搜索安装过程异常: {e}")
@@ -114,15 +106,28 @@ class MCPSearchTool:
                 installed_tools=[]
             )
     
-    async def analyze_tool_needs(self, task_description: str, current_available_tools: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def analyze_tool_needs(self, task_description: str, reason: str = "") -> Dict[str, Any]:
         """分析工具需求，返回LLM推荐但不执行安装"""
         logger.info(f"🧠 分析任务工具需求: {task_description[:100]}...")
+        if reason:
+            logger.info(f"分析原因: {reason}")
         
         try:
-            # 工具缺口检测
-            analysis = await self.tool_gap_detector.analyze_tool_sufficiency(
-                task_description, current_available_tools
+            # 由于analyze_tool_needs通常在没有足够工具时被调用，直接进行工具搜索
+            logger.info("🔍 直接进行LLM工具选择...")
+            
+            # 直接使用LLM选择工具
+            recommended_tools = await self.find_matching_tools_from_analysis(
+                task_description, []
             )
+            
+            # 构造分析结果
+            has_sufficient = len(recommended_tools) == 0
+            analysis = type('Analysis', (), {
+                'has_sufficient_tools': has_sufficient,
+                'overall_assessment': '工具需求分析完成' if has_sufficient else '需要安装新工具',
+                'tool_requirements': []
+            })()
             
             # 格式化分析结果
             has_sufficient = getattr(analysis, 'has_sufficient_tools', False)
@@ -280,17 +285,30 @@ Return format:
             # 根据实际的MCPServerCandidate类结构来构建
             from .dynamic_mcp_manager import MCPServerCandidate
             
+            # 从mcp_tools.json中获取安全信息
+            security_info = tool_info.get('security', {})
+            verified = security_info.get('verified', False) if isinstance(security_info, dict) else False
+            
+            # 计算安全分数
+            security_score = 0.0
+            if verified:
+                security_score += 0.5
+            if tool_info.get('author') in ['anthropic', 'community']:
+                security_score += 0.3
+            if tool_info.get('capabilities'):
+                security_score += 0.2
+                
             return MCPServerCandidate(
                 name=tool_info.get('name', 'Unknown Tool'),
                 description=tool_info.get('description', ''),
                 github_url=tool_info.get('github_url', tool_info.get('repository_url', '')),
                 author=tool_info.get('author', 'Unknown'),
                 tags=tool_info.get('tags', []),
-                install_method=tool_info.get('install_method', 'pip'),
+                install_method=tool_info.get('install_method', 'python'),
                 capabilities=tool_info.get('capabilities', []),
-                verified=tool_info.get('verified', False),
-                security_score=tool_info.get('security_score', 0.0),
-                popularity_score=tool_info.get('popularity_score', 0.0)
+                verified=verified,
+                security_score=security_score,
+                popularity_score=0.5  # 给一个默认的中等流行度分数
             )
         except Exception as e:
             logger.error(f"创建工具候选者失败: {e}")

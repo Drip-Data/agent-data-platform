@@ -214,6 +214,7 @@ class BrowserUseMCPServer:
                 browser_config = BrowserConfig(
                     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
                     disable_security=True,     # 允许跨域访问
+                    chrome_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",  # macOS Chrome路径
                     extra_chromium_args=[
                         "--no-sandbox",
                         "--disable-dev-shm-usage",
@@ -237,7 +238,8 @@ class BrowserUseMCPServer:
                 # 回退到基本配置
                 browser_config = BrowserConfig(
                     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
-                    disable_security=True
+                    disable_security=True,
+                    chrome_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"  # macOS Chrome路径
                 )
                 self.browser = Browser(config=browser_config)
                 await self.browser.start()
@@ -1058,6 +1060,9 @@ class BrowserUseMCPServer:
 
 async def main():
     """主函数"""
+    import signal
+    import sys
+    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -1069,13 +1074,51 @@ async def main():
     
     server = BrowserUseMCPServer(config_manager)
     
+    # 设置信号处理器确保优雅退出
+    def signal_handler():
+        logger.info("收到停止信号，正在清理资源...")
+        # 创建任务来异步清理
+        asyncio.create_task(cleanup_and_exit(server))
+    
+    async def cleanup_and_exit(server):
+        try:
+            # 清理浏览器资源
+            if hasattr(server, 'browser') and server.browser:
+                await server.browser.close()
+                logger.info("浏览器会话已关闭")
+            
+            # 清理其他资源
+            if hasattr(server, 'cleanup'):
+                await server.cleanup()
+                
+        except Exception as e:
+            logger.error(f"清理过程中出错: {e}")
+        finally:
+            logger.info("Browser Use服务器已完全停止")
+            # 强制退出
+            os._exit(0)
+    
+    # 注册信号处理器
+    for sig in [signal.SIGTERM, signal.SIGINT]:
+        signal.signal(sig, lambda s, f: signal_handler())
+    
     try:
         await server.run()
     except KeyboardInterrupt:
         logger.info("收到中断信号，正在退出...")
+        await cleanup_and_exit(server)
+    except OSError as e:
+        if "Address already in use" in str(e) or "Errno 48" in str(e):
+            logger.error(f"端口冲突: {e}")
+            logger.error("端口8084已被占用，请检查是否有其他Browser Use进程正在运行")
+            sys.exit(1)
+        else:
+            logger.error(f"网络错误: {e}")
+            sys.exit(1)
     except Exception as e:
         logger.error(f"服务器启动失败: {e}")
-        raise
+        await cleanup_and_exit(server)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -86,27 +86,28 @@ class BatchTaskTester:
         return tasks
     
     def standardize_task_format(self, task: Dict) -> Optional[Dict]:
-        """标准化任务格式"""
-        # 支持多种任务格式
-        standardized = {}
-        
+        """标准化任务格式 - 适配最新API格式"""
         # 获取任务描述
         description = (task.get("description") or 
                       task.get("input") or 
                       task.get("task_description"))
         if not description:
             return None
-            
-        standardized["input"] = description
-        standardized["description"] = f"批量测试: {description[:50]}..."
         
-        # 保留原始task_id用于追踪
-        if "task_id" in task:
-            standardized["original_task_id"] = task["task_id"]
-            
-        # 其他可选字段
-        if "priority" in task:
-            standardized["priority"] = task["priority"]
+        # 构建符合API要求的标准格式
+        standardized = {
+            "task_type": task.get("task_type", "reasoning"),  # 添加必需的task_type字段
+            "input": description,  # 使用input作为主要内容字段
+            "priority": task.get("priority", "medium"),  # 设置默认优先级
+            "context": {
+                "original_task_id": task.get("task_id"),  # 将原始ID放入context中
+                "batch_test": True,  # 标记为批量测试
+                "expected_tools": task.get("expected_tools", []),  # 保留期望工具信息
+                "max_steps": task.get("max_steps", 15),  # 保留步数限制
+                "domain": task.get("domain"),  # 保留领域信息
+                "complexity": task.get("complexity")  # 保留复杂度信息
+            }
+        }
             
         return standardized
     
@@ -135,7 +136,7 @@ class BatchTaskTester:
                                      original_task_id: Optional[str],
                                      description: str,
                                      submit_time: datetime) -> TaskResult:
-        """等待任务完成"""
+        """等待任务完成 - 适配新的API响应格式"""
         start_time = time.time()
         
         while time.time() - start_time < self.timeout:
@@ -149,14 +150,15 @@ class BatchTaskTester:
                         status = data.get("status")
                         
                         if status in ["completed", "failed"]:
-                            result_data = data.get("result", {})
+                            # 适配新的API响应格式
+                            result_data = data.get("result") or {}
                             
                             return TaskResult(
                                 task_id=task_id,
                                 original_task_id=original_task_id,
                                 description=description,
                                 status=status,
-                                success=result_data.get("success", False),
+                                success=(status == "completed"),
                                 final_result=result_data.get("final_result"),
                                 error_message=result_data.get("error_message"),
                                 total_duration=result_data.get("total_duration", 0),

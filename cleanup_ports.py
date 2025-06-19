@@ -6,7 +6,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def cleanup_ports():
-    ports = [8088, 8089, 8090, 8091, 8092, 5555, 8081, 8082, 8080]
+    ports = [8088, 8089, 8090, 8091, 8092, 5555, 8081, 8082, 8080, 8083, 8084]
     
     for port in ports:
         try:

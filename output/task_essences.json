@@ -327,5 +327,329 @@
     },
     "extracted_at": "2025-06-19T18:24:11.623975",
     "source_trajectory_id": "925a9848-2569-44b7-898a-d972e243f65a"
+  },
+  {
+    "essence_id": "essence_1750331349_faa6e9be-2016-4166-b2c2-d55ef5be8302",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "计算从1到150所有整数之和的平方。任务核心是应用等差数列求和公式，并在编程环境中进行精确的数值计算，以验证数学公式应用与计算准确性。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 42.076,
+      "steps_count": 3,
+      "key_features": [
+        "数学计算",
+        "等差数列求和公式应用",
+        "精确数值计算",
+        "编程环境执行",
+        "考察计算准确性"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "browser_navigator",
+        "microsandbox-mcp-server",
+        "python_executor"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:09:09.201455",
+    "source_trajectory_id": "faa6e9be-2016-4166-b2c2-d55ef5be8302"
+  },
+  {
+    "essence_id": "essence_1750331359_051cd0a5-25bb-4bbe-a368-c0b52f29b84f",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "使用增强推理代理执行基础数学运算“1+1”，并准确输出结果。任务核心在于验证推理环境对简单算术请求的决策与代码执行能力，确保代理能正确调用工具完成计算，并打印最终结果，以测试其基础流程处理效率与准确性。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 54.075,
+      "steps_count": 3,
+      "key_features": [
+        "基础数学运算",
+        "智能代理执行",
+        "验证代理决策与执行能力",
+        "代码沙箱工具使用",
+        "结果准确性要求"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "browser_navigator",
+        "microsandbox-mcp-server",
+        "python_executor"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:09:19.787627",
+    "source_trajectory_id": "051cd0a5-25bb-4bbe-a368-c0b52f29b84f"
+  },
+  {
+    "essence_id": "essence_1750331786_71cad143-bfef-425c-8401-d795f961cc9b",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "计算从1到150所有整数之和的平方。任务要求运用等差数列求和公式，并通过编程工具进行精确的数值计算。此任务核心在于数学公式的正确应用与计算结果的准确性，最终输出该和的二次方。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 24.706,
+      "steps_count": 2,
+      "key_features": [
+        "数学公式应用",
+        "精确数值计算",
+        "编程实现",
+        "单步高效执行"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "python_executor",
+        "browser_navigator",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:16:26.619121",
+    "source_trajectory_id": "71cad143-bfef-425c-8401-d795f961cc9b"
+  },
+  {
+    "essence_id": "essence_1750331793_02633f0b-6557-42af-b46c-3421208db625",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "在指定代码执行环境中，执行基础数学运算“1+1”并准确输出结果。此任务旨在验证智能代理对直接计算请求的响应能力，确保其能识别并利用合适的工具（如沙箱环境）高效完成简单的算术操作，从而验证环境的基础计算执行功能。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 30.511,
+      "steps_count": 2,
+      "key_features": [
+        "基础数学运算",
+        "直接代码执行",
+        "环境能力验证",
+        "单工具调用",
+        "低推理复杂度"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "browser_navigator",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:16:33.935018",
+    "source_trajectory_id": "02633f0b-6557-42af-b46c-3421208db625"
+  },
+  {
+    "essence_id": "essence_1750331809_da8c3879-a95a-40d5-adbe-d0447c909aa1",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "执行并验证基础数学运算“1+1”的准确性。任务目标是确保智能代理能通过代码执行工具准确完成直接算术计算，验证其基础计算能力和工具调用逻辑。此任务旨在测试代理对简单算术请求的响应与处理可靠性。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 28.337,
+      "steps_count": 2,
+      "key_features": [
+        "基础算术计算",
+        "通过代码执行完成",
+        "代理工具调用验证",
+        "任务复杂度低"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "browser_navigator",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:16:49.945481",
+    "source_trajectory_id": "da8c3879-a95a-40d5-adbe-d0447c909aa1"
+  },
+  {
+    "essence_id": "essence_1750331818_678ea3ba-68bc-4e64-b465-3b77cf28f601",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "利用代码执行工具，精确计算并验证基础算术表达式“1+1”的结果。此任务旨在评估代理对简单数学运算的执行与验证能力，确保其计算的准确性。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 34.446,
+      "steps_count": 2,
+      "key_features": [
+        "基础算术计算",
+        "通过代码执行完成",
+        "单步直接操作",
+        "代理计算能力验证"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "browser_navigator",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:16:58.618038",
+    "source_trajectory_id": "678ea3ba-68bc-4e64-b465-3b77cf28f601"
+  },
+  {
+    "essence_id": "essence_1750332429_3a6cf3c2-bdc4-425b-bdf0-48312fce4a2a",
+    "task_type": "reasoning",
+    "domain": "web_automation",
+    "query": "使用浏览器工具访问百度首页(https://www.baidu.com)，成功导航后，提取并返回该页面的标题和主要内容。此任务旨在验证系统对网页的基础导航和关键信息提取能力，是Web自动化功能的基础测试。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 29.798,
+      "steps_count": 3,
+      "key_features": [
+        "网页导航",
+        "页面内容提取",
+        "Web自动化能力验证",
+        "特定URL操作"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "browser-use-mcp-server",
+        "browser_navigator"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:27:09.264904",
+    "source_trajectory_id": "3a6cf3c2-bdc4-425b-bdf0-48312fce4a2a"
+  },
+  {
+    "essence_id": "essence_1750332436_73e78ace-073c-45b6-b2a7-295669c84b2c",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "利用浏览器自动化工具，在百度搜索'人工智能发展现状'。任务目标是准确获取并返回搜索结果页面的前3个标题，以验证工具的网页导航、搜索执行及关键信息提取能力。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 28.308,
+      "steps_count": 3,
+      "key_features": [
+        "网页导航",
+        "搜索操作",
+        "信息提取",
+        "工具能力验证"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "browser-use-mcp-server",
+        "browser_navigator"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:27:16.227003",
+    "source_trajectory_id": "73e78ace-073c-45b6-b2a7-295669c84b2c"
+  },
+  {
+    "essence_id": "essence_1750332443_e016b99f-b9d1-4175-86fd-42833dff6f3b",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "使用浏览器自动化工具访问一个在线计算器网站，输入数学表达式'25+37'，并准确提取并返回计算结果。此任务旨在测试浏览器工具的网页导航、表单填写和结果提取能力。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 40.731,
+      "steps_count": 3,
+      "key_features": [
+        "网页导航与访问",
+        "表单数据输入",
+        "网页内容（计算结果）提取",
+        "浏览器工具交互能力测试"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "browser-use-mcp-server",
+        "browser_navigator"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:27:23.192393",
+    "source_trajectory_id": "e016b99f-b9d1-4175-86fd-42833dff6f3b"
+  },
+  {
+    "essence_id": "essence_1750332452_7ab22f94-c726-4cb6-ad1a-f12ac80457f8",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "对给定数据集[10,15,20,25,30,35,40]进行统计分析，计算其均值、方差、标准差和中位数。此任务旨在测试系统动态搜索、安装并利用必要的统计分析工具的能力，以完成数据处理和计算。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 61.52,
+      "steps_count": 3,
+      "key_features": [
+        "统计数据分析",
+        "动态工具搜索与安装",
+        "多步骤决策与工具协同",
+        "计算特定统计量",
+        "系统工具管理能力测试"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "mcp-search-tool",
+        "browser_navigator"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:27:32.101183",
+    "source_trajectory_id": "7ab22f94-c726-4cb6-ad1a-f12ac80457f8"
+  },
+  {
+    "essence_id": "essence_1750332463_113c09a4-bb57-417f-97a6-9fd91e5ed397",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "查询北京市当前的天气情况，包括温度、湿度和天气状况。此任务的核心目标是测试系统动态获取、安装并成功调用外部天气API服务的能力，以验证其在复杂工具集成场景下的执行效率和鲁棒性。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 49.956,
+      "steps_count": 3,
+      "key_features": [
+        "动态API工具获取",
+        "外部服务集成测试",
+        "特定信息查询",
+        "多步骤工具协调"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "mcp-search-tool",
+        "browser_navigator"
+      ]
+    },
+    "extracted_at": "2025-06-19T19:27:43.862176",
+    "source_trajectory_id": "113c09a4-bb57-417f-97a6-9fd91e5ed397"
+  },
+  {
+    "essence_id": "essence_1750336608_cab39d30-c14f-4770-a465-aecb3fb6f75a",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "使用Python计算简单的算术表达式“1+1”，并对计算结果进行验证。任务目标是执行基础的数值运算并确保其准确性，主要通过代码执行完成。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 16.317,
+      "steps_count": 2,
+      "key_features": [
+        "基础算术计算",
+        "结果验证",
+        "代码执行（Python）",
+        "单步逻辑操作",
+        "确定性结果"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "microsandbox-mcp-server",
+        "python_executor"
+      ]
+    },
+    "extracted_at": "2025-06-19T20:36:48.869113",
+    "source_trajectory_id": "cab39d30-c14f-4770-a465-aecb3fb6f75a"
+  },
+  {
+    "essence_id": "essence_1750338040_4540a105-6cc0-4e05-9a8d-3e94db430390",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "对数值数据集[5,10,15,20,25]进行统计分析，计算均值、方差、标准差和中位数。此任务旨在验证系统能否识别并有效利用或安装所需的统计计算工具，以准确提取数据集的核心特征。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 73.387,
+      "steps_count": 3,
+      "key_features": [
+        "统计计算需求",
+        "数值数据处理",
+        "工具能力识别与管理",
+        "环境依赖性强",
+        "测试工具搜索与安装功能"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "browser_navigator",
+        "mcp-search-tool"
+      ]
+    },
+    "extracted_at": "2025-06-19T21:00:40.064075",
+    "source_trajectory_id": "4540a105-6cc0-4e05-9a8d-3e94db430390"
   }
 ]

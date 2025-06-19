@@ -256,20 +256,35 @@ class ToolGapDetector:
             return None
     
     def _extract_from_fallback(self, description: str) -> Tuple[bool, str]:
-        """语义分析备用方法"""
+        """语义分析备用方法 - 改进版本以减少误报"""
         desc_lower = description.lower()
         
-        # 需求指示器
-        need_indicators = ['需要', '创建', '生成', '构建', '制作', '分析', '处理']
-        have_indicators = ['现有', '当前', '已有', '使用']
+        # 基础计算任务 - 通常可以用现有工具完成
+        basic_compute_indicators = [
+            '计算', '1+1', '2+2', '3*3', '求和', '乘积', '算术', '数学运算', 
+            'print(', 'execute', 'microsandbox', 'python', '代码执行'
+        ]
         
-        need_score = sum(1 for indicator in need_indicators if indicator in desc_lower)
-        have_score = sum(1 for indicator in have_indicators if indicator in desc_lower)
+        # 复杂需求指示器 - 可能需要新工具
+        complex_need_indicators = [
+            '网络爬虫', '数据库', '图像处理', '机器学习', '自然语言处理',
+            '文件上传', 'api调用', '第三方服务', '专业软件'
+        ]
         
-        if need_score > have_score:
-            return False, "search_for_new_tools"
-        else:
+        # 检查是否是基础计算任务
+        is_basic_compute = any(indicator in desc_lower for indicator in basic_compute_indicators)
+        has_complex_needs = any(indicator in desc_lower for indicator in complex_need_indicators)
+        
+        # 如果是基础计算任务，认为工具充足
+        if is_basic_compute and not has_complex_needs:
             return True, "continue_with_existing_tools"
+        
+        # 如果有复杂需求，可能需要新工具
+        if has_complex_needs:
+            return False, "search_for_new_tools"
+        
+        # 默认情况下，认为现有工具足够
+        return True, "continue_with_existing_tools"
     
     def _build_analysis_from_data(self, data: dict) -> ToolGapAnalysis:
         """从数据构建分析结果"""

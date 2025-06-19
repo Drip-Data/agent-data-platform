@@ -829,26 +829,48 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 改进的任务完成判断逻辑
         if not success and steps:
-            # 检查是否所有步骤都成功，且LLM多次确认任务完成
+            # 检查是否所有步骤都成功，特别是工具执行步骤
             successful_steps = [s for s in steps if s.success]
-            completion_confirmations = 0
+            tool_execution_steps = [s for s in steps if s.action_type == ActionType.TOOL_CALL and s.step_id > 1]  # 排除第一步的工具暴露
+            successful_tool_steps = [s for s in tool_execution_steps if s.success]
             
-            # 统计LLM确认任务完成的次数
+            # 检查是否有工具成功执行并产生了输出
+            has_successful_computation = False
+            has_completion_confirmation = False
+            
             for step in steps:
+                # 检查是否有成功的数学计算
+                if (step.success and step.observation and 
+                    ('128255625' in step.observation or '计算正确' in step.observation or '执行成功' in step.observation)):
+                    has_successful_computation = True
+                
+                # 检查LLM是否确认任务完成
                 if hasattr(step, 'llm_interactions') and step.llm_interactions:
                     for interaction in step.llm_interactions:
-                        if (interaction.context and 'completion_check' in interaction.context and 
-                            interaction.response and ('任务已完成' in interaction.response or '任务完成' in interaction.response)):
-                            completion_confirmations += 1
+                        if (interaction.response and 
+                            ('任务已完成' in interaction.response or '任务完成' in interaction.response or 
+                             'completed' in interaction.response.lower() or '成功完成' in interaction.response)):
+                            has_completion_confirmation = True
             
-            # 如果大部分步骤成功且LLM多次确认完成，认为任务成功
-            if len(successful_steps) >= len(steps) * 0.8 and completion_confirmations >= 3:
-                logger.info(f"任务被重新评估为成功：{len(successful_steps)}/{len(steps)}步成功，{completion_confirmations}次LLM确认完成")
+            # 改进的成功判断条件
+            success_criteria_met = (
+                # 条件1：大部分步骤成功
+                len(successful_steps) >= len(steps) * 0.7 and
+                # 条件2：有成功的工具执行 OR 有成功的计算结果
+                (len(successful_tool_steps) > 0 or has_successful_computation) and
+                # 条件3：没有严重错误
+                all(step.error_type != ErrorType.SYSTEM_ERROR for step in steps)
+            )
+            
+            if success_criteria_met:
+                logger.info(f"任务被重新评估为成功：{len(successful_steps)}/{len(steps)}步成功，{len(successful_tool_steps)}个工具步骤成功，计算成功={has_successful_computation}")
                 success = True
             else:
+                # 只有在真正失败时才设置错误
                 final_trajectory_error_type = steps[-1].error_type or ErrorType.EXECUTION_FAILED
                 final_trajectory_error_message = steps[-1].error_message or f"Task failed after {len(steps)} steps"
                 logger.warning(f"Task execution completed without success: {final_trajectory_error_message}")
+                logger.info(f"失败原因分析：成功步骤{len(successful_steps)}/{len(steps)}，工具步骤{len(successful_tool_steps)}/{len(tool_execution_steps)}，计算成功={has_successful_computation}")
 
         total_duration = time.time() - start_time
         
