@@ -39,14 +39,14 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.info(f"DEBUG: Loaded toolscore_http_port: {toolscore_http_port}, toolscore_mcp_port: {toolscore_mcp_port}")
             
             self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', f'http://localhost:{toolscore_http_port}')
-            # 使用 toolscore_mcp_port (例如8081) 而不是 toolscore_http_port (8082)
-            self.toolscore_websocket_endpoint = os.getenv('TOOLSCORE_WS_URL', f'ws://localhost:{toolscore_mcp_port}')
+            # 使用 toolscore_mcp_port (例如8000) 而不是 toolscore_http_port (8091)
+            self.toolscore_websocket_endpoint = toolscore_websocket_endpoint or os.getenv('TOOLSCORE_WS_URL', f'ws://localhost:{toolscore_mcp_port}')
             logger.info(f"DEBUG: Configured toolscore_websocket_endpoint (using mcp_port): {self.toolscore_websocket_endpoint}")
         except Exception as e:
             logger.warning(f"配置加载失败，使用默认端口: {e}")
-            self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8082')
-            # 如果配置加载失败，也应该考虑一个更合适的默认MCP WS端口，或者确保环境变量TOOLSCORE_WS_URL被设置
-            self.toolscore_websocket_endpoint = toolscore_websocket_endpoint or os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8081') # 默认为8081，与ports_config一致
+            self.toolscore_endpoint = os.getenv('TOOLSCORE_HTTP_URL', 'http://localhost:8091')
+            # 如果配置加载失败，使用默认端口
+            self.toolscore_websocket_endpoint = toolscore_websocket_endpoint or os.getenv('TOOLSCORE_WS_URL', 'ws://localhost:8000')
         
         # 轻量级客户端
         self.real_time_client = RealTimeToolClient(self.toolscore_websocket_endpoint)
@@ -989,6 +989,66 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 默认返回原始ID
         return tool_id
+    def _format_trajectory_for_readable_output(self, trajectory: TrajectoryResult) -> Dict[str, Any]:
+        """格式化轨迹数据以提高可读性"""
+        trajectory_dict = trajectory.to_dict()
+        
+        # 格式化steps，添加换行以提高可读性
+        formatted_steps = []
+        for step in trajectory_dict['steps']:
+            formatted_step = {
+                'step_id': step['step_id'],
+                'action_type': step['action_type'],
+                'success': step['success']
+            }
+            
+            # 格式化tool_input - 添加换行使其更易读
+            if step.get('tool_input'):
+                formatted_step['tool_input'] = step['tool_input']
+            
+            # 格式化tool_output - 添加换行使其更易读
+            if step.get('tool_output'):
+                output = step['tool_output']
+                if len(output) > 100:
+                    # 长输出添加换行
+                    formatted_step['tool_output'] = output
+                else:
+                    formatted_step['tool_output'] = output
+            
+            # 添加其他重要字段
+            if step.get('thinking'):
+                formatted_step['thinking'] = step['thinking']
+            if step.get('execution_code'):
+                formatted_step['execution_code'] = step['execution_code']
+            if step.get('error_type'):
+                formatted_step['error_type'] = step['error_type']
+            if step.get('error_message'):
+                formatted_step['error_message'] = step['error_message']
+            if step.get('duration'):
+                formatted_step['duration'] = round(step['duration'], 3)
+                
+            formatted_steps.append(formatted_step)
+        
+        # 创建格式化的轨迹字典
+        formatted_trajectory = {
+            'task_id': trajectory_dict['task_id'],
+            'task_name': trajectory_dict['task_name'],
+            'task_description': trajectory_dict['task_description'],
+            'runtime_id': trajectory_dict['runtime_id'],
+            'success': trajectory_dict['success'],
+            'steps': formatted_steps,
+            'final_result': trajectory_dict['final_result'],
+            'error_type': trajectory_dict['error_type'],
+            'error_message': trajectory_dict['error_message'],
+            'total_duration': round(trajectory_dict['total_duration'], 3),
+            'metadata': trajectory_dict['metadata'],
+            'created_at': trajectory_dict['created_at'],
+            'available_tools': trajectory_dict['available_tools'],
+            'used_tools': trajectory_dict['used_tools']
+        }
+        
+        return formatted_trajectory
+
     async def _save_trajectory(self, trajectory: TrajectoryResult):
         """保存轨迹到文件"""
         out_dir = get_trajectories_dir()
@@ -1006,10 +1066,12 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 logging.error(f"Error reading trajectories collection: {e}")
                 trajectories = []
         
-        trajectories.append(trajectory.__dict__)
+        # 使用格式化的轨迹数据
+        formatted_trajectory = self._format_trajectory_for_readable_output(trajectory)
+        trajectories.append(formatted_trajectory)
         
         with open(collection_file, 'w', encoding='utf-8') as f:
-            json.dump(trajectories, f, ensure_ascii=False, indent=2, default=str)
+            json.dump(trajectories, f, ensure_ascii=False, indent=2)
         
         logger.info(f"Saved trajectory {trajectory.task_id} to collection")
 

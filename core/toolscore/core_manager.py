@@ -52,36 +52,73 @@ class CoreManager:
         # 预置MCP服务器配置
         self.predefined_servers = [
             {
-                "tool_id": "python-executor-server",
-                "name": "Python Executor",
-                "description": "Execute Python code and scripts with full programming capabilities",
-                "endpoint": "ws://localhost:8083/mcp",
+                "tool_id": "microsandbox-server",
+                "name": "MicroSandbox Secure Executor",
+                "description": "Execute Python code in secure isolated sandbox with hardware-level isolation and comprehensive monitoring",
+                "endpoint": "ws://localhost:8081/mcp",
                 "capabilities": [
                     {
-                        "name": "python_execute",
-                        "description": "Execute Python code and return results",
+                        "name": "microsandbox_execute",
+                        "description": "Execute Python code in secure sandbox environment",
                         "parameters": {
-                            "code": {"type": "string", "description": "Python code to execute", "required": True}
+                            "code": {"type": "string", "description": "Python code to execute", "required": True},
+                            "session_id": {"type": "string", "description": "Session ID for multi-turn execution", "required": False},
+                            "timeout": {"type": "integer", "description": "Execution timeout in seconds", "required": False}
                         }
+                    },
+                    {
+                        "name": "microsandbox_install_package",
+                        "description": "Install Python packages in sandbox environment",
+                        "parameters": {
+                            "package_name": {"type": "string", "description": "Package name to install", "required": True}
+                        }
+                    },
+                    {
+                        "name": "microsandbox_get_performance_stats",
+                        "description": "Get performance statistics and monitoring data",
+                        "parameters": {}
                     }
                 ],
-                "tags": ["python", "code", "execution", "programming"]
+                "tags": ["python", "code", "execution", "sandbox", "security", "monitoring"]
             },
             {
-                "tool_id": "browser-navigator-server", 
-                "name": "Browser Navigator",
-                "description": "Navigate web pages, extract content, and perform browser automation",
-                "endpoint": "ws://localhost:3002/mcp",
+                "tool_id": "browser-use-server", 
+                "name": "Browser-Use AI Automation",
+                "description": "AI-powered browser automation with natural language task execution and comprehensive web interaction capabilities",
+                "endpoint": "ws://localhost:8082/mcp",
                 "capabilities": [
                     {
-                        "name": "navigate_to_url",
+                        "name": "browser_use_execute_task",
+                        "description": "Execute complex browser tasks using AI and natural language",
+                        "parameters": {
+                            "task": {"type": "string", "description": "Natural language task description", "required": True},
+                            "max_steps": {"type": "integer", "description": "Maximum execution steps", "required": False},
+                            "use_vision": {"type": "boolean", "description": "Enable visual understanding", "required": False}
+                        }
+                    },
+                    {
+                        "name": "browser_navigate",
                         "description": "Navigate to a specific URL",
                         "parameters": {
                             "url": {"type": "string", "description": "URL to navigate to", "required": True}
                         }
+                    },
+                    {
+                        "name": "browser_screenshot",
+                        "description": "Take a screenshot of the current page",
+                        "parameters": {
+                            "filename": {"type": "string", "description": "Screenshot filename", "required": False}
+                        }
+                    },
+                    {
+                        "name": "browser_extract_content",
+                        "description": "Extract specific content from the page using AI",
+                        "parameters": {
+                            "goal": {"type": "string", "description": "Content extraction goal", "required": True}
+                        }
                     }
                 ],
-                "tags": ["browser", "web", "navigation", "automation"]
+                "tags": ["browser", "web", "navigation", "automation", "ai", "vision", "nlp"]
             }
         ]
         

@@ -17,8 +17,8 @@ queue_mapping:
   
   # 任务类型映射
   task_type_mapping:
-    CODE: "tasks:reasoning"      # 通过python-executor-server处理
-    WEB: "tasks:reasoning"       # 通过browser-navigator-server处理  
+    CODE: "tasks:reasoning"      # 通过microsandbox-server处理
+    WEB: "tasks:reasoning"       # 通过browser-use-server处理  
     REASONING: "tasks:reasoning" # 直接推理处理
 
 # 运行时配置
@@ -47,13 +47,13 @@ runtimes:
 tool_recommendation:
   fallback_mapping:
     CODE:
-      - "python_executor"
+      - "microsandbox"
     WEB:
-      - "browser_navigator"
+      - "browser_use"
       - "web_search"
     REASONING:
       - "python_executor"
-      - "browser_navigator"
+      - "browser_use"
   
   # 推荐策略
   strategy:

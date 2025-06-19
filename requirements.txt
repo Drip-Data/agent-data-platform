@@ -27,3 +27,8 @@ uvicorn>=0.20.0
 watchdog>=2.1.0
 websockets==15.0.1
 python-socks>=2.4.3
+langchain-core>=0.1.0
+langchain-openai>=0.1.0
+browser-use>=0.1.0  # 需要Python 3.11+
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

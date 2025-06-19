@@ -10,10 +10,14 @@ import sys
 from pathlib import Path
 import signal
 import argparse
+from dotenv import load_dotenv
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
+
+# 加载环境变量
+load_dotenv(project_root / '.env')
 
 # 导入核心组件
 from core.config_manager import ConfigManager
@@ -152,8 +156,8 @@ def setup_signal_handlers(service_manager):
             import subprocess
             # 清理所有MCP服务器相关进程
             subprocess.run(['pkill', '-f', 'mcp_servers'], timeout=5, check=False)
-            subprocess.run(['pkill', '-f', 'python_executor_server'], timeout=3, check=False)
-            subprocess.run(['pkill', '-f', 'browser_navigator_server'], timeout=3, check=False)
+            subprocess.run(['pkill', '-f', 'microsandbox_server'], timeout=3, check=False)
+            subprocess.run(['pkill', '-f', 'browser_use_server'], timeout=3, check=False)
             subprocess.run(['pkill', '-f', 'search_tool_server'], timeout=3, check=False)
             logger.info("已尝试清理MCP服务器进程")
         except Exception as e:

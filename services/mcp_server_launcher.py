@@ -50,11 +50,15 @@ def initialize(config_manager: ConfigManager):
         # 确保包含必要的MCP服务器
         if "microsandbox_server" not in mcp_servers:
             mcp_servers.append("microsandbox_server")  # 添加MicroSandbox MCP Server
-        if "browser_navigator_server" not in mcp_servers:
-            mcp_servers.append("browser_navigator_server")
+        # browser_navigator_server已替换为browser_use_server
+        if "browser_navigator_server" in mcp_servers:
+            mcp_servers.remove("browser_navigator_server")
         # 添加 search_tool_server
         if "search_tool_server" not in mcp_servers:
             mcp_servers.append("search_tool_server")
+        # 添加 browser_use_server
+        if "browser_use_server" not in mcp_servers:
+            mcp_servers.append("browser_use_server")
         # 移除已弃用的 python_executor_server
         if "python_executor_server" in mcp_servers:
             mcp_servers.remove("python_executor_server")
@@ -63,8 +67,8 @@ def initialize(config_manager: ConfigManager):
         logger.warning(f"从ConfigManager加载MCP服务器列表失败: {e}，使用默认列表")
         mcp_servers = [
             'microsandbox_server',  # MicroSandbox MCP服务器
-            'browser_navigator_server',
-            'search_tool_server' # 添加 search_tool_server 到默认列表
+            'search_tool_server', # 搜索工具服务器
+            'browser_use_server'  # Browser-Use AI浏览器自动化服务器 (替换browser_navigator_server)
         ]
     
     logger.info(f"MCP服务器启动器初始化完成，配置了 {len(mcp_servers)} 个服务器: {mcp_servers}")
@@ -196,7 +200,7 @@ async def _start_server(server_name: str):
                             server_config = value
                             break
             
-            cmd = ['python', '-m', module_str]
+            cmd = ['python3', '-m', module_str]
             
             # 处理端口分配逻辑
             if server_config and server_config.get('auto_start', True): # 默认auto_start为True

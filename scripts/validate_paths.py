@@ -68,8 +68,9 @@ def check_hardcoded_paths():
         "main.py",
         "core/task_manager.py",
         "runtimes/reasoning/enhanced_runtime.py",
-        "mcp_servers/python_executor_server/python_executor_tool.py",
-        "mcp_servers/browser_navigator_server/browser_tool.py",
+        "mcp_servers/microsandbox_server/main.py",
+        # "mcp_servers/python_executor_server/python_executor_tool.py",  # DEPRECATED
+        # "mcp_servers/browser_navigator_server/browser_tool.py",  # DEPRECATED
         "scripts/batch_test_tasks.py"
     ]
     
@@ -120,16 +121,18 @@ def test_component_imports():
         print(f"❌ EnhancedReasoningRuntime 导入失败: {e}")
     
     try:
-        from mcp_servers.python_executor_server.python_executor_tool import PythonExecutorTool
-        print("✅ PythonExecutorTool 导入成功")
+        # from mcp_servers.python_executor_server.python_executor_tool import PythonExecutorTool  # DEPRECATED
+        from mcp_servers.microsandbox_server.main import MicroSandboxMCPServer
+        print("✅ MicroSandbox Server 导入成功 (已替换PythonExecutorTool)")
     except Exception as e:
-        print(f"❌ PythonExecutorTool 导入失败: {e}")
+        print(f"❌ MicroSandbox Server 导入失败: {e}")
     
     try:
-        from mcp_servers.browser_navigator_server.browser_tool import BrowserTool
-        print("✅ BrowserTool 导入成功")
+        # from mcp_servers.browser_navigator_server.browser_tool import BrowserTool  # DEPRECATED
+        from mcp_servers.browser_use_server.main import BrowserUseMCPServer
+        print("✅ Browser-Use Server 导入成功 (已替换BrowserTool)")
     except Exception as e:
-        print(f"❌ BrowserTool 导入失败: {e}")
+        print(f"❌ Browser-Use Server 导入失败: {e}")
 
 
 def create_test_output():

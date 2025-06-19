@@ -1014,12 +1014,12 @@ class ToolScoreMonitoringAPI:
             
             start_time = time.time()
             
-            # 🔧 修复：对于Python执行器，尝试直接调用避免WebSocket连接问题
-            if tool_id == "python-executor-mcp-server" and hasattr(self, 'python_executor_server') and self.python_executor_server:
-                logger.info(f"🚀 直接调用同进程的Python Executor")
+            # 🔧 修复：对于MicroSandbox执行器，尝试直接调用避免WebSocket连接问题
+            if tool_id == "microsandbox-mcp-server" and hasattr(self, 'microsandbox_server') and self.microsandbox_server:
+                logger.info(f"🚀 直接调用同进程的MicroSandbox Server")
                 try:
-                    # 直接调用Python Executor的handle_tool_action方法
-                    action_result = await self.python_executor_server.handle_tool_action(action, parameters)
+                    # 直接调用MicroSandbox Server的handle_tool_action方法
+                    action_result = await self.microsandbox_server.handle_tool_action(action, parameters)
                     processing_time_ms = int((time.time() - start_time) * 1000)
                     
                     if action_result.get("success", False):

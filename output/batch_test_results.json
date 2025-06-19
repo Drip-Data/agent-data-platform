@@ -1,20 +1,32 @@
 {
-  "test_time": "2025-06-17T15:52:57.270444",
-  "total_tasks": 1,
-  "successful_tasks": 1,
-  "failed_tasks": 0,
+  "test_time": "2025-06-19T13:35:51.265151",
+  "total_tasks": 2,
+  "successful_tasks": 0,
+  "failed_tasks": 2,
   "results": [
     {
-      "task_id": "b6373276-b439-4048-87fc-aa4a86af7cda",
-      "original_task_id": "new_test",
-      "description": "请计算1+2+...+150的和的2次方",
-      "status": "completed",
-      "success": true,
-      "final_result": "任务完成。生成结果：\n128255625\n128255625",
-      "error_message": null,
-      "total_duration": 107.96331906318665,
-      "submit_time": "2025-06-17T15:51:07.378051",
-      "complete_time": "2025-06-17T15:52:57.252292"
+      "task_id": "5a013626-b30e-4a59-89b5-6ab5c906e964",
+      "original_task_id": "seed_reasoning_e5d624b5",
+      "description": "请计算从1到150所有整数之和的平方。任务需要识别等差数列求和公式，并进行精确的数值计算。最终结果应为该和的二次方。此任务考察数学公式应用与计算准确性。",
+      "status": "failed",
+      "success": false,
+      "final_result": "Unknown error",
+      "error_message": "Unknown error",
+      "total_duration": 47.20239782333374,
+      "submit_time": "2025-06-19T13:34:23.055765",
+      "complete_time": "2025-06-19T13:35:51.263800"
+    },
+    {
+      "task_id": "aa41706a-9241-4b73-a045-0919477d6436",
+      "original_task_id": "seed_reasoning_8da97ac7",
+      "description": "利用增强推理代理（enhanced-reasoning-1）执行基础数学运算“1+1”，并准确打印计算结果。此任务旨在验证推理环境处理简单算术请求的决策与执行能力，即使是直接的计算，也通过智能代理的流程完成，确保结果的准确性。",
+      "status": "failed",
+      "success": false,
+      "final_result": "Unknown error",
+      "error_message": "Unknown error",
+      "total_duration": 40.489662885665894,
+      "submit_time": "2025-06-19T13:34:23.055863",
+      "complete_time": "2025-06-19T13:35:05.156449"
     }
   ]
 }

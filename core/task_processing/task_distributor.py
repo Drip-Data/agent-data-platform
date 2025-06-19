@@ -36,11 +36,12 @@ class TaskDistributor:
             
             # 记录工具推荐统计
             tool_metadata = task.constraints.get("tool_metadata", {})
-            logger.debug(f"工具推荐日志: {json.dumps({
+            tool_log = {
                 'task_id': task.task_id,
                 'recommended_tools': task.expected_tools,
                 'confidence': tool_metadata.get('recommendation_confidence', 0.0),
                 'strategy': tool_metadata.get('recommendation_strategy', 'unknown')
-            })}")
+            }
+            logger.debug(f"工具推荐日志: {json.dumps(tool_log)}")
         else:
             logger.error(f"未找到队列名称，任务 {task.task_id} 未分发。")

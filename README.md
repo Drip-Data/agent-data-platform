@@ -271,13 +271,23 @@ watch -n 2 "curl -s http://localhost:8000/api/v1/tasks/${TASK_ID} | jq '.status'
 }
 ```
 
-#### Browser Navigator Server (端口: 8082)
+#### Browser-Use Server (端口: 8082)
 ```python
-# 支持的工具  
-- navigate_to_url: 页面导航
-- get_page_content: 内容提取
-- click_element: 元素交互
-- fill_form: 表单填写
+# AI驱动的浏览器自动化服务器 (替换原Browser Navigator)
+# 支持的主要工具:
+- browser_use_execute_task: AI自然语言任务执行
+- browser_navigate: 页面导航
+- browser_click_element: 智能元素点击
+- browser_input_text: 智能文本输入
+- browser_extract_content: AI内容提取
+- browser_screenshot: 页面截图
+- browser_scroll_down/up: 页面滚动
+- browser_search_google: Google搜索
+- browser_save_pdf: PDF保存
+# ... 总计25+个功能
+
+# AI功能示例:
+browser_use_execute_task("在Google上搜索Python教程并打开第一个结果")
 ```
 
 #### Search Tool Server (端口: 8080)

@@ -54,18 +54,20 @@ mcp_servers:
   #   stop_command: "msb server stop"
   #   health_endpoint: "/health"
     
-  browser_navigator:
-    port: 8082 # 初始配置端口，但会受auto_detect影响
-    description: "浏览器导航器MCP服务器"
-    protocol: "websocket"
-    health_endpoint: "/health"
-    auto_start: true
   search_tool:
     port: 8080 # 搜索工具MCP服务器
     description: "文件内容搜索和代码定义搜索工具服务器"
     protocol: "websocket"
     health_endpoint: "/health"
     auto_start: true
+    
+  browser_use:
+    port: 8083
+    description: "Browser-Use AI浏览器自动化服务器"
+    protocol: "websocket" 
+    health_endpoint: "/health"
+    auto_start: true
+    type: "internal"
 
 # 🆕 未来扩展端口预留
 future_mcp_servers:

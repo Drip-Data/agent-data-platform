@@ -254,7 +254,36 @@ class ConfigManager:
                 return self._get_default_llm_config()
             
             with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
+                raw_config = yaml.safe_load(f)
+            
+            # 转换新格式到旧格式
+            if 'llm_providers' in raw_config:
+                converted_config = {
+                    'default_provider': raw_config.get('default_provider', 'gemini'),
+                    'providers': {}
+                }
+                
+                for provider_name, provider_config in raw_config['llm_providers'].items():
+                    if provider_config.get('enabled', True):
+                        converted_provider = {
+                            'models': {}
+                        }
+                        
+                        if provider_name == 'gemini':
+                            converted_provider['gemini_api_key'] = provider_config.get('api_key')
+                            converted_provider['gemini_default_model'] = provider_config.get('model', 'gemini-2.5-flash-preview-05-20')
+                        elif provider_name == 'openai':
+                            converted_provider['api_key_env'] = 'OPENAI_API_KEY'
+                            converted_provider['default_model'] = provider_config.get('model', 'gpt-4o')
+                        elif provider_name == 'vllm':
+                            converted_provider['base_url_env'] = 'VLLM_BASE_URL'
+                            converted_provider['default_model'] = provider_config.get('model', 'default-model')
+                        
+                        converted_config['providers'][provider_name] = converted_provider
+                
+                return converted_config
+            else:
+                return raw_config
         except Exception as e:
             logger.error(f"加载 LLM 配置失败: {e}")
             return self._get_default_llm_config()

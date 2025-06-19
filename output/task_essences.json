@@ -41,5 +41,291 @@
     },
     "extracted_at": "2025-06-17T22:21:50.594872",
     "source_trajectory_id": "11a79d08-d0e2-4c82-8ab4-2b32ec309ba4"
+  },
+  {
+    "essence_id": "essence_1750311550_aa41706a-9241-4b73-a045-0919477d6436",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "利用增强推理代理（enhanced-reasoning-1）执行并验证基础数学运算“1+1”的准确性。此任务旨在测试该推理环境处理简单算术请求的决策与执行能力，确保通过智能代理流程能准确完成直接计算，从而验证其基础算术处理的可靠性。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 40.489662885665894,
+      "steps_count": 0,
+      "key_features": [
+        "Agent-driven computation",
+        "Basic arithmetic validation",
+        "Reasoning capability assessment",
+        "Environment verification"
+      ],
+      "confidence": 0.9,
+      "tools_used": []
+    },
+    "extracted_at": "2025-06-19T13:39:10.542314",
+    "source_trajectory_id": "aa41706a-9241-4b73-a045-0919477d6436"
+  },
+  {
+    "essence_id": "essence_1750314115_b227d2be-1179-46b1-852e-98b5ecb03267",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "使用增强推理代理（enhanced-reasoning-1）计算并验证“1+1”的准确性。此任务旨在评估代理处理基础算术请求的决策与执行能力，以验证其算术处理的可靠性。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 81.15260219573975,
+      "steps_count": 0,
+      "key_features": [
+        "代理能力测试",
+        "基础算术验证",
+        "推理决策流程评估",
+        "系统可靠性验证"
+      ],
+      "confidence": 0.9,
+      "tools_used": []
+    },
+    "extracted_at": "2025-06-19T14:21:55.404998",
+    "source_trajectory_id": "b227d2be-1179-46b1-852e-98b5ecb03267"
+  },
+  {
+    "essence_id": "essence_1750314129_ae07acd3-66cd-434b-b0be-ad181f4615c2",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "利用增强推理代理执行“1+1”基础数学运算，并准确输出计算结果。此任务旨在验证推理环境对简单算术请求的决策与执行能力，确保代理能可靠地完成直接计算。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 44.66701912879944,
+      "steps_count": 0,
+      "key_features": [
+        "代理能力验证",
+        "基础数学运算",
+        "推理环境测试",
+        "决策与执行流程验证",
+        "输入简单但流程复杂"
+      ],
+      "confidence": 0.9,
+      "tools_used": []
+    },
+    "extracted_at": "2025-06-19T14:22:09.741239",
+    "source_trajectory_id": "ae07acd3-66cd-434b-b0be-ad181f4615c2"
+  },
+  {
+    "essence_id": "essence_1750324990_347b1ced-f54d-41b8-ac5b-f2e2f5abf0e7",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "在MicroSandbox环境中执行Python代码`print(2+2)`并输出结果。此任务旨在验证MicroSandbox的代码执行能力，核心挑战在于确保沙箱环境的稳定性和正确响应。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 38.767,
+      "steps_count": 3,
+      "key_features": [
+        "MicroSandbox环境",
+        "Python代码执行",
+        "基础算术运算",
+        "系统功能测试",
+        "工具执行失败"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "python_executor",
+        "browser_navigator",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T17:23:10.387010",
+    "source_trajectory_id": "347b1ced-f54d-41b8-ac5b-f2e2f5abf0e7"
+  },
+  {
+    "essence_id": "essence_1750325529_940a538a-3c82-4a3b-b287-191e42e24378",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "使用microsandbox-mcp-server工具执行`print(3*3)`并输出结果。此任务旨在测试MicroSandbox在代码执行失败时，是否能提供详细且增强的错误信息，以评估其错误处理能力。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 35.009,
+      "steps_count": 3,
+      "key_features": [
+        "MicroSandbox工具交互",
+        "测试错误信息增强功能",
+        "执行简单数学计算",
+        "任务执行失败 (Unknown error)",
+        "关注工具行为和输出"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "microsandbox-mcp-server",
+        "browser_navigator",
+        "python_executor"
+      ]
+    },
+    "extracted_at": "2025-06-19T17:32:09.839565",
+    "source_trajectory_id": "940a538a-3c82-4a3b-b287-191e42e24378"
+  },
+  {
+    "essence_id": "essence_1750326857_f7d2e262-fdbc-495f-abfd-35dba0ae5376",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "验证MicroSandbox修复的有效性。任务要求利用`microsandbox-mcp-server`工具，在MicroSandbox环境中执行`print(5*5)`代码，并成功获取计算结果。此任务旨在确认MicroSandbox的计算功能已恢复正常，是系统修复后的关键验证步骤，确保其稳定运行。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 41.394,
+      "steps_count": 3,
+      "key_features": [
+        "MicroSandbox环境功能验证",
+        "通过特定工具执行代码",
+        "简单计算作为测试用例",
+        "系统修复后的回归测试"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T17:54:17.104512",
+    "source_trajectory_id": "f7d2e262-fdbc-495f-abfd-35dba0ae5376"
+  },
+  {
+    "essence_id": "essence_1750326873_7dc7612a-bc82-4d77-b22b-07eaa8192edb",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "执行一个简单的数学计算任务，求7与8的乘积。此任务旨在测试并验证本地代码执行器的基本运算能力，需通过调用相应的代码执行工具完成。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 39.107,
+      "steps_count": 3,
+      "key_features": [
+        "基础数学计算",
+        "依赖代码执行工具",
+        "测试执行环境功能",
+        "工具层未知错误导致失败"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "python_executor",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T17:54:33.640134",
+    "source_trajectory_id": "7dc7612a-bc82-4d77-b22b-07eaa8192edb"
+  },
+  {
+    "essence_id": "essence_1750328005_4d4a9e39-a898-4577-94ab-dc3795a8d1ca",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "该任务旨在执行一个基础的数学乘法运算（15乘以3），并直接输出计算结果。它展示了在沙箱环境中利用代码执行工具（如microsandbox）进行简单算术计算的能力，核心在于准确识别并调用合适的工具来完成直接的计算任务。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 21.767,
+      "steps_count": 3,
+      "key_features": [
+        "基础算术计算",
+        "沙箱代码执行",
+        "直接结果输出",
+        "工具选择与调用",
+        "单步逻辑操作"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "python_executor",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T18:13:25.934012",
+    "source_trajectory_id": "4d4a9e39-a898-4577-94ab-dc3795a8d1ca"
+  },
+  {
+    "essence_id": "essence_1750328322_21805da5-98ac-49ca-a1fd-1080f7a92866",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "利用增强推理代理，通过代码执行环境（如microsandbox）执行基础数学运算“1+1”，并准确打印计算结果。此任务旨在验证代理在推理环境下处理简单算术请求的决策与执行能力，确保即使是直接计算也能通过智能代理流程高效完成，并能从执行错误中自我恢复。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 46.84,
+      "steps_count": 3,
+      "key_features": [
+        "代理驱动的执行流程",
+        "代码沙箱工具使用",
+        "基础数学运算",
+        "错误恢复与自我纠正能力"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "python_executor",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T18:18:42.366235",
+    "source_trajectory_id": "21805da5-98ac-49ca-a1fd-1080f7a92866"
+  },
+  {
+    "essence_id": "essence_1750328328_1210b59a-e4cf-43ba-9e48-ff2b4c8b585c",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "计算从1到150所有整数之和的平方。任务要求利用等差数列求和公式，并在编程环境中进行精确的数值计算。此任务旨在考察数学公式的正确应用与计算的准确性。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 48.755,
+      "steps_count": 3,
+      "key_features": [
+        "数学公式应用",
+        "精确数值计算",
+        "编程环境执行",
+        "等差数列求和"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "python_executor",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T18:18:48.966950",
+    "source_trajectory_id": "1210b59a-e4cf-43ba-9e48-ff2b4c8b585c"
+  },
+  {
+    "essence_id": "essence_1750328338_7e7b9335-f0e1-4630-a6c8-87609933af7a",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "测试增强推理代理（enhanced-reasoning-1）在代码执行环境中准确完成基础数学运算“1+1”的能力。任务目标是验证代理能否通过智能决策，利用计算工具可靠地执行并验证简单算术请求，确保其基础算术处理的准确性。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 69.899,
+      "steps_count": 3,
+      "key_features": [
+        "测试AI代理的基础计算能力",
+        "涉及通过代码执行工具进行算术运算",
+        "强调结果的准确性验证",
+        "需要代理进行工具选择与决策"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T18:18:58.289411",
+    "source_trajectory_id": "7e7b9335-f0e1-4630-a6c8-87609933af7a"
+  },
+  {
+    "essence_id": "essence_1750328651_925a9848-2569-44b7-898a-d972e243f65a",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "使用增强推理代理，通过调用合适的计算工具（如microsandbox）准确计算并验证“1+1”的结果。此任务旨在评估代理处理基础算术请求的决策、工具调用及错误处理能力。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 103.671,
+      "steps_count": 3,
+      "key_features": [
+        "基础算术计算",
+        "依赖外部计算工具执行",
+        "评估代理的工具选择与调用能力",
+        "涉及代理的错误处理与重试机制",
+        "验证代理对简单计算任务的可靠性"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "microsandbox-mcp-server"
+      ]
+    },
+    "extracted_at": "2025-06-19T18:24:11.623975",
+    "source_trajectory_id": "925a9848-2569-44b7-898a-d972e243f65a"
   }
 ]

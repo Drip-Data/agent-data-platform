@@ -1,1 +1,0 @@
-# Browser Navigator Server package
