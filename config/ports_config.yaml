@@ -35,7 +35,7 @@ mcp_servers:
   #   health_endpoint: "/health"
   #   auto_start: false
     
-  microsandbox_mcp:
+  microsandbox_server:
     port: 8090
     description: "MicroSandbox MCP服务器 - 安全代码执行"
     protocol: "websocket"
@@ -54,17 +54,25 @@ mcp_servers:
   #   stop_command: "msb server stop"
   #   health_endpoint: "/health"
     
-  search_tool:
+  search_tool_server:
     port: 8080 # 搜索工具MCP服务器
     description: "文件内容搜索和代码定义搜索工具服务器"
     protocol: "websocket"
     health_endpoint: "/health"
     auto_start: true
     
-  browser_use:
+  browser_use_server:
     port: 8084
     description: "Browser-Use AI浏览器自动化服务器"
     protocol: "websocket" 
+    health_endpoint: "/health"
+    auto_start: true
+    type: "internal"
+    
+  deepsearch_server:
+    port: 8086
+    description: "专业级深度搜索和研究工具服务器"
+    protocol: "websocket"
     health_endpoint: "/health"
     auto_start: true
     type: "internal"

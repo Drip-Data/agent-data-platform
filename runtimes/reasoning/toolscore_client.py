@@ -18,7 +18,7 @@ class ToolScoreClient:
     def __init__(self, toolscore_endpoint: str):
         self.endpoint = toolscore_endpoint.rstrip('/')
         self.session = None
-        self.timeout = aiohttp.ClientTimeout(total=30)
+        self.timeout = aiohttp.ClientTimeout(total=120)  # 增加到120秒以支持深度搜索
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(timeout=self.timeout)
@@ -41,7 +41,19 @@ class ToolScoreClient:
             async with self.session.get(f"{self.endpoint}/api/v1/tools/available") as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data.get("formatted_tools_description", "")
+                    # 从API实际返回的结构中获取工具列表并格式化
+                    if "available_tools" in data:
+                        tools = data["available_tools"]
+                        formatted_lines = []
+                        for tool in tools:
+                            if isinstance(tool, dict):
+                                name = tool.get("server_name", tool.get("server_id", "Unknown"))
+                                desc = tool.get("description", "")
+                                formatted_lines.append(f"- {name}: {desc}")
+                            else:
+                                formatted_lines.append(f"- {tool}")
+                        return "\n".join(formatted_lines)
+                    return ""
                 else:
                     logger.error(f"获取工具列表失败: HTTP {response.status}")
                     return ""
@@ -67,15 +79,55 @@ class ToolScoreClient:
             logger.error(f"获取原始工具列表时发生异常: {e}")
             return []
     
+    async def analyze_tool_needs(self, task_description: str) -> Dict[str, Any]:
+        """分析工具需求 - 兼容性方法"""
+        await self._ensure_session()
+        
+        try:
+            # 调用工具缺口分析API
+            gap_result = await self.analyze_tool_gap(task_description=task_description)
+            
+            if gap_result.get("has_sufficient_tools", True):
+                return {
+                    "success": True,
+                    "analysis": {
+                        "needed_tools": [],
+                        "recommendations": "现有工具已充足"
+                    }
+                }
+            else:
+                missing_caps = gap_result.get("gap_analysis", {}).get("missing_capabilities", [])
+                return {
+                    "success": True, 
+                    "analysis": {
+                        "needed_tools": missing_caps,
+                        "recommendations": f"需要补充工具以支持: {', '.join(missing_caps)}"
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"工具需求分析时发生异常: {e}")
+            return {
+                "success": False,
+                "analysis": {
+                    "needed_tools": [],
+                    "recommendations": f"分析失败: {str(e)}"
+                }
+            }
+    
     async def request_tool_capability(self, task_description: str, 
                                     required_capabilities: List[str] = None,
                                     auto_install: bool = True) -> Dict[str, Any]:
         """一站式工具能力请求服务 - LLM发现缺少工具时调用"""
         await self._ensure_session()
         
+        # 获取当前可用工具列表
+        current_tools = await self.get_available_tools_raw()
+        
         request_data = {
             "task_description": task_description,
-            "auto_install": auto_install
+            "auto_install": auto_install,
+            "current_tools": current_tools
         }
         
         if required_capabilities:

@@ -1,5 +1,0 @@
-
-{"task_id": "fibonacci_10", "task_type": "reasoning", "description": "Calculate the 10th Fibonacci number using recursion", "max_steps": 5},
-{"task_id": "demo_gcd_task", "task_type": "reasoning", "description": "创建一个函数计算两个数的最大公约数", "max_steps": 3},
-{"task_id": "ai_education_impact_analysis", "task_type": "reasoning", "description": "使用Python计算1到100之间所有偶数的和", "max_steps": 5},
-{"task_id": "test_reasoning_new_task", "task_type": "reasoning", "description": "使用Python将字符串'hello'反转为'olleh'", "max_steps": 3}

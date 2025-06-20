@@ -60,6 +60,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 📌 缓存实时工具事件，便于写入轨迹
         self._tool_event_buffer = []
         
+        # 📈 失败历史记录，用于避免重复失败的操作
+        self.failure_history = {
+            'tool_installations': set(),  # 记录失败的工具安装
+            'tool_calls': {},  # 记录失败的工具调用
+            'search_queries': set()  # 记录失败的搜索查询
+        }
+        
     async def initialize(self):
         """初始化运行时 - 简化为纯工具消费者"""
         logger.info("🚀 初始化Enhanced Reasoning Runtime - 简化版本")
@@ -473,7 +480,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     break
                 
                 # 检查是否是工具能力请求
-                elif action == 'request_tool_capability' or (tool_id and 'search' in tool_id.lower()):
+                elif action == 'request_tool_capability' or (tool_id and tool_id in ['mcp-search-tool'] and action in ['analyze_tool_needs', 'search_and_install_tools']):
                     logger.info("🔍 检测到工具能力请求，发起ToolScore API调用")
                     
                     # 从参数中提取任务描述和能力需求
@@ -982,6 +989,40 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             self._tool_event_buffer.clear()
         
         return trajectory
+    
+    def _should_skip_failed_operation(self, operation_key: str, tool_id: str, action: str, params: Dict[str, Any]) -> bool:
+        """检查是否应该跳过重复失败的操作"""
+        # 检查工具调用失败历史
+        if operation_key in self.failure_history.get('tool_calls', {}):
+            failure_count = self.failure_history['tool_calls'][operation_key].get('count', 0)
+            if failure_count >= 2:  # 连续失败2次就跳过
+                return True
+        
+        # 检查特定的工具安装失败
+        if action in ['search_and_install_tools', 'request_tool_capability']:
+            task_desc = params.get('task_description', '')
+            search_key = f"{action}:{hash(task_desc)}"
+            if search_key in self.failure_history.get('search_queries', set()):
+                return True
+                
+        return False
+    
+    def _record_failed_operation(self, category: str, operation_key: str, error_msg: str):
+        """记录失败的操作"""
+        if category == 'tool_calls':
+            if operation_key not in self.failure_history['tool_calls']:
+                self.failure_history['tool_calls'][operation_key] = {'count': 0, 'errors': []}
+            
+            self.failure_history['tool_calls'][operation_key]['count'] += 1
+            self.failure_history['tool_calls'][operation_key]['errors'].append(error_msg)
+            
+        elif category == 'search_queries':
+            self.failure_history['search_queries'].add(operation_key)
+            
+        elif category == 'tool_installations':
+            self.failure_history['tool_installations'].add(operation_key)
+            
+        logger.debug(f"📈 记录失败操作: {category}/{operation_key}")
     
     def _create_tool_available_callback(self, trajectory_id: str, step_id: int):
         """创建工具可用时的回调函数（不接受参数）"""

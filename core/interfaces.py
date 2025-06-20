@@ -10,6 +10,7 @@ class TaskType(Enum):
     CODE = "code"
     WEB = "web"
     REASONING = "reasoning"
+    RESEARCH = "research"  # 添加研究任务类型
     # GENERAL = "general"  # 添加通用任务类型
 
 class ActionType(Enum):

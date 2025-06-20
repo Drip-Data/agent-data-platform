@@ -76,10 +76,13 @@ class ToolGapDetector:
                     })
                 
                 if analysis:
+                    logger.info("LLM分析成功")
                     return analysis
+                else:
+                    logger.warning("LLM分析返回空结果")
                     
             except Exception as e:
-                logger.warning(f"LLM分析失败，使用备用方法: {e}")
+                logger.error(f"LLM分析异常: {e}", exc_info=True)
         
         # 备用分析方法
         return await self._rule_based_analysis(task_description, available_tools, previous_attempts)
@@ -90,6 +93,7 @@ class ToolGapDetector:
         
         tools_description = "\n".join([
             f"- {tool.get('name', tool.get('tool_id', 'Unknown'))}: {tool.get('description', '')}"
+            if isinstance(tool, dict) else f"- {tool}"
             for tool in available_tools[:20]  # 限制工具数量避免提示词过长
         ]) if available_tools else "无可用工具"
         
@@ -268,7 +272,8 @@ class ToolGapDetector:
         # 复杂需求指示器 - 可能需要新工具
         complex_need_indicators = [
             '网络爬虫', '数据库', '图像处理', '机器学习', '自然语言处理',
-            '文件上传', 'api调用', '第三方服务', '专业软件'
+            '文件上传', 'api调用', '第三方服务', '专业软件',
+            '研究', '调研', '分析', '报告', '探索', 'deepsearch'
         ]
         
         # 检查是否是基础计算任务
@@ -283,8 +288,8 @@ class ToolGapDetector:
         if has_complex_needs:
             return False, "search_for_new_tools"
         
-        # 默认情况下，认为现有工具足够
-        return True, "continue_with_existing_tools"
+        # 默认情况下，认为现有工具不足
+        return False, "search_for_new_tools"
     
     def _build_analysis_from_data(self, data: dict) -> ToolGapAnalysis:
         """从数据构建分析结果"""
@@ -359,4 +364,4 @@ class ToolGapDetector:
             "description": primary_requirement.description,
             "reasoning": primary_requirement.reasoning,
             "confidence": primary_requirement.confidence_score
-        } 
+        }

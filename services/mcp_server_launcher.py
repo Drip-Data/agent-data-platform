@@ -59,6 +59,9 @@ def initialize(config_manager: ConfigManager):
         # 添加 browser_use_server
         if "browser_use_server" not in mcp_servers:
             mcp_servers.append("browser_use_server")
+        # 添加 deepsearch_server
+        if "deepsearch_server" not in mcp_servers:
+            mcp_servers.append("deepsearch_server")
         # 移除已弃用的 python_executor_server
         if "python_executor_server" in mcp_servers:
             mcp_servers.remove("python_executor_server")
@@ -68,7 +71,8 @@ def initialize(config_manager: ConfigManager):
         mcp_servers = [
             'microsandbox_server',  # MicroSandbox MCP服务器
             'search_tool_server', # 搜索工具服务器
-            'browser_use_server'  # Browser-Use AI浏览器自动化服务器 (替换browser_navigator_server)
+            'browser_use_server',  # Browser-Use AI浏览器自动化服务器 (替换browser_navigator_server)
+            'deepsearch_server'  # 专业级深度搜索服务器
         ]
     
     logger.info(f"MCP服务器启动器初始化完成，配置了 {len(mcp_servers)} 个服务器: {mcp_servers}")
@@ -187,20 +191,28 @@ async def _start_server(server_name: str):
             server_config = None
             # 尝试从ports_config中找到对应服务器的配置
             if 'mcp_servers' in ports_config:
-                for key, value in ports_config['mcp_servers'].items():
-                    # 特殊映射处理
-                    if server_name == 'microsandbox_server' and key == 'microsandbox_mcp':
-                        if isinstance(value, dict):
-                            server_config = value
-                            break
-                    # 移除 '_server' 后缀进行匹配
-                    normalized_server_name = server_name.replace('_server', '')
-                    if normalized_server_name == key:
-                        if isinstance(value, dict):
-                            server_config = value
-                            break
-            
+                server_config = ports_config['mcp_servers'].get(server_name)
+
+            port = None
+            if server_config and 'port' in server_config:
+                port = server_config['port']
+                logger.info(f"[MCP启动器] 为 {server_name} 使用配置文件指定端口: {port}")
+                # 检查端口是否可用
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    if s.connect_ex(('localhost', port)) == 0:
+                        logger.warning(f"[MCP启动器] 端口 {port} 已被占用，尝试查找可用端口...")
+                        port = find_available_port(port + 1, port + 100)
+                        if not port:
+                            logger.error(f"[MCP启动器] 无法为 {server_name} 找到可用端口")
+                            server_statuses[server_name] = {'status': 'error', 'message': 'No available ports'}
+                            return
+                        logger.info(f"[MCP启动器] 为 {server_name} 分配了新端口: {port}")
+
+            if port:
+                env[f"{server_name.upper()}_PORT"] = str(port)
+
             cmd = ['python3', '-m', module_str]
+            env['PYTHONPATH'] = project_root_for_pythonpath + os.pathsep + env.get('PYTHONPATH', '')
             
             # 处理端口分配逻辑
             if server_config and server_config.get('auto_start', True): # 默认auto_start为True

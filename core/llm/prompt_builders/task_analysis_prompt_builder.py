@@ -16,6 +16,7 @@ class TaskAnalysisPromptBuilder(IPromptBuilder):
 
 1. **任务类型分类** (task_type):
    - reasoning: 需要复杂推理、多工具协同、分析对比
+   - research: 需要深度调研、专业级信息收集、多轮搜索分析
    - web: 主要涉及网页操作、信息搜索、网站导航  
    - code: 主要是编程、算法、计算、数据处理
    - image: 图像生成、图像处理、视觉相关
@@ -27,6 +28,9 @@ class TaskAnalysisPromptBuilder(IPromptBuilder):
    分析任务需要哪些具体的技术能力，例如：
    - image_generation (图像生成)
    - web_scraping (网页抓取)
+   - deep_research (专业级深度调研)
+   - quick_search (快速信息搜索)
+   - comprehensive_analysis (全面分析)
    - data_analysis (数据分析)
    - file_processing (文件处理)
    - code_execution (代码执行)
@@ -39,10 +43,12 @@ class TaskAnalysisPromptBuilder(IPromptBuilder):
 3. **具体工具类型** (tools_needed):
    基于能力需求，推测可能需要的工具类型，例如：
    - 图像生成工具 (如DALL-E, Stable Diffusion相关)
+   - 深度搜索工具 (如deepsearch专业级调研工具)
    - 浏览器操作工具 (如Selenium, Playwright相关)
    - 数据分析工具 (如pandas, numpy相关)
    - 文件处理工具 (如PDF, Excel处理相关)
    - API调用工具 (如HTTP客户端相关)
+   - 快速搜索工具 (如基础搜索、文件搜索相关)
 
 4. **关键特征识别** (key_features):
    识别任务描述中的关键特征，帮助匹配工具

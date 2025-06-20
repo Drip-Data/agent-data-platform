@@ -8,8 +8,20 @@
       "description": "Statistical analysis tools for calculating mean, variance, standard deviation, median and other statistical measures",
       "author": "anthropic",
       "version": "1.0.0",
-      "capabilities": ["statistics", "mean", "variance", "standard_deviation", "median", "data_analysis"],
-      "tags": ["statistics", "analysis", "math", "data"],
+      "capabilities": [
+        "statistics",
+        "mean",
+        "variance",
+        "standard_deviation",
+        "median",
+        "data_analysis"
+      ],
+      "tags": [
+        "statistics",
+        "analysis",
+        "math",
+        "data"
+      ],
       "installation": {
         "python": "pip install numpy scipy"
       },
@@ -28,13 +40,24 @@
       }
     },
     {
-      "tool_id": "weather-api-server", 
+      "tool_id": "weather-api-server",
       "name": "Weather API MCP Server",
       "description": "Weather information service providing current weather conditions, temperature, humidity, and forecasts",
       "author": "community",
       "version": "1.0.0",
-      "capabilities": ["weather", "temperature", "humidity", "forecast", "location"],
-      "tags": ["weather", "api", "forecast", "temperature"],
+      "capabilities": [
+        "weather",
+        "temperature",
+        "humidity",
+        "forecast",
+        "location"
+      ],
+      "tags": [
+        "weather",
+        "api",
+        "forecast",
+        "temperature"
+      ],
       "installation": {
         "python": "pip install requests"
       },
@@ -54,12 +77,23 @@
     },
     {
       "tool_id": "file-operations-server",
-      "name": "File Operations MCP Server", 
+      "name": "File Operations MCP Server",
       "description": "Comprehensive file system operations including read, write, search, and manipulation",
       "author": "anthropic",
       "version": "2.1.0",
-      "capabilities": ["file_read", "file_write", "file_search", "directory_operations", "file_manipulation"],
-      "tags": ["filesystem", "files", "io", "search"],
+      "capabilities": [
+        "file_read",
+        "file_write",
+        "file_search",
+        "directory_operations",
+        "file_manipulation"
+      ],
+      "tags": [
+        "filesystem",
+        "files",
+        "io",
+        "search"
+      ],
       "installation": {
         "python": "pip install pathlib os"
       },
@@ -68,7 +102,7 @@
       "entry_point": "src/filesystem/main.py",
       "runtime": {
         "default_port": 8083,
-        "protocol": "http", 
+        "protocol": "http",
         "endpoint": "/mcp"
       },
       "security": {
@@ -83,8 +117,19 @@
       "description": "Advanced web scraping and data extraction from websites",
       "author": "community",
       "version": "1.5.3",
-      "capabilities": ["web_scraping", "html_parsing", "data_extraction", "url_fetching"],
-      "tags": ["web", "scraping", "html", "data", "extraction"],
+      "capabilities": [
+        "web_scraping",
+        "html_parsing",
+        "data_extraction",
+        "url_fetching"
+      ],
+      "tags": [
+        "web",
+        "scraping",
+        "html",
+        "data",
+        "extraction"
+      ],
       "installation": {
         "python": "pip install beautifulsoup4 requests"
       },

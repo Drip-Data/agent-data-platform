@@ -128,7 +128,7 @@ class MicroSandboxMCPServer:
             microsandbox_port = int(dynamic_port)
             logger.info(f"使用动态分配端口: {microsandbox_port}")
         else:
-            microsandbox_port = ports_config['mcp_servers']['microsandbox_mcp']['port']
+            microsandbox_port = ports_config['mcp_servers']['microsandbox_server']['port']
             logger.info(f"使用配置文件端口: {microsandbox_port}")
         
         toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']

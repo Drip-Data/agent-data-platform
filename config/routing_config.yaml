@@ -20,6 +20,7 @@ queue_mapping:
     CODE: "tasks:reasoning"      # 通过microsandbox-server处理
     WEB: "tasks:reasoning"       # 通过browser-use-server处理  
     REASONING: "tasks:reasoning" # 直接推理处理
+    RESEARCH: "tasks:reasoning"  # 通过deepsearch-server处理
 
 # 运行时配置
 runtimes:
@@ -34,6 +35,8 @@ runtimes:
       - "web_scraping"
       - "form_filling"
       - "file_operations"
+      - "deep_research"
+      - "comprehensive_analysis"
     health_check:
       enabled: true
       interval: 60  # 秒
@@ -53,6 +56,10 @@ tool_recommendation:
       - "web_search"
     REASONING:
       - "python_executor"
+      - "browser_use"
+    RESEARCH:
+      - "deepsearch"
+      - "web_search"
       - "browser_use"
   
   # 推荐策略

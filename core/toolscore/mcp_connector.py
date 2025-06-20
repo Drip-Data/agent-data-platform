@@ -21,6 +21,7 @@ class MCPServerConnector:
         self.endpoint = endpoint
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = False
+        self._lock = asyncio.Lock()  # 添加锁来防止并发问题
         logger.info(f"MCPServerConnector initialized for {endpoint}")
     
     async def connect(self):
@@ -63,86 +64,87 @@ class MCPServerConnector:
     
     async def execute_tool_action(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> ExecutionResult:
         """执行工具动作"""
-        if not self._connected:
-            await self.connect()
-        
-        if not self.websocket:
-            return ExecutionResult(
-                success=False,
-                error_message="Not connected to MCP server",
-                error_type=ErrorType.NETWORK_ERROR
-            )
-        
-        request_id = str(uuid.uuid4())
-        request = {
-            "type": "execute_tool_action",
-            "request_id": request_id,
-            "tool_id": tool_id,
-            "action": action,
-            "parameters": parameters
-        }
-        
-        try:
-            # 发送请求
-            await self.websocket.send(json.dumps(request))
+        async with self._lock:  # 使用锁防止并发访问
+            if not self._connected:
+                await self.connect()
             
-            # 等待响应
-            response_str = await self.websocket.recv()
-            response = json.loads(response_str)
-            
-            # 解析响应
-            if response.get("type") == "execute_tool_action_response":
-                result_data = response.get("result", {})
-                
-                if result_data.get("success", False):
-                    return ExecutionResult(
-                        success=True,
-                        data=result_data.get("data"),
-                        execution_time=result_data.get("execution_time", 0.0)
-                    )
-                else:
-                    # 处理错误
-                    error_type = ErrorType.TOOL_ERROR
-                    if result_data.get("error_type"):
-                        try:
-                            error_type = ErrorType(result_data["error_type"])
-                        except (ValueError, KeyError):
-                            error_type = ErrorType.TOOL_ERROR
-                    
-                    return ExecutionResult(
-                        success=False,
-                        error_message=result_data.get("error", "Unknown error"),
-                        error_type=error_type
-                    )
-            else:
+            if not self.websocket:
                 return ExecutionResult(
                     success=False,
-                    error_message=f"Unexpected response type: {response.get('type')}",
+                    error_message="Not connected to MCP server",
+                    error_type=ErrorType.NETWORK_ERROR
+                )
+            
+            request_id = str(uuid.uuid4())
+            request = {
+                "type": "execute_tool_action",
+                "request_id": request_id,
+                "tool_id": tool_id,
+                "action": action,
+                "parameters": parameters
+            }
+            
+            try:
+                # 发送请求
+                await self.websocket.send(json.dumps(request))
+                
+                # 等待响应
+                response_str = await self.websocket.recv()
+                response = json.loads(response_str)
+                
+                # 解析响应
+                if response.get("type") == "execute_tool_action_response":
+                    result_data = response.get("result", {})
+                    
+                    if result_data.get("success", False):
+                        return ExecutionResult(
+                            success=True,
+                            data=result_data.get("data"),
+                            execution_time=result_data.get("execution_time", 0.0)
+                        )
+                    else:
+                        # 处理错误
+                        error_type = ErrorType.TOOL_ERROR
+                        if result_data.get("error_type"):
+                            try:
+                                error_type = ErrorType(result_data["error_type"])
+                            except (ValueError, KeyError):
+                                error_type = ErrorType.TOOL_ERROR
+                        
+                        return ExecutionResult(
+                            success=False,
+                            error_message=result_data.get("error_message", result_data.get("error", "Unknown error")),
+                            error_type=error_type
+                        )
+                else:
+                    return ExecutionResult(
+                        success=False,
+                        error_message=f"Unexpected response type: {response.get('type')}",
+                        error_type=ErrorType.SYSTEM_ERROR
+                    )
+            
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("Connection to MCP server closed")
+                self._connected = False
+                return ExecutionResult(
+                    success=False,
+                    error_message="Connection to MCP server closed",
+                    error_type=ErrorType.NETWORK_ERROR
+                )
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse response: {e}")
+                return ExecutionResult(
+                    success=False,
+                    error_message=f"Invalid JSON response: {e}",
                     error_type=ErrorType.SYSTEM_ERROR
                 )
-        
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("Connection to MCP server closed")
-            self._connected = False
-            return ExecutionResult(
-                success=False,
-                error_message="Connection to MCP server closed",
-                error_type=ErrorType.NETWORK_ERROR
-            )
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse response: {e}")
-            return ExecutionResult(
-                success=False,
-                error_message=f"Invalid JSON response: {e}",
-                error_type=ErrorType.SYSTEM_ERROR
-            )
-        except Exception as e:
-            logger.error(f"Error executing tool action: {e}")
-            return ExecutionResult(
-                success=False,
-                error_message=str(e),
-                error_type=ErrorType.SYSTEM_ERROR
-            )
+            except Exception as e:
+                logger.error(f"Error executing tool action: {e}")
+                return ExecutionResult(
+                    success=False,
+                    error_message=str(e),
+                    error_type=ErrorType.SYSTEM_ERROR
+                )
     
     async def cleanup(self):
         """清理资源"""

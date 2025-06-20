@@ -43,6 +43,7 @@ class MCPSearchResult:
     message: str
     installed_tools: List[Dict[str, Any]]
     error_message: Optional[str] = None
+    fallback_used: bool = False  # 标记是否使用了降级策略
 
 class DynamicMCPManager:
     """动态MCP服务器管理器 - 无Docker版本"""

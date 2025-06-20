@@ -390,7 +390,7 @@ class MCPServer:
                     logger.info(f"📤 已发送请求到 {tool_id}")
                     
                     # 等待响应
-                    response_str = await asyncio.wait_for(ws.recv(), timeout=30.0) # 使用 wait_for 确保超时
+                    response_str = await asyncio.wait_for(ws.recv(), timeout=120.0) # 增加超时以支持长时间运行的工具
                     logger.info(f"📥 收到响应: {response_str[:200]}...")
                     response_data = json.loads(response_str)
                     
@@ -500,7 +500,7 @@ class MCPServer:
                     await ws.send(json.dumps(register_request))
                     
                     logger.info(f"[{self.server_name}] Waiting for registration response from toolscore...")
-                    response_str = await asyncio.wait_for(ws.recv(), timeout=30.0) # 添加超时
+                    response_str = await asyncio.wait_for(ws.recv(), timeout=120.0) # 增加超时以支持长时间运行的工具
                     logger.info(f"[{self.server_name}] Received registration response: {response_str}")
                     response_data = json.loads(response_str)
                     

@@ -1,1 +1,0 @@
-{"task_id": "test_statistics_analysis", "task_type": "reasoning", "description": "对数据集[10,15,20,25,30,35,40]进行统计分析，计算均值、方差、标准差和中位数。此任务需要统计分析工具来验证MCP工具搜索和安装功能。", "max_steps": 10}

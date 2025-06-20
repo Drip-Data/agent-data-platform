@@ -278,6 +278,8 @@ class RealTimeToolClient:
                             desc += " (操作: microsandbox_execute, microsandbox_install_package, microsandbox_list_sessions, microsandbox_close_session, microsandbox_cleanup_expired)"
                         elif tool_id == "browser-navigator-mcp-server" or "browser" in tool_id:
                             desc += " (操作: navigate_to_url, get_page_content, click_element, fill_form)"
+                        elif tool_id == "mcp-deepsearch" or "deepsearch" in tool_id:
+                            desc += " (操作: research, quick_research, comprehensive_research)"
                         elif tool_id == "mcp-search-tool" or "search" in tool_id:
                             desc += " (操作: analyze_tool_needs, search_and_install_tools)"
                         tool_descriptions.append(desc)
