@@ -19,17 +19,23 @@ from runtimes.reasoning.toolscore_client import ToolScoreClient
 from runtimes.reasoning.real_time_tool_client import RealTimeToolClient
 from core.local_python_executor import LocalPythonExecutor
 from core.tool_usage_tracker import ToolUsageTracker
+from core.memory_manager import MemoryManager
+from core.step_planner import StepPlanner
 
 logger = logging.getLogger(__name__)
 
 class EnhancedReasoningRuntime(RuntimeInterface):
     """增强推理运行时 - 简化版本，专注LLM推理和执行"""
-    def __init__(self, config_manager, llm_client, toolscore_client, toolscore_websocket_endpoint: Optional[str] = None):
+    def __init__(self, config_manager, llm_client, toolscore_client, redis_manager=None, toolscore_websocket_endpoint: Optional[str] = None):
         self._runtime_id = f"enhanced-reasoning-{uuid.uuid4()}"
         self.config_manager = config_manager
         self.client = llm_client
         self.toolscore_client = toolscore_client
         self.metrics = EnhancedMetrics(port=8003)
+        
+        # 初始化记忆管理器和步骤规划器
+        self.memory_manager = MemoryManager(redis_manager=redis_manager)
+        self.step_planner = StepPlanner(llm_client=llm_client, memory_manager=self.memory_manager)
         
         # 使用配置管理器获取服务端点
         try:
@@ -209,10 +215,15 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         final_trajectory_error_message = None
         
         steps: List[ExecutionStep] = []
-        max_steps = 2
+        max_steps = task.max_steps or 10  # 使用动态max_steps，默认为10
         max_retries = 1
         retry_delay_seconds = 2
         current_outputs = []  # 用于存储每步的输出
+        
+        # 生成会话ID用于记忆管理
+        session_id = f"session_{trajectory_id}_{int(start_time)}"
+        
+        logger.info(f"📊 任务配置: max_steps={max_steps}, session_id={session_id}")
         
         # 🔍 新增：收集LLM交互信息
         current_step_llm_interactions = []
@@ -272,7 +283,19 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 临时替换方法进行任务分析
         self.client._call_api = wrapped_call_api_for_analysis
         try:
-            task_requirements = await self.client.analyze_task_requirements(task.description)
+            # === 上下文注入：为任务分析添加记忆上下文 ===
+            enhanced_task_description = task.description
+            try:
+                # 获取跨会话洞察用于任务分析
+                cross_session_insights = await self.memory_manager.get_cross_session_insights(limit=2)
+                if cross_session_insights:
+                    insights_context = "历史经验参考: " + "; ".join(cross_session_insights)
+                    enhanced_task_description = f"{task.description}\n\n{insights_context}"
+                    logger.debug(f"🧠 任务分析已增强历史洞察上下文")
+            except Exception as ctx_err:
+                logger.warning(f"获取任务分析上下文失败: {ctx_err}")
+            
+            task_requirements = await self.client.analyze_task_requirements(enhanced_task_description)
         finally:
             self.client._call_api = original_call_api
         
@@ -338,6 +361,19 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         except Exception as auto_gap_err:
             logger.error(f"自动缺口检测/修复过程异常: {auto_gap_err}")
 
+        # === 生成初始执行计划 ===
+        try:
+            logger.info("🧠 生成多步执行计划...")
+            available_tool_ids = await self.toolscore_client.get_available_tools()
+            initial_plan = await self.step_planner.generate_initial_plan(
+                task, available_tool_ids, session_id
+            )
+            logger.info(f"📋 生成执行计划: {len(initial_plan.planned_steps)} 步骤, 置信度: {initial_plan.confidence:.3f}")
+            max_steps = min(max_steps, initial_plan.max_steps)  # 使用计划中的max_steps
+        except Exception as plan_err:
+            logger.error(f"生成执行计划失败: {plan_err}, 使用传统执行模式")
+            initial_plan = None
+
         for step_id in range(1, max_steps + 1):
             # 🔍 重置当前步骤的LLM交互记录
             current_step_llm_interactions = []
@@ -381,28 +417,74 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             self.client._call_api = wrapped_call_api
             
             try:
-                # 获取下一个动作
-                serializable_steps = [s.to_dict() if hasattr(s, 'to_dict') else s.__dict__ for s in steps]
+                # === 智能步骤规划：优先使用StepPlanner ===
+                planned_step = None
+                if initial_plan:
+                    # 使用步骤规划器获取下一步
+                    try:
+                        available_tool_ids = await self.toolscore_client.get_available_tools()
+                        planned_step = await self.step_planner.plan_next_step(
+                            task, steps, available_tool_ids, session_id
+                        )
+                        if planned_step:
+                            logger.info(f"📋 使用规划步骤: {planned_step.action} -> {planned_step.tool_id}")
+                            thinking = f"Step {step_id}: 执行计划步骤 - {planned_step.action}"
+                            action = planned_step.action
+                            tool_id = planned_step.tool_id
+                            params = planned_step.parameters.copy()
+                        else:
+                            logger.info("📋 步骤规划器认为任务可能已完成，检查完成状态")
+                    except Exception as plan_step_err:
+                        logger.warning(f"步骤规划失败，回退到传统方式: {plan_step_err}")
                 
-                # 获取已注册工具ID列表和描述
-                available_tool_ids = await self.toolscore_client.get_available_tools()
-                # available_tool_ids现在是一个工具ID列表
-                available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
-                    fallback_client=self.toolscore_client
-                )
-                
-                action_result = await self.client.generate_enhanced_reasoning(
-                    task_description=task.description,
-                    available_tools=available_tool_ids,  # 添加已注册工具ID列表
-                    tool_descriptions=available_tools_description,  # 详细工具描述
-                    previous_steps=serializable_steps,
-                    execution_context={}
-                )
-                
-                thinking = action_result.get('thinking', f"Step {step_id}: Analyzing task and deciding next action")
-                action = action_result.get('action')
-                tool_id = action_result.get('tool_id') or action_result.get('tool')
-                params = action_result.get('parameters', {})
+                # === 传统方式：当没有规划步骤时 ===
+                if not planned_step:
+                    # 获取下一个动作
+                    serializable_steps = [s.to_dict() if hasattr(s, 'to_dict') else s.__dict__ for s in steps]
+                    
+                    # 获取已注册工具ID列表和描述
+                    available_tool_ids = await self.toolscore_client.get_available_tools()
+                    # available_tool_ids现在是一个工具ID列表
+                    available_tools_description = await self.real_time_client.get_fresh_tools_for_llm(
+                        fallback_client=self.toolscore_client
+                    )
+                    
+                    # === 上下文注入：获取记忆上下文并注入到执行上下文中 ===
+                    memory_context = ""
+                    cross_session_insights = []
+                    try:
+                        # 获取当前会话的上下文摘要
+                        memory_context = await self.memory_manager.generate_context_summary(
+                            session_id, max_steps=5
+                        )
+                        # 获取跨会话洞察
+                        cross_session_insights = await self.memory_manager.get_cross_session_insights(limit=3)
+                        logger.debug(f"🧠 获取记忆上下文: {len(memory_context)} 字符, {len(cross_session_insights)} 洞察")
+                    except Exception as memory_ctx_err:
+                        logger.warning(f"获取记忆上下文失败: {memory_ctx_err}")
+                    
+                    # 构建增强的执行上下文
+                    enhanced_execution_context = {
+                        "step_number": step_id,
+                        "max_steps": max_steps,
+                        "session_id": session_id,
+                        "memory_context": memory_context,
+                        "cross_session_insights": cross_session_insights,
+                        "planning_mode": "traditional" if not initial_plan else "planned"
+                    }
+                    
+                    action_result = await self.client.generate_enhanced_reasoning(
+                        task_description=task.description,
+                        available_tools=available_tool_ids,  # 添加已注册工具ID列表
+                        tool_descriptions=available_tools_description,  # 详细工具描述
+                        previous_steps=serializable_steps,
+                        execution_context=enhanced_execution_context  # 包含记忆上下文的执行上下文
+                    )
+                    
+                    thinking = action_result.get('thinking', f"Step {step_id}: Analyzing task and deciding next action")
+                    action = action_result.get('action')
+                    tool_id = action_result.get('tool_id') or action_result.get('tool')
+                    params = action_result.get('parameters', {})
                 
                 # 添加action和tool_id到params中以保持兼容性
                 if action:
@@ -780,7 +862,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
             duration = time.time() - tool_start
 
-            steps.append(ExecutionStep(
+            step = ExecutionStep(
                 step_id=step_id,
                 action_type=action_type,
                 action_params=params,
@@ -793,7 +875,31 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 timestamp=time.time(),
                 duration=duration,
                 llm_interactions=current_step_llm_interactions  # 🔍 新增
-            ))
+            )
+            steps.append(step)
+            
+            # === 记忆存储：将执行步骤存储到记忆管理器 ===
+            try:
+                await self.memory_manager.store_conversation_step(
+                    task_id=trajectory_id,
+                    session_id=session_id,
+                    user_input=f"步骤{step_id}: {action} ({tool_id})",
+                    agent_output=observation,
+                    thinking_summary=thinking,
+                    tools_used=[tool_id] if tool_id else [],
+                    success=tool_success,
+                    error_message=current_attempt_err_msg,
+                    metadata={
+                        "step_id": step_id,
+                        "action": action,
+                        "tool_id": tool_id,
+                        "duration": duration,
+                        "execution_code": execution_code
+                    }
+                )
+                logger.debug(f"💾 步骤 {step_id} 已存储到记忆管理器")
+            except Exception as memory_err:
+                logger.warning(f"记忆存储失败: {memory_err}")
 
             # 检查是否完成 - 也需要记录LLM交互
             completion_interactions = []
@@ -818,11 +924,29 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             
             self.client._call_api = wrapped_call_api_for_completion
             try:
-                completion = await self.client.check_task_completion(
-                    task.description,
-                    [s.__dict__ for s in steps],
-                    current_outputs
-                )
+                # === 智能完成检查：优先使用StepPlanner ===
+                completion_result = {"completed": False, "reason": ""}
+                
+                if initial_plan:
+                    # 使用步骤规划器检查完成状态
+                    try:
+                        planner_completed, planner_reason = await self.step_planner.check_completion(
+                            task, steps, current_outputs
+                        )
+                        completion_result = {"completed": planner_completed, "reason": planner_reason}
+                        logger.debug(f"🎯 步骤规划器完成检查: {planner_completed}, 原因: {planner_reason}")
+                    except Exception as planner_err:
+                        logger.warning(f"步骤规划器完成检查失败: {planner_err}")
+                
+                # === 后备完成检查：使用传统LLM方式 ===
+                if not completion_result["completed"]:
+                    completion = await self.client.check_task_completion(
+                        task.description,
+                        [s.__dict__ for s in steps],
+                        current_outputs
+                    )
+                    completion_result = completion
+                    
             finally:
                 self.client._call_api = original_call_api
             
@@ -830,8 +954,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if completion_interactions:
                 steps[-1].llm_interactions.extend(completion_interactions)
             
-            if completion.get('completed'):
+            if completion_result.get('completed'):
                 success = True
+                logger.info(f"✅ 任务完成: {completion_result.get('reason', '检查通过')}")
                 break
         
         # 改进的任务完成判断逻辑
@@ -987,6 +1112,30 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     success=True
                 ))
             self._tool_event_buffer.clear()
+        
+        # === 会话总结：保存会话摘要到记忆管理器 ===
+        try:
+            # 提取主要话题和洞察
+            main_topics = [task.description]
+            key_insights = []
+            
+            if success:
+                key_insights.append(f"任务成功完成，共执行{len(steps)}步，耗时{total_duration:.2f}秒")
+                if tool_tracker:
+                    used_tools = tool_tracker.get_used_tools_summary()
+                    if used_tools:
+                        key_insights.append(f"主要使用工具: {', '.join(used_tools[:3])}")
+            else:
+                key_insights.append(f"任务执行失败: {final_trajectory_error_message}")
+            
+            await self.memory_manager.store_session_summary(
+                session_id=session_id,
+                main_topics=main_topics,
+                key_insights=key_insights
+            )
+            logger.debug(f"💾 会话摘要已保存: {session_id}")
+        except Exception as session_err:
+            logger.warning(f"保存会话摘要失败: {session_err}")
         
         return trajectory
     

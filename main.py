@@ -353,7 +353,8 @@ async def main_async():
             config_manager,
             llm_client,
             runtime_toolscore_client,
-            toolscore_websocket_endpoint # 传入WebSocket端点
+            toolscore_websocket_endpoint, # 传入WebSocket端点
+            redis_manager # 传入Redis管理器
         ),
         start_fn=runtime_service.start,
         stop_fn=runtime_service.stop,

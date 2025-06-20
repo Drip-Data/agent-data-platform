@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+import os
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
@@ -76,12 +77,22 @@ class OptimizedAgentController:
             "recovered_tasks": 0
         }
         
+        # 学习数据存储路径
+        self.learning_data_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), 
+            "data", 
+            "learning_data.json"
+        )
+        
         logger.info("优化的AI Agent控制器初始化完成")
     
     async def initialize(self):
         """初始化系统"""
         try:
             logger.info("开始初始化优化的Agent系统...")
+            
+            # 加载学习数据
+            await self._load_learning_data()
             
             # 初始化各个模块
             await self._initialize_modules()
@@ -507,18 +518,87 @@ class OptimizedAgentController:
         except Exception as e:
             logger.error(f"系统关闭异常: {e}")
     
+    async def _load_learning_data(self):
+        """加载学习数据"""
+        try:
+            # 确保数据目录存在
+            data_dir = os.path.dirname(self.learning_data_path)
+            os.makedirs(data_dir, exist_ok=True)
+            
+            if os.path.exists(self.learning_data_path):
+                logger.info(f"加载学习数据从: {self.learning_data_path}")
+                
+                with open(self.learning_data_path, 'r', encoding='utf-8') as f:
+                    learning_data = json.load(f)
+                
+                # 恢复决策引擎的学习数据
+                if hasattr(self.adaptive_decision_engine, 'decision_weights'):
+                    self.adaptive_decision_engine.decision_weights.update(
+                        learning_data.get("decision_weights", {})
+                    )
+                
+                if hasattr(self.adaptive_decision_engine, 'pattern_memory'):
+                    pattern_memory_data = learning_data.get("pattern_memory", {})
+                    if hasattr(self.adaptive_decision_engine.pattern_memory, 'update'):
+                        self.adaptive_decision_engine.pattern_memory.update(pattern_memory_data)
+                
+                if hasattr(self.adaptive_decision_engine, 'performance_cache'):
+                    performance_cache_data = learning_data.get("performance_cache", {})
+                    if hasattr(self.adaptive_decision_engine.performance_cache, 'update'):
+                        self.adaptive_decision_engine.performance_cache.update(performance_cache_data)
+                
+                # 恢复系统指标
+                system_metrics = learning_data.get("system_metrics", {})
+                self.system_metrics.update(system_metrics)
+                
+                logger.info(f"成功加载学习数据，包含 {len(learning_data)} 个数据项")
+            else:
+                logger.info("未找到学习数据文件，将使用默认配置")
+                
+        except Exception as e:
+            logger.error(f"加载学习数据失败: {e}")
+            logger.info("将使用默认配置继续运行")
+
     async def _save_learning_data(self):
         """保存学习数据"""
         try:
-            # 保存决策引擎的学习数据
+            # 确保数据目录存在
+            data_dir = os.path.dirname(self.learning_data_path)
+            os.makedirs(data_dir, exist_ok=True)
+            
+            # 收集学习数据
             learning_data = {
-                "decision_weights": self.adaptive_decision_engine.decision_weights,
-                "pattern_memory": dict(self.adaptive_decision_engine.pattern_memory),
-                "performance_cache": dict(self.adaptive_decision_engine.performance_cache)
+                "timestamp": datetime.now().isoformat(),
+                "system_metrics": self.system_metrics.copy(),
+                "decision_weights": {},
+                "pattern_memory": {},
+                "performance_cache": {}
             }
             
-            # 这里应该保存到持久化存储
-            logger.info("学习数据已保存")
+            # 保存决策引擎的学习数据
+            if hasattr(self.adaptive_decision_engine, 'decision_weights'):
+                try:
+                    learning_data["decision_weights"] = dict(self.adaptive_decision_engine.decision_weights)
+                except:
+                    learning_data["decision_weights"] = {}
+            
+            if hasattr(self.adaptive_decision_engine, 'pattern_memory'):
+                try:
+                    learning_data["pattern_memory"] = dict(self.adaptive_decision_engine.pattern_memory)
+                except:
+                    learning_data["pattern_memory"] = {}
+            
+            if hasattr(self.adaptive_decision_engine, 'performance_cache'):
+                try:
+                    learning_data["performance_cache"] = dict(self.adaptive_decision_engine.performance_cache)
+                except:
+                    learning_data["performance_cache"] = {}
+            
+            # 写入文件
+            with open(self.learning_data_path, 'w', encoding='utf-8') as f:
+                json.dump(learning_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"学习数据已保存到: {self.learning_data_path}")
             
         except Exception as e:
             logger.error(f"保存学习数据失败: {e}")
