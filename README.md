@@ -1,6 +1,6 @@
 # Agent Data Platform
 
-🚀 **智能代理数据平台** - 基于MCP协议的企业级AI任务执行与学习框架，现已集成**MicroSandbox安全执行环境**
+🚀 **智能代理数据平台** - 基于MCP协议的企业级AI任务执行与学习框架，现已集成**MicroSandbox安全执行环境**、**持久化记忆管理**和**多步推理能力**
 
 ---
 
@@ -11,6 +11,8 @@
 ### 🎯 核心价值
 
 - **🤖 智能决策**: 基于Gemini LLM的自主任务分析和代码生成
+- **🧠 持久化记忆**: 跨任务和跨会话的智能记忆管理，支持上下文学习
+- **🔄 多步推理**: 动态步骤规划，支持复杂长流程任务执行（不再限制2步）
 - **🔧 工具生态**: 基于MCP协议的可扩展工具服务器架构  
 - **📚 轨迹学习**: 从执行轨迹中学习并生成新的训练任务
 - **⚡ 高性能**: Redis驱动的异步任务队列和并发处理
@@ -157,24 +159,53 @@ curl -X POST "http://localhost:8000/api/v1/tasks" \
 # 期望输出: {"task_id": "xxx-xxx-xxx", "status": "queued", ...}
 ```
 
-**示例2：数学计算任务**
+**示例2：多步推理研究任务**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/tasks" \
      -H "Content-Type: application/json" \
      -d '{
-       "task_type": "reasoning",
-       "input": "计算1到100的平方和",
-       "priority": "medium"
+       "task_type": "research",
+       "input": "深度调研AI Agent开发领域的最新趋势，特别关注多模态Agent、LangGraph框架的发展现状",
+       "priority": "high",
+       "max_steps": 15,
+       "context": {
+         "session_id": "user_research_session",
+         "timeout": 600
+       }
      }'
 ```
 
-**示例3：代码生成任务**
+**示例3：代码生成和执行任务**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/tasks" \
      -H "Content-Type: application/json" \
      -d '{
        "task_type": "code", 
-       "input": "创建一个Python函数实现快速排序算法，并在microsandbox中测试",
+       "input": "创建一个Python函数实现快速排序算法，并在microsandbox中测试，要求包含性能基准测试",
+       "priority": "medium",
+       "max_steps": 8
+     }'
+```
+
+**示例4：记忆管理演示**
+```bash
+# 第一个任务 - 建立会话记忆
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "reasoning",
+       "input": "我是一个数据科学家，正在研究机器学习算法优化",
+       "context": {"session_id": "data_scientist_session"},
+       "priority": "medium"
+     }'
+
+# 第二个任务 - 利用会话记忆
+curl -X POST "http://localhost:8000/api/v1/tasks" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "task_type": "code",
+       "input": "基于我刚才提到的研究方向，帮我生成一个梯度下降优化器的代码",
+       "context": {"session_id": "data_scientist_session"},
        "priority": "medium"
      }'
 ```
@@ -207,8 +238,12 @@ watch -n 2 "curl -s http://localhost:8000/api/v1/tasks/${TASK_ID} | jq '.status'
 #### 2. **Enhanced Reasoning Runtime** (增强推理运行时)
 - **作用**: 统一任务执行引擎，处理所有类型任务
 - **能力**: LLM推理、工具调用、多步工作流编排
-- **特性**: 智能工具选择、错误恢复、轨迹记录
-- **集成**: 与MicroSandbox无缝集成，确保安全执行
+- **特性**: 
+  - 智能工具选择、错误恢复、轨迹记录
+  - **动态步骤数**：支持最多100步的复杂任务执行
+  - **记忆集成**：自动存储和调用会话历史
+  - **上下文注入**：LLM决策时获得历史经验指导
+- **集成**: 与MicroSandbox、MemoryManager、StepPlanner无缝集成
 
 #### 3. **ToolScore System** (工具评分系统)
 - **端口**: 8089 (WebSocket), 8088 (HTTP监控)
@@ -225,7 +260,23 @@ watch -n 2 "curl -s http://localhost:8000/api/v1/tasks/${TASK_ID} | jq '.status'
   - 超时和资源限制
 - **安全性**: 完全隔离的执行环境，防止恶意代码
 
-#### 5. **Synthesis System** (合成学习系统)
+#### 5. **MemoryManager** (记忆管理器) 🧠
+- **功能**: 会话记忆存储、上下文管理、跨会话洞察
+- **特性**: 
+  - **Redis持久化**：生产级记忆存储，支持内存降级
+  - **智能摘要**：为LLM提供精炼的历史上下文
+  - **跨会话学习**：从历史交互中提取成功模式
+- **存储**: 支持会话步骤、任务轨迹、用户偏好
+
+#### 6. **StepPlanner** (步骤规划器) 🔄
+- **功能**: 智能任务分解、动态规划调整、策略选择
+- **策略**: 
+  - **顺序执行**：简单任务的线性处理
+  - **自适应规划**：根据执行结果动态调整
+  - **迭代优化**：复杂任务的反复改进
+- **集成**: 与MemoryManager结合，基于历史经验规划
+
+#### 7. **Synthesis System** (合成学习系统)
 - **功能**: 轨迹分析、模式提取、种子任务生成
 - **特性**: 自动学习、任务合成、质量评估
 - **输出**: 新的训练任务和改进建议
@@ -621,11 +672,12 @@ done
 ```json
 // 请求体
 {
-  "task_type": "code|reasoning|web",    // 任务类型
+  "task_type": "code|reasoning|web|research",  // 任务类型
   "input": "任务描述",                   // 任务内容
   "priority": "high|medium|low",        // 优先级(可选)
+  "max_steps": 10,                      // 最大执行步骤数(可选，默认10)
   "context": {                          // 额外上下文(可选)
-    "session_id": "my-session",
+    "session_id": "my-session",         // 会话ID，用于记忆管理
     "timeout": 60,
     "tags": ["test", "demo"]
   }
@@ -665,10 +717,21 @@ done
   "timestamp": "2024-01-01T12:00:30Z",
   "result": {
     "success": true,
-    "final_result": "π的值是: 3.141592653589793",
-    "execution_time": 2.5,
-    "steps_completed": 3,
-    "tools_used": ["microsandbox-mcp-server.microsandbox_execute"]
+    "final_result": "任务完成。生成结果：AI Agent领域深度分析报告已完成...",
+    "execution_time": 207.5,
+    "steps_completed": 8,
+    "max_steps_used": 15,
+    "tools_used": ["mcp-deepsearch.comprehensive_research"],
+    "memory_context": {
+      "session_id": "user_research_session",
+      "context_applied": true,
+      "previous_tasks_referenced": 3
+    },
+    "reasoning_trace": {
+      "planning_steps": 2,
+      "execution_steps": 6,
+      "adaptive_adjustments": 1
+    }
   }
 }
 ```
@@ -681,7 +744,14 @@ done
   "services": {
     "task_api": "running",
     "toolscore": "healthy",
-    "microsandbox": "available"
+    "microsandbox": "available",
+    "memory_manager": "ready",
+    "step_planner": "initialized"
+  },
+  "memory_stats": {
+    "cached_sessions": 12,
+    "total_stored_steps": 156,
+    "redis_available": true
   },
   "timestamp": "2024-01-01T12:00:00Z"
 }
@@ -735,6 +805,9 @@ agent-data-platform/
 │   ├── llm_client.py          # 🤖 LLM客户端
 │   ├── interfaces.py          # 📋 数据结构定义
 │   ├── redis_manager.py       # 📊 Redis连接管理
+│   ├── memory_manager.py      # 🧠 记忆管理器 (新增)
+│   ├── step_planner.py        # 🔄 多步推理规划器 (新增)
+│   ├── optimized_agent_controller.py  # 🎯 增强代理控制器 (更新)
 │   ├── tool_usage_tracker.py  # 📈 工具使用跟踪 (新增)
 │   │
 │   ├── synthesiscore/         # 🧠 合成学习系统
@@ -773,6 +846,8 @@ agent-data-platform/
 ├── tests/                     # 🧪 测试套件
 │   ├── test_synthesis_focus.py       # 🔬 合成系统测试
 │   ├── test_system_validation.py     # ✅ 系统验证测试
+│   ├── test_memory_manager.py        # 🧠 记忆管理器测试 (新增)
+│   ├── test_step_planner.py          # 🔄 步骤规划器测试 (新增)
 │   ├── test_microsandbox_*.py        # 🛡️ MicroSandbox测试 (新增)
 │   └── test_tool_tracking*.py        # 📈 工具跟踪测试 (新增)
 │
@@ -781,6 +856,10 @@ agent-data-platform/
 │   │   └── trajectories_collection.json
 │   ├── seed_tasks.jsonl       # 🌱 生成的种子任务
 │   └── batch_test_results.json # 📊 批量测试结果
+│
+├── data/                      # 💾 数据目录 (新增)
+│   ├── learning_data.json     # 🎯 持久化学习数据
+│   └── memory_cache/          # 🧠 记忆缓存目录
 │
 ├── logs/                      # 📝 日志目录
 │   └── main_test.log          # 主要日志文件
@@ -1222,8 +1301,17 @@ python main.py
 # === 健康检查 ===
 curl http://localhost:8000/health
 
-# === 提交任务 ===
+# === 基础任务提交 ===
 curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{"task_type":"code","input":"测试MicroSandbox: print(\"Hello!\")"}'
+
+# === 多步推理任务 ===
+curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{"task_type":"research","input":"深度分析AI发展趋势","max_steps":15,"context":{"session_id":"research_session"}}'
+
+# === 会话记忆任务 ===
+# 第一个任务建立上下文
+curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{"task_type":"reasoning","input":"我正在研究机器学习","context":{"session_id":"my_session"}}'
+# 第二个任务使用上下文
+curl -X POST http://localhost:8000/api/v1/tasks -H "Content-Type: application/json" -d '{"task_type":"code","input":"基于刚才的研究方向，生成算法代码","context":{"session_id":"my_session"}}'
 
 # === 查看任务 ===
 curl http://localhost:8000/api/v1/tasks/TASK_ID
@@ -1231,6 +1319,10 @@ curl http://localhost:8000/api/v1/tasks/TASK_ID
 # === 监控 ===
 tail -f logs/main_test.log
 redis-cli XLEN tasks:reasoning
+
+# === 测试记忆和学习功能 ===
+python -m pytest tests/test_memory_manager.py -v
+python -m pytest tests/test_step_planner.py -v
 
 # === 清理 ===
 python cleanup_ports.py
