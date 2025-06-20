@@ -21,6 +21,7 @@ from core.local_python_executor import LocalPythonExecutor
 from core.tool_usage_tracker import ToolUsageTracker
 from core.memory_manager import MemoryManager
 from core.step_planner import StepPlanner
+from core.trajectory_enhancer import TrajectoryEnhancer
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 初始化记忆管理器和步骤规划器
         self.memory_manager = MemoryManager(redis_manager=redis_manager)
         self.step_planner = StepPlanner(llm_client=llm_client, memory_manager=self.memory_manager)
+        
+        # 🔍 初始化轨迹增强器
+        self.trajectory_enhancer = TrajectoryEnhancer()
         
         # 使用配置管理器获取服务端点
         try:
@@ -220,6 +224,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         retry_delay_seconds = 2
         current_outputs = []  # 用于存储每步的输出
         
+        # 🔍 启动轨迹增强和资源追踪
+        tracking_info = self.trajectory_enhancer.start_task_tracking(trajectory_id)
+        logger.info(f"🔍 轨迹追踪已启动: {tracking_info}")
+        
         # 生成会话ID用于记忆管理
         session_id = f"session_{trajectory_id}_{int(start_time)}"
         
@@ -247,13 +255,30 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.warning("⚠️ 检测到暂无可用工具，可能存在工具注册问题")
 
         # === 记录首次暴露给 LLM 的工具集合 ===
+        step_start_time = time.time()
         expose_step = ExecutionStep(
             step_id=len(steps)+1,
             action_type=ActionType.TOOL_CALL,
             action_params={"tools_snapshot": available_tools_description},
             observation="Tools exposed to LLM for planning",
-            success=True
+            success=True,
+            event_source="system",
+            triggering_event="task_initialization"
         )
+        step_end_time = time.time()
+        expose_step.duration = step_end_time - step_start_time
+        expose_step.resource_usage = self.trajectory_enhancer.calculate_step_resource_usage(step_start_time, step_end_time)
+        
+        # 添加子事件
+        # 从工具描述中估算工具数量
+        tools_count = available_tools_description.count('- ') if available_tools_description else 0
+        self.trajectory_enhancer.add_sub_event_to_step(
+            expose_step, 
+            "tools_exposed", 
+            f"Exposed {tools_count} tools to LLM",
+            {"tools_count": tools_count}
+        )
+        
         steps.append(expose_step)
 
         # 智能任务需求分析
@@ -1098,8 +1123,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             used_tools=tool_tracker.get_used_tools_summary()
         )
         
+        # 🔍 应用轨迹增强 - 添加详细元数据
+        enhanced_trajectory = self.trajectory_enhancer.enhance_trajectory(trajectory)
+        
         # 保存轨迹
-        await self._save_trajectory(trajectory)
+        await self._save_trajectory(enhanced_trajectory)
         
         # === 将运行期间捕获的新工具事件追加到轨迹 ===
         if self._tool_event_buffer:

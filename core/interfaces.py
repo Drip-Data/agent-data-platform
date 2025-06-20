@@ -82,6 +82,17 @@ class ExecutionStep:
     # 🔍 新增：LLM交互记录
     llm_interactions: List['LLMInteraction'] = field(default_factory=list)
     
+    # 🔍 新增：事件因果关系和源归属
+    event_source: str = "agent"  # "agent" | "user" | "system" | "environment"
+    caused_by_step: Optional[int] = None
+    triggering_event: Optional[str] = None
+    
+    # 🔍 新增：性能和资源使用
+    resource_usage: Dict[str, Any] = field(default_factory=dict)
+    
+    # 🔍 新增：子事件（细粒度追踪）
+    sub_events: List[Dict[str, Any]] = field(default_factory=list)
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式，用于日志和序列化"""
         # 安全处理error_type，可能是字符串或ErrorType枚举
@@ -104,8 +115,16 @@ class ExecutionStep:
             'error_message': self.error_message,
             'timestamp': self.timestamp,
             'duration': self.duration,
-            # 🔍 新增：LLM交互记录
-            'llm_interactions': [interaction.to_dict() for interaction in self.llm_interactions]
+            # 🔍 LLM交互记录
+            'llm_interactions': [interaction.to_dict() for interaction in self.llm_interactions],
+            # 🔍 新增：事件因果关系和源归属
+            'event_source': self.event_source,
+            'caused_by_step': self.caused_by_step,
+            'triggering_event': self.triggering_event,
+            # 🔍 新增：性能和资源使用
+            'resource_usage': self.resource_usage,
+            # 🔍 新增：子事件（细粒度追踪）
+            'sub_events': self.sub_events
         }
 
 @dataclass
@@ -124,9 +143,18 @@ class TrajectoryResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     
-    # 🔍 新增：工具使用跟踪
+    # 🔍 工具使用跟踪
     available_tools: List[Dict[str, Any]] = field(default_factory=list)  # 任务开始时可用的MCP服务器
     used_tools: Dict[str, bool] = field(default_factory=dict)           # 实际使用的工具: {tool_key: success_status}
+    
+    # 🔍 新增：累积的LLM元数据
+    llm_metrics: Dict[str, Any] = field(default_factory=dict)  # 累积的令牌使用、成本等
+    
+    # 🔍 新增：执行环境信息
+    execution_environment: Dict[str, Any] = field(default_factory=dict)
+    
+    # 🔍 新增：错误处理统计
+    error_handling: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict:
         # 安全处理error_type
@@ -150,9 +178,15 @@ class TrajectoryResult:
             'total_duration': self.total_duration,
             'metadata': self.metadata,
             'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.created_at)),
-            # 🔍 新增：工具使用跟踪
+            # 🔍 工具使用跟踪
             'available_tools': self.available_tools,
-            'used_tools': self.used_tools
+            'used_tools': self.used_tools,
+            # 🔍 新增：累积的LLM元数据
+            'llm_metrics': self.llm_metrics,
+            # 🔍 新增：执行环境信息
+            'execution_environment': self.execution_environment,
+            # 🔍 新增：错误处理统计
+            'error_handling': self.error_handling
         }
     
     @classmethod
@@ -240,6 +274,10 @@ class LLMInteraction:
     response_length: int = 0
     response_time: float = 0.0  # 响应时间（秒）
     
+    # 🔍 新增：详细的令牌使用统计
+    token_usage: Dict[str, Any] = field(default_factory=dict)
+    cost_info: Dict[str, Any] = field(default_factory=dict)
+    
     # 解析结果
     parsed_data: Dict[str, Any] = field(default_factory=dict)
     parsing_success: bool = True
@@ -247,36 +285,28 @@ class LLMInteraction:
     
     # 成功/失败状态
     success: bool = True
-    error_type: Optional[str] = None
     error_message: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式便于存储"""
+        """转换为字典格式，用于轨迹保存"""
         return {
             'interaction_id': self.interaction_id,
-            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.timestamp)),
+            'timestamp': self.timestamp,
             'provider': self.provider,
             'model': self.model,
             'context': self.context,
-            'prompt_info': {
-                'type': self.prompt_type,
-                'length': self.prompt_length,
-                'content_preview': self.prompt[:200] + '...' if len(self.prompt) > 200 else self.prompt,
-                'metadata': self.input_metadata
-            },
-            'response_info': {
-                'length': self.response_length,
-                'time': self.response_time,
-                'content_preview': self.response[:200] + '...' if len(self.response) > 200 else self.response,
-                'parsing_success': self.parsing_success,
-                'parsing_errors': self.parsing_errors,
-                'parsed_data': self.parsed_data
-            },
-            'status': {
-                'success': self.success,
-                'error_type': self.error_type,
-                'error_message': self.error_message
-            }
+            'prompt_length': self.prompt_length,
+            'prompt_type': self.prompt_type,
+            'response_length': self.response_length,
+            'response_time': self.response_time,
+            'token_usage': self.token_usage,  # 新增
+            'cost_info': self.cost_info,      # 新增
+            'success': self.success,
+            'error_message': self.error_message,
+            'input_metadata': self.input_metadata,
+            'parsed_data': self.parsed_data,
+            'parsing_success': self.parsing_success,
+            'parsing_errors': self.parsing_errors
         }
     
     @classmethod
