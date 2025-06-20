@@ -187,6 +187,73 @@ async def get_task_status(task_id: str):
         logger.error(f"Failed to get task status: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get task status: {e}")
 
+# ===== SynthesisCore v2.0 监控API =====
+
+@app.get("/api/v1/synthesis/health", summary="SynthesisCore健康状态")
+async def synthesis_health():
+    """获取SynthesisCore v1.0和v2.0的健康状态"""
+    try:
+        from services import synthesis_service
+        return synthesis_service.health_check()
+    except Exception as e:
+        logger.error(f"Failed to get synthesis health: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/v1/synthesis/v2/statistics", summary="SynthesisCore v2.0统计")
+async def synthesis_v2_statistics():
+    """获取SynthesisCore v2.0统计信息"""
+    try:
+        from services import synthesis_service
+        return synthesis_service.get_v2_statistics()
+    except Exception as e:
+        logger.error(f"Failed to get v2 statistics: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/v1/synthesis/force_process", summary="强制处理轨迹")
+async def force_synthesis_process():
+    """强制立即处理轨迹文件"""
+    try:
+        from services import synthesis_service
+        return synthesis_service.force_process()
+    except Exception as e:
+        logger.error(f"Failed to force process: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/v1/synthesis/seed_tasks", summary="查看生成的种子任务")
+async def get_seed_tasks(limit: int = 10):
+    """查看最近生成的种子任务"""
+    try:
+        seed_tasks_file = "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/seed_tasks.jsonl"
+        
+        if not os.path.exists(seed_tasks_file):
+            return {"seed_tasks": [], "total_count": 0, "message": "No seed tasks file found"}
+        
+        with open(seed_tasks_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # 取最后limit行
+        recent_lines = lines[-limit:] if len(lines) > limit else lines
+        
+        seed_tasks = []
+        for line in recent_lines:
+            if line.strip():
+                try:
+                    task = json.loads(line.strip())
+                    seed_tasks.append(task)
+                except json.JSONDecodeError:
+                    continue
+        
+        return {
+            "seed_tasks": seed_tasks,
+            "total_count": len(lines),
+            "recent_count": len(seed_tasks),
+            "file_path": seed_tasks_file
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get seed tasks: {e}")
+        return {"error": str(e)}
+
 @app.post("/api/v1/tools/list", summary="获取可用工具列表")
 async def list_available_tools():
     """获取ToolScore中可用的工具列表"""

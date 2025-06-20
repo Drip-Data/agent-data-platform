@@ -1323,5 +1323,196 @@
     },
     "extracted_at": "2025-06-20T19:29:54.276765",
     "source_trajectory_id": "67929b7b-1bf0-48a3-98a3-d47a2fe5fb7f"
+  },
+  {
+    "essence_id": "essence_1750441302_67929b7b-1bf0-48a3-98a3-d47a2fe5fb7f",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "执行一项深度研究，全面分析AI Agent开发领域的最新趋势，重点关注多模态Agent、LangGraph框架的现状与发展，并预测2024年下半年至2025年的关键技术突破。任务需利用高级搜索与信息整合工具，生成一份专业的综合分析报告，揭示行业前沿动态与未来走向。",
+    "complexity_level": "complex",
+    "success_pattern": {
+      "duration": 207.987,
+      "steps_count": 2,
+      "key_features": [
+        "深度研究与综合分析",
+        "多维度主题覆盖（趋势、多模态、框架、未来突破）",
+        "前瞻性预测（2024年末至2025年）",
+        "高级信息整合与报告生成",
+        "利用专业工具进行复杂信息处理"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "browser_navigator",
+        "mcp-deepsearch"
+      ]
+    },
+    "extracted_at": "2025-06-21T01:41:42.164631",
+    "source_trajectory_id": "67929b7b-1bf0-48a3-98a3-d47a2fe5fb7f"
+  },
+  {
+    "essence_id": "essence_1750441311_96fdf70d-509f-4b0c-acb8-282e055e28f5",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "请对AI Agent开发领域的最新趋势进行深度研究，重点关注多模态Agent和LangGraph框架的现状与未来发展（2024下半年至2025年）。任务需利用网络搜索工具，分析并总结关键技术突破和趋势。",
+    "complexity_level": "complex",
+    "success_pattern": {
+      "duration": 6.388,
+      "steps_count": 4,
+      "key_features": [
+        "深度研究与信息综合",
+        "AI Agent领域趋势分析",
+        "关注特定技术（多模态Agent, LangGraph）",
+        "未来技术预测（2024下半年-2025）",
+        "需要网络搜索和推理能力"
+      ],
+      "confidence": 0.95,
+      "tools_used": []
+    },
+    "extracted_at": "2025-06-21T01:41:51.212600",
+    "source_trajectory_id": "96fdf70d-509f-4b0c-acb8-282e055e28f5"
+  },
+  {
+    "essence_id": "essence_1750441317_test_synthesis_v2_1750438496",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "获取比特币（BTC）的当前美元价格及其24小时涨跌幅。任务需利用搜索工具查询实时加密货币市场数据，并使用编程工具对检索到的价格和变动信息进行精确格式化，以提供清晰、易读的最终结果。此任务展示了跨工具协作进行金融信息查询与展示的能力。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 15.2,
+      "steps_count": 2,
+      "key_features": [
+        "实时金融数据查询",
+        "多工具协同（搜索与编程）",
+        "数据格式化与呈现",
+        "加密货币价格追踪"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "deepsearch",
+        "python_executor"
+      ]
+    },
+    "extracted_at": "2025-06-21T01:41:57.420725",
+    "source_trajectory_id": "test_synthesis_v2_1750438496"
+  },
+  {
+    "essence_id": "essence_1750441322_test_simple_monitor_1750439534",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "本任务旨在优化AI代理系统的性能。首先通过系统监控工具分析当前CPU和内存利用率以识别性能瓶颈，随后利用深度搜索工具研究并评估多种AI系统性能优化技术，最终实施有效策略以显著提升系统响应速度和整体效率。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 25.5,
+      "steps_count": 2,
+      "key_features": [
+        "AI系统性能分析与优化",
+        "多工具协同（系统监控与深度搜索）",
+        "问题诊断与解决方案研究",
+        "目标导向：提升系统响应速度"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "deepsearch",
+        "python_executor"
+      ]
+    },
+    "extracted_at": "2025-06-21T01:42:02.535107",
+    "source_trajectory_id": "test_simple_monitor_1750439534"
+  },
+  {
+    "essence_id": "essence_1750441505_67929b7b-1bf0-48a3-98a3-d47a2fe5fb7f",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "执行一项深度研究，全面分析AI Agent开发领域的最新趋势，重点关注多模态Agent、LangGraph框架的现状与未来发展，并预测2024年末至2025年的主要技术突破。任务目标是生成一份专业的综合分析报告。",
+    "complexity_level": "complex",
+    "success_pattern": {
+      "duration": 207.987,
+      "steps_count": 2,
+      "key_features": [
+        "深度研究与信息综合",
+        "特定技术领域聚焦（AI Agent、多模态、LangGraph）",
+        "未来趋势预测与前瞻性分析",
+        "高级研究工具（mcp-deepsearch）的有效利用",
+        "产出专业分析报告"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "mcp-deepsearch",
+        "browser_navigator"
+      ]
+    },
+    "extracted_at": "2025-06-21T01:45:05.941682",
+    "source_trajectory_id": "67929b7b-1bf0-48a3-98a3-d47a2fe5fb7f"
+  },
+  {
+    "essence_id": "essence_1750441514_96fdf70d-509f-4b0c-acb8-282e055e28f5",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "请利用网络搜索工具，全面调研AI Agent开发领域的最新趋势。重点关注多模态Agent和LangGraph框架的当前发展状况，并预测2024年下半年至2025年的关键技术突破。任务需整合多源信息，形成一份结构化的分析报告，突出核心洞察和未来发展方向。",
+    "complexity_level": "complex",
+    "success_pattern": {
+      "duration": 6.388,
+      "steps_count": 4,
+      "key_features": [
+        "深度技术趋势调研",
+        "聚焦特定AI Agent技术（多模态、LangGraph）",
+        "未来技术突破预测",
+        "多源信息整合与分析",
+        "需要网络搜索和内容理解能力"
+      ],
+      "confidence": 0.95,
+      "tools_used": []
+    },
+    "extracted_at": "2025-06-21T01:45:14.032615",
+    "source_trajectory_id": "96fdf70d-509f-4b0c-acb8-282e055e28f5"
+  },
+  {
+    "essence_id": "essence_1750441520_test_synthesis_v2_1750438496",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "获取比特币(BTC)的当前美元价格及其24小时涨跌幅。任务需要利用搜索工具查询实时金融数据，并通过编程工具对获取到的价格和变动信息进行格式化处理，最终以清晰易读的方式呈现。此任务展示了多工具协同获取并处理特定信息的效率。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 15.2,
+      "steps_count": 2,
+      "key_features": [
+        "实时加密货币价格查询",
+        "多工具协同（搜索与代码执行）",
+        "数据提取与格式化",
+        "结果清晰呈现"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "deepsearch"
+      ]
+    },
+    "extracted_at": "2025-06-21T01:45:20.656408",
+    "source_trajectory_id": "test_synthesis_v2_1750438496"
+  },
+  {
+    "essence_id": "essence_1750441533_test_simple_monitor_1750439534",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "优化AI代理系统性能，提升响应速度。任务涉及使用Python执行器监控系统CPU和内存使用情况以识别性能瓶颈，并利用深度搜索工具研究AI系统性能优化技术，最终实施有效策略以显著提升系统效率和响应能力。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 25.5,
+      "steps_count": 2,
+      "key_features": [
+        "AI系统性能优化",
+        "系统资源监控与分析",
+        "多工具协同（Python执行器与深度搜索）",
+        "问题诊断与解决方案探索",
+        "提升系统响应速度"
+      ],
+      "confidence": 0.9,
+      "tools_used": [
+        "python_executor",
+        "deepsearch"
+      ]
+    },
+    "extracted_at": "2025-06-21T01:45:33.625860",
+    "source_trajectory_id": "test_simple_monitor_1750439534"
   }
 ]

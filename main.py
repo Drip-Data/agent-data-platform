@@ -362,9 +362,17 @@ async def main_async():
         dependencies=["redis", "toolscore", "mcp_servers"]
     )
     
+    # 获取LLM配置并合并到服务配置中
+    llm_config = config_manager.get_llm_config()
+    synthesis_config = {
+        'redis_url': redis_url,
+        'TRAJECTORIES_DIR': 'output/trajectories',
+        **llm_config  # 合并LLM配置
+    }
+    
     service_manager.register_service(
         name="synthesis",
-        initialize_fn=lambda config: synthesis_service.initialize(config or {}), # 传入配置字典
+        initialize_fn=lambda config: synthesis_service.initialize(synthesis_config), # 传入完整配置
         start_fn=synthesis_service.start,
         stop_fn=synthesis_service.stop,
         health_check_fn=synthesis_service.health_check,
