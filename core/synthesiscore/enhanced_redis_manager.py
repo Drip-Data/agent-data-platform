@@ -150,7 +150,7 @@ class CorpusQueueManager:
                 "processing_status": corpus_content.processing_status
             }
             
-            message_id = await self.redis_client.xadd(self.stream_name, corpus_data)
+            message_id = await safe_redis_call(self.redis_client.xadd, self.stream_name, corpus_data)
             logger.debug(f"✅ 语料已添加到队列: {corpus_content.corpus_id}")
             return message_id.decode() if isinstance(message_id, bytes) else message_id
             
@@ -194,7 +194,7 @@ class CorpusQueueManager:
             pipeline.xadd(self.stream_name, corpus_data)
         
         try:
-            results = await pipeline.execute()
+            results = await safe_redis_call(pipeline.execute)
             message_ids = [result.decode() if isinstance(result, bytes) else result for result in results]
             logger.info(f"✅ 批量添加语料完成: {len(corpus_list)} 个语料")
             return message_ids
@@ -318,7 +318,7 @@ class TaskQueueManager:
         """添加任务到指定流"""
         try:
             task_data = self._serialize_task(task, task_category)
-            message_id = await self.redis_client.xadd(stream_name, task_data)
+            message_id = await safe_redis_call(self.redis_client.xadd, stream_name, task_data)
             logger.debug(f"✅ 任务已添加到 {stream_name}: {task.task_id}")
             return message_id.decode() if isinstance(message_id, bytes) else message_id
             
@@ -335,7 +335,7 @@ class TaskQueueManager:
             pipeline.xadd(stream_name, task_data)
         
         try:
-            results = await pipeline.execute()
+            results = await safe_redis_call(pipeline.execute)
             message_ids = [result.decode() if isinstance(result, bytes) else result for result in results]
             logger.info(f"✅ 批量添加到 {stream_name}: {len(tasks)} 个任务")
             return message_ids
@@ -416,7 +416,7 @@ class VerificationQueueManager:
                 "requested_at": datetime.now().isoformat()
             }
             
-            message_id = await self.redis_client.xadd(self.stream_name, verification_data)
+            message_id = await safe_redis_call(self.redis_client.xadd, self.stream_name, verification_data)
             logger.debug(f"✅ 验证请求已添加: {task.task_id}")
             return message_id.decode() if isinstance(message_id, bytes) else message_id
             
@@ -439,12 +439,12 @@ class VerificationQueueManager:
             
             # 存储到verification结果流
             result_stream = f"{self.stream_name}:results"
-            message_id = await self.redis_client.xadd(result_stream, result_data)
+            message_id = await safe_redis_call(self.redis_client.xadd, result_stream, result_data)
             
             # 同时存储到哈希表以便快速查询
             result_key = f"verification_result:{result.task_id}"
-            await self.redis_client.hset(result_key, mapping=result_data)
-            await self.redis_client.expire(result_key, 7 * 24 * 3600)  # 7天过期
+            await safe_redis_call(self.redis_client.hset, result_key, mapping=result_data)
+            await safe_redis_call(self.redis_client.expire, result_key, 7 * 24 * 3600)  # 7天过期
             
             logger.debug(f"✅ 验证结果已存储: {result.task_id}")
             return message_id.decode() if isinstance(message_id, bytes) else message_id
@@ -505,8 +505,8 @@ class MetricsManager:
             
             # 存储到哈希表
             session_key = f"{self.metrics_key}:{session_id}"
-            await self.redis_client.hset(session_key, mapping=metrics_data)
-            await self.redis_client.expire(session_key, 30 * 24 * 3600)  # 30天过期
+            await safe_redis_call(self.redis_client.hset, session_key, mapping=metrics_data)
+            await safe_redis_call(self.redis_client.expire, session_key, 30 * 24 * 3600)  # 30天过期
             
             # 更新全局统计
             await self._update_global_stats(metrics)
@@ -536,7 +536,7 @@ class MetricsManager:
             # 更新最后更新时间
             pipeline.hset(global_key, "last_updated", datetime.now().isoformat())
             
-            await pipeline.execute()
+            await safe_redis_call(pipeline.execute)
             
         except Exception as e:
             logger.error(f"❌ 更新全局统计失败: {e}")
@@ -545,7 +545,7 @@ class MetricsManager:
         """获取全局指标"""
         try:
             global_key = f"{self.metrics_key}:global"
-            raw_data = await self.redis_client.hgetall(global_key)
+            raw_data = await safe_redis_call(self.redis_client.hgetall, global_key)
             
             if not raw_data:
                 return {}

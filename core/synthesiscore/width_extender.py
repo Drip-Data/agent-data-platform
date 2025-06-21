@@ -101,9 +101,10 @@ class SemanticGrouper:
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=similarity_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "task_similarity_assessment"}
             )
             
@@ -258,9 +259,10 @@ class TaskFuser:
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=theme_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "theme_analysis"}
             )
             
@@ -291,9 +293,10 @@ class TaskFuser:
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=question_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "composite_question_generation"}
             )
             
@@ -423,9 +426,10 @@ class DecompositionValidator:
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=decomposition_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "decomposition_validation"}
             )
             
@@ -455,9 +459,10 @@ class DecompositionValidator:
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=complexity_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "complexity_validation"}
             )
             
@@ -565,11 +570,22 @@ class WidthExtender:
         self.decomposition_validator = DecompositionValidator(llm_client)
         self.config = EnhancedSynthesisConfig()
     
-    async def extend_atomic_tasks_width(self, atomic_tasks: List[AtomicTask]) -> List[CompositeTask]:
-        """宽度扩展原子任务为复合任务"""
+    async def extend_atomic_tasks_width(self, atomic_tasks: List[AtomicTask], 
+                                       adaptive_config: Optional[Any] = None) -> List[CompositeTask]:
+        """优化的宽度扩展原子任务为复合任务"""
         logger.info(f"🚀 开始宽度扩展 {len(atomic_tasks)} 个原子任务")
         
+        if not atomic_tasks:
+            return []
+        
         try:
+            # 使用自适应配置更新相似度阈值
+            if adaptive_config:
+                original_threshold = self.config.WIDTH_EXTENSION_CONFIG['semantic_similarity_threshold']
+                adaptive_threshold = adaptive_config.width_config["semantic_similarity_threshold"]
+                self.config.WIDTH_EXTENSION_CONFIG['semantic_similarity_threshold'] = adaptive_threshold
+                logger.debug(f"🔧 使用自适应相似度阈值: {adaptive_threshold} (原值: {original_threshold})")
+            
             # 1. 语义分组
             task_groups = await self.semantic_grouper.group_atomic_tasks(atomic_tasks)
             
@@ -577,32 +593,13 @@ class WidthExtender:
                 logger.warning("⚠️ 未找到可分组的任务")
                 return []
             
-            # 2. 并行融合各组任务
-            composite_tasks = []
+            logger.info(f"📊 语义分组完成，得到 {len(task_groups)} 个任务组")
             
-            fusion_tasks = [self.task_fuser.fuse_task_group(group) for group in task_groups]
-            fusion_results = await asyncio.gather(*fusion_tasks, return_exceptions=True)
+            # 2. 批量并行融合各组任务
+            composite_tasks = await self._batch_fuse_task_groups(task_groups, adaptive_config)
             
-            for i, result in enumerate(fusion_results):
-                if isinstance(result, CompositeTask):
-                    composite_tasks.append(result)
-                elif isinstance(result, Exception):
-                    logger.error(f"❌ 任务组 {i} 融合失败: {result}")
-            
-            # 3. 验证复合任务
-            validated_tasks = []
-            
-            for composite_task in composite_tasks:
-                try:
-                    validation_result = await self.decomposition_validator.validate_composite_task(composite_task)
-                    
-                    if validation_result.get('is_valid', False):
-                        validated_tasks.append(composite_task)
-                    else:
-                        logger.warning(f"⚠️ 复合任务验证不通过: {composite_task.task_id}")
-                        
-                except Exception as e:
-                    logger.error(f"❌ 复合任务验证失败 {composite_task.task_id}: {e}")
+            # 3. 批量验证复合任务
+            validated_tasks = await self._batch_validate_composite_tasks(composite_tasks, adaptive_config)
             
             logger.info(f"✅ 宽度扩展完成，生成 {len(validated_tasks)} 个有效复合任务")
             return validated_tasks
@@ -610,6 +607,82 @@ class WidthExtender:
         except Exception as e:
             logger.error(f"❌ 宽度扩展失败: {e}")
             return []
+    
+    async def _batch_fuse_task_groups(self, task_groups: List[List[AtomicTask]], 
+                                     adaptive_config: Optional[Any] = None) -> List[CompositeTask]:
+        """批量融合任务组"""
+        max_concurrent = adaptive_config.batch_config["max_concurrent_batches"] if adaptive_config else 3
+        
+        # 使用信号量控制并发
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def fuse_with_semaphore(group: List[AtomicTask]):
+            async with semaphore:
+                try:
+                    return await self.task_fuser.fuse_task_group(group)
+                except Exception as e:
+                    logger.error(f"❌ 任务组融合失败: {e}")
+                    return None
+        
+        # 并行处理所有组
+        fusion_results = await asyncio.gather(
+            *[fuse_with_semaphore(group) for group in task_groups],
+            return_exceptions=True
+        )
+        
+        # 收集有效结果
+        composite_tasks = []
+        for i, result in enumerate(fusion_results):
+            if isinstance(result, CompositeTask):
+                composite_tasks.append(result)
+            elif isinstance(result, Exception):
+                logger.error(f"❌ 任务组 {i} 融合异常: {result}")
+            elif result is None:
+                logger.warning(f"⚠️ 任务组 {i} 融合返回空结果")
+        
+        logger.info(f"✅ 任务组融合完成，成功融合 {len(composite_tasks)}/{len(task_groups)} 个组")
+        return composite_tasks
+    
+    async def _batch_validate_composite_tasks(self, composite_tasks: List[CompositeTask], 
+                                            adaptive_config: Optional[Any] = None) -> List[CompositeTask]:
+        """批量验证复合任务"""
+        if not composite_tasks:
+            return []
+        
+        max_concurrent = adaptive_config.batch_config["max_concurrent_batches"] if adaptive_config else 3
+        
+        # 使用信号量控制并发
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def validate_with_semaphore(task: CompositeTask):
+            async with semaphore:
+                try:
+                    validation_result = await self.decomposition_validator.validate_composite_task(task)
+                    return task, validation_result
+                except Exception as e:
+                    logger.error(f"❌ 复合任务验证失败 {task.task_id}: {e}")
+                    return task, {"is_valid": False, "error": str(e)}
+        
+        # 并行验证所有任务
+        validation_results = await asyncio.gather(
+            *[validate_with_semaphore(task) for task in composite_tasks],
+            return_exceptions=True
+        )
+        
+        # 筛选有效任务
+        validated_tasks = []
+        for result in validation_results:
+            if isinstance(result, tuple):
+                task, validation = result
+                if validation.get('is_valid', False):
+                    validated_tasks.append(task)
+                else:
+                    logger.warning(f"⚠️ 复合任务验证不通过: {task.task_id}")
+            elif isinstance(result, Exception):
+                logger.error(f"❌ 复合任务验证异常: {result}")
+        
+        logger.info(f"✅ 复合任务验证完成，{len(validated_tasks)}/{len(composite_tasks)} 个任务通过验证")
+        return validated_tasks
     
     async def get_width_extension_statistics(self, atomic_tasks: List[AtomicTask], 
                                            composite_tasks: List[CompositeTask]) -> Dict[str, Any]:

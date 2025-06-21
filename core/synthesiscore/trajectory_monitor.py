@@ -160,9 +160,29 @@ class TrajectoryMonitor:
             
             logger.info(f"🆕 发现 {len(new_trajectories)} 个新轨迹，开始处理...")
             
-            # 使用SynthesisCore v2.0处理轨迹
+            # 调试：显示所有新轨迹的信息
+            logger.info("🔍 所有新轨迹详情:")
+            for i, trajectory in enumerate(new_trajectories):
+                logger.info(f"  {i+1}. task_id={trajectory.task_id}, runtime_id={trajectory.runtime_id}, success={trajectory.success}")
+            
+            # 过滤出值得处理的轨迹
+            valid_trajectories = []
+            for trajectory in new_trajectories:
+                if self._should_process_trajectory(trajectory):
+                    valid_trajectories.append(trajectory)
+                    logger.info(f"✅ 轨迹通过过滤: {trajectory.task_id} (runtime={trajectory.runtime_id}, success={trajectory.success})")
+                else:
+                    logger.debug(f"⏭️ 跳过轨迹: {trajectory.task_id}")
+            
+            logger.info(f"📊 轨迹过滤结果: {len(valid_trajectories)}/{len(new_trajectories)} 个轨迹通过过滤")
+            
+            if not valid_trajectories:
+                logger.warning("⚠️ 没有有效轨迹可处理")
+                return {"success": False, "message": "No valid trajectories to process"}
+            
+            # 使用SynthesisCore v2.0处理有效轨迹
             result = await self.synthesis_core.synthesize_tasks(
-                trajectories=new_trajectories,
+                trajectories=valid_trajectories,
                 mode="full",  # 生成所有类型的任务
                 verify_quality=True
             )
@@ -171,12 +191,14 @@ class TrajectoryMonitor:
                 # 转换为种子任务并保存
                 await self._convert_and_save_seed_tasks(result)
                 
-                # 更新已处理记录
-                self._update_processed_trajectories([t.task_id for t in new_trajectories])
+                # 只标记成功处理的有效轨迹为已处理
+                self._update_processed_trajectories([t.task_id for t in valid_trajectories])
                 
                 logger.info(f"✅ 轨迹处理完成，生成种子任务: 原子 {len(result['atomic_tasks'])}, 扩展 {len(result['extended_tasks'])}, 复合 {len(result['composite_tasks'])}")
+                logger.info(f"✅ 标记 {len(valid_trajectories)} 个有效轨迹为已处理")
             else:
                 logger.error(f"❌ SynthesisCore处理失败: {result.get('error', 'Unknown error')}")
+                logger.warning(f"⚠️ 不标记轨迹为已处理，以便下次重试")
                 
         except Exception as e:
             logger.error(f"❌ 处理轨迹变化失败: {e}")
@@ -209,6 +231,9 @@ class TrajectoryMonitor:
     def _convert_to_trajectory_result(self, traj_data: Dict) -> Optional[TrajectoryResult]:
         """转换轨迹数据格式"""
         try:
+            # 调试日志：检查数据结构
+            logger.debug(f"🔍 TM Converting trajectory: {traj_data.get('task_id', 'unknown')}")
+            
             # 基础信息
             task_id = traj_data.get('task_id', f"traj_{int(time.time())}")
             task_description = traj_data.get('task_description', traj_data.get('description', ''))
@@ -252,11 +277,44 @@ class TrajectoryMonitor:
                 created_at=completed_at_time  # 使用created_at而不是completed_at
             )
             
+            logger.debug(f"🔍 TM Created: {trajectory.task_id}")
             return trajectory
             
         except Exception as e:
             logger.error(f"❌ 轨迹数据转换失败: {e}")
             return None
+    
+    def _should_process_trajectory(self, trajectory: TrajectoryResult) -> bool:
+        """判断轨迹是否值得处理"""
+        # 1. 成功的轨迹总是处理
+        if trajectory.success:
+            return True
+        
+        # 2. reasoning runtime的轨迹，即使失败也可能有价值（不要求有执行步骤）
+        runtime_id = trajectory.runtime_id.lower()
+        if 'reasoning' in runtime_id:
+            logger.info(f"🧠 Found reasoning trajectory: {trajectory.task_id}")
+            return True
+        
+        # 3. 有执行步骤的轨迹
+        if len(trajectory.steps) > 0:
+            # 有多个步骤的复杂任务，即使失败也可能有价值
+            if len(trajectory.steps) >= 2:
+                return True
+        
+        # 4. 任务描述包含特定关键词
+        task_desc = trajectory.task_description.lower()
+        valuable_keywords = ['reasoning', '推理', '分析', 'analysis', 'compare', '对比', '研究']
+        if any(keyword in task_desc for keyword in valuable_keywords):
+            logger.info(f"🔎 Found valuable keywords in task description: {trajectory.task_id}")
+            return True
+        
+        # 5. 有最终结果的轨迹，即使失败也可能有价值
+        if trajectory.final_result and len(trajectory.final_result.strip()) > 50:
+            logger.info(f"📝 Found trajectory with substantial final result: {trajectory.task_id}")
+            return True
+        
+        return False
     
     def _convert_step_data(self, step_data: Dict, step_index: int) -> Optional[ExecutionStep]:
         """转换步骤数据"""

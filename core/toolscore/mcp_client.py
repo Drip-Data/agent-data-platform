@@ -70,18 +70,20 @@ class MCPToolClient:
                 error_msg = response.get("error") or response.get("message", "Unknown error")
                 raise Exception(f"Toolscore error: {error_msg}")
             return response
-        except websockets_client.ConnectionClosedOK:
-            logger.warning("Connection to toolscore closed gracefully. Attempting to reconnect for next request.")
-            self._connected = False
-            await self.connect() # 尝试重新连接
-            # 重新连接后再次发送请求
-            if self._connected and self.websocket:
-                return await self._send_request(request_type, payload)
+        except Exception as conn_error:
+            # 处理连接关闭异常（兼容不同websockets版本）
+            if "ConnectionClosed" in str(type(conn_error)) or "ConnectionClosedOK" in str(conn_error):
+                logger.warning("Connection to toolscore closed gracefully. Attempting to reconnect for next request.")
+                self._connected = False
+                await self.connect() # 尝试重新连接
+                # 重新连接后再次发送请求
+                if self._connected and self.websocket:
+                    return await self._send_request(request_type, payload)
+                else:
+                    raise ConnectionError("Failed to reconnect to toolscore after graceful close.")
             else:
-                raise ConnectionError("Failed to reconnect to toolscore after graceful close.")
-        except Exception as e:
-            logger.error(f"Error sending request to toolscore or receiving response: {e}")
-            raise
+                logger.error(f"Error sending request to toolscore or receiving response: {conn_error}")
+                raise
 
     async def get_all_tools(self) -> List[ToolSpec]:
         """获取所有可用工具"""
@@ -172,3 +174,14 @@ class MCPToolClient:
     async def cleanup(self):
         """清理资源"""
         await self.disconnect()
+    
+    # 添加兼容性方法别名
+    async def list_tools(self) -> List[ToolSpec]:
+        """获取所有可用工具 (get_all_tools 的别名)"""
+        return await self.get_all_tools()
+    
+    async def call_tool(self, tool_id: str, action: str = "execute", parameters: Dict[str, Any] = None) -> ExecutionResult:
+        """调用工具 (execute_tool 的别名)"""
+        if parameters is None:
+            parameters = {}
+        return await self.execute_tool(tool_id, action, parameters)

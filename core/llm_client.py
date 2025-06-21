@@ -81,7 +81,12 @@ class LLMClient:
                 self.provider_instance = OpenAIProvider(config)
             elif provider_name == 'gemini':
                 self.provider = LLMProvider.GEMINI
-                self.provider_instance = GeminiProvider(config)
+                # 从嵌套配置中提取 Gemini 特定配置并合并到根级别
+                gemini_config = config.copy()
+                if 'providers' in config and 'gemini' in config['providers']:
+                    gemini_provider_config = config['providers']['gemini']
+                    gemini_config.update(gemini_provider_config)
+                self.provider_instance = GeminiProvider(gemini_config)
             elif provider_name == 'deepseek':
                 self.provider = LLMProvider.DEEPSEEK
                 self.provider_instance = DeepSeekProvider(config)
@@ -121,7 +126,12 @@ class LLMClient:
         elif self.provider == LLMProvider.OPENAI:
             self.provider_instance = OpenAIProvider(self.config)
         elif self.provider == LLMProvider.GEMINI:
-            self.provider_instance = GeminiProvider(self.config)
+            # 从嵌套配置中提取 Gemini 特定配置并合并到根级别
+            gemini_config = self.config.copy()
+            if 'providers' in self.config and 'gemini' in self.config['providers']:
+                gemini_provider_config = self.config['providers']['gemini']
+                gemini_config.update(gemini_provider_config)
+            self.provider_instance = GeminiProvider(gemini_config)
         elif self.provider == LLMProvider.DEEPSEEK:
             self.provider_instance = DeepSeekProvider(self.config)
         else:

@@ -63,6 +63,9 @@ class ReasoningResponseParser(IResponseParser):
                     json_text += '}' * missing_braces
                     logger.warning(f"🔧 修复了 {missing_braces} 个缺失的右括号")
                 
+                # 修复常见的JSON格式错误
+                json_text = self._fix_json_formatting_errors(json_text)
+                
                 # 尝试解析JSON
                 try:
                     parsed = json.loads(json_text)
@@ -76,6 +79,16 @@ class ReasoningResponseParser(IResponseParser):
                     
                 except json.JSONDecodeError as json_error:
                     logger.warning(f"❌ JSON解析失败: {json_error}")
+                    # 尝试更激进的修复
+                    fixed_json = self._aggressive_json_fix(json_text)
+                    if fixed_json:
+                        try:
+                            parsed = json.loads(fixed_json)
+                            result = self._validate_and_complete_parsed_response(parsed)
+                            logger.info(f"✅ 使用激进修复成功解析JSON")
+                            return result
+                        except:
+                            pass
                     # 继续使用备用解析方法
             
         except Exception as e:
@@ -292,3 +305,57 @@ class ReasoningResponseParser(IResponseParser):
                 logger.info(f"🔧 生成参数: {params}")
         
         return result
+    
+    def _fix_json_formatting_errors(self, json_text: str) -> str:
+        """修复常见的JSON格式错误"""
+        # 修复常见的逗号错误
+        json_text = re.sub(r',\s*}', '}', json_text)  # 移除对象最后的逗号
+        json_text = re.sub(r',\s*]', ']', json_text)  # 移除数组最后的逗号
+        
+        # 修复缺少逗号的情况
+        json_text = re.sub(r'"\s*\n\s*"', '",\n"', json_text)  # 字符串之间缺少逗号
+        json_text = re.sub(r'}\s*\n\s*"', '},\n"', json_text)  # 对象后缺少逗号
+        
+        # 修复引号问题
+        json_text = re.sub(r"'([^']*)':", r'"\1":', json_text)  # 单引号替换为双引号
+        
+        # 修复布尔值和null
+        json_text = re.sub(r'\bTrue\b', 'true', json_text)
+        json_text = re.sub(r'\bFalse\b', 'false', json_text)
+        json_text = re.sub(r'\bNone\b', 'null', json_text)
+        
+        return json_text
+    
+    def _aggressive_json_fix(self, json_text: str) -> Optional[str]:
+        """更激进的JSON修复方法"""
+        try:
+            # 尝试修复截断的JSON
+            if not json_text.strip().endswith('}'):
+                # 找到最后一个完整的字段
+                lines = json_text.split('\n')
+                valid_lines = []
+                brace_count = 0
+                
+                for line in lines:
+                    valid_lines.append(line)
+                    brace_count += line.count('{') - line.count('}')
+                    
+                    # 如果括号平衡且该行结束，可能是个好的截断点
+                    if brace_count == 0 and (line.strip().endswith(',') or line.strip().endswith('"')):
+                        break
+                
+                # 补齐缺失的括号
+                if brace_count > 0:
+                    valid_lines.append('}' * brace_count)
+                
+                fixed_json = '\n'.join(valid_lines)
+                
+                # 清理最后的逗号
+                fixed_json = re.sub(r',(\s*})$', r'\1', fixed_json, flags=re.MULTILINE)
+                
+                return fixed_json
+                
+        except Exception as e:
+            logger.debug(f"激进JSON修复失败: {e}")
+            
+        return None

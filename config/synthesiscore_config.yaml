@@ -1,0 +1,187 @@
+# SynthesisCore 配置文件
+# 用于控制TaskCraft算法的各项阈值和参数
+# 工程师可以通过调整这些参数来优化任务生成质量
+
+# =============================================================================
+# 原子任务生成配置 (Atomic Task Generation)
+# =============================================================================
+atomic_generation:
+  # 每个语料最大结论数 - 控制从单个轨迹语料中提取的结论数量上限
+  # 值越大提取的结论越多，但可能包含低质量结论
+  max_conclusions_per_corpus: 20
+  
+  # 最大候选原子任务数 - 控制为每个结论生成的候选问题数量
+  # 影响生成的问题多样性，值越大生成的候选问题越多
+  max_candidate_atomic_tasks: 10
+  
+  # 结论提取置信度阈值 (0.0-1.0) - 只保留高置信度的结论
+  # 值越高过滤越严格，只保留高质量结论，但可能错过有用信息
+  conclusion_extraction_confidence: 0.7
+  
+  # 原子性验证阈值 (0.0-1.0) - 控制任务通过原子性验证的最低分数
+  # 这是最关键的参数！决定有多少任务能通过验证
+  # - 0.8: 非常严格，只通过完美的原子任务（可能导致0个任务生成）
+  # - 0.5: 中等严格，适合大部分场景  
+  # - 0.2: 相对宽松，适合复杂分析任务（当前设置）
+  # - 0.1: 非常宽松，几乎所有任务都能通过
+  atomicity_verification_threshold: 0.2
+  
+  # 并行工作线程数 - 控制并发处理的任务验证数量
+  # 值越大处理越快，但消耗更多API调用配额
+  parallel_workers: 4
+
+# =============================================================================
+# 深度扩展配置 (Depth Extension)  
+# =============================================================================
+depth_extension:
+  # 最大跳跃数 - 控制深度扩展的最大层级
+  # 值越大生成的任务链越长，但也越复杂
+  max_hops: 3
+  
+  # 最大反向搜索尝试次数 - 控制寻找超集的重试次数
+  # 影响深度扩展的成功率，值越大找到超集概率越高
+  max_backward_search_attempts: 5
+  
+  # 超集验证阈值 (0.0-1.0) - 验证找到的超集是否有效
+  # 值越高要求超集质量越高
+  superset_validation_threshold: 0.8
+  
+  # 中间任务质量阈值 (0.0-1.0) - 中间生成任务的最低质量要求
+  # 影响深度扩展任务链的整体质量
+  intermediate_task_quality_threshold: 0.7
+  
+  # 每个查询最大搜索结果数 - 控制搜索超集时返回的最大结果数
+  # 值越大搜索越全面，但处理时间越长
+  max_search_results_per_query: 10
+
+# =============================================================================
+# 宽度扩展配置 (Width Extension)
+# =============================================================================  
+width_extension:
+  # 分组最小任务数 - 创建复合任务所需的最少原子任务数
+  # 至少需要这么多相关任务才能合并成复合任务
+  min_tasks_for_grouping: 2
+  
+  # 每组最大任务数 - 单个复合任务最多包含的原子任务数  
+  # 防止复合任务过于复杂
+  max_tasks_per_group: 3
+  
+  # 语义相似度阈值 (0.0-1.0) - 判断任务是否相关的相似度门槛
+  # 值越高要求任务越相似才能合并
+  semantic_similarity_threshold: 0.6
+  
+  # 分解验证阈值 (0.0-1.0) - 验证复合任务是否可以正确分解
+  # 确保生成的复合任务逻辑合理
+  decomposition_validation_threshold: 0.8
+  
+  # 复杂性验证阈值 (0.0-1.0) - 控制复合任务的复杂度要求
+  # 值越高生成的复合任务越复杂
+  complexity_validation_threshold: 0.7
+
+# =============================================================================
+# 验证引擎配置 (Verification Engine)
+# =============================================================================
+verification:
+  # 总体质量阈值 (0.0-1.0) - 任务通过验证的最低综合质量分数
+  # 这是所有验证维度的加权平均分的门槛
+  overall_quality_threshold: 0.75
+  
+  # 各验证维度权重 - 控制不同质量维度的重要性
+  # 所有权重之和应为1.0
+  dimension_weights:
+    executability: 0.25      # 可执行性权重 - 任务是否可以被Agent执行
+    difficulty: 0.15         # 难度适中性权重 - 任务难度是否合适
+    answer_uniqueness: 0.15  # 答案唯一性权重 - 答案是否明确唯一
+    tool_requirements: 0.15  # 工具需求权重 - 工具选择是否合理
+    language_quality: 0.15   # 语言质量权重 - 问题表述是否清晰
+    cognitive_complexity: 0.10 # 认知复杂度权重 - 思维复杂度是否合适
+    atomicity: 0.05          # 原子性权重 - 任务是否足够原子化
+  
+  # 执行超时时间 (秒) - 验证任务执行的最大等待时间
+  # 防止验证过程无限等待
+  execution_timeout_seconds: 60
+  
+  # 最大验证重试次数 - 验证失败时的重试次数
+  # 提高验证的鲁棒性
+  max_verification_retries: 3
+
+# =============================================================================
+# 自适应提示词配置 (Adaptive Prompt)
+# =============================================================================
+adaptive_prompt:
+  # 提示词优化阈值 - 触发提示词优化的性能改进门槛
+  # 当性能提升超过此百分比时才更新提示词
+  prompt_optimization_threshold: 0.1  # 10%改进
+  
+  # 每种类型的少样本示例数 - Few-shot学习的示例数量
+  # 影响提示词的学习效果
+  few_shot_examples_per_type: 20
+  
+  # A/B测试样本大小 - 对比测试新旧提示词的样本数
+  # 值越大测试结果越可靠
+  ab_test_sample_size: 50
+  
+  # 成功率计算窗口大小 - 计算成功率的滑动窗口大小
+  # 影响成功率统计的时效性
+  success_rate_window_size: 100
+  
+  # 保留的提示词版本数 - 历史提示词版本的保留数量
+  # 便于回滚到之前的版本
+  prompt_version_retention: 5
+
+# =============================================================================
+# Redis队列配置 (Redis Queue Configuration)
+# =============================================================================
+redis_queue:
+  # Redis流名称配置
+  streams:
+    corpus_queue: "synthesis:v2:corpus_queue"
+    atomic_tasks: "synthesis:v2:atomic_tasks"
+    extended_tasks: "synthesis:v2:extended_tasks"
+    verification_queue: "synthesis:v2:verification_queue"
+    training_data: "synthesis:v2:training_data"
+    quality_reports: "synthesis:v2:quality_reports"
+  
+  # Redis键名称配置  
+  keys:
+    config: "synthesis:v2:config"
+    prompt_versions: "synthesis:v2:prompt_versions"
+    success_rates: "synthesis:v2:success_rates"
+    few_shot_examples: "synthesis:v2:few_shot_examples"
+    generation_metrics: "synthesis:v2:generation_metrics"
+  
+  # 批处理大小 - 批量处理任务的数量
+  # 影响处理效率和内存使用
+  batch_size: 10
+  
+  # 处理超时时间 (秒) - 队列处理的超时时间
+  # 防止队列处理阻塞
+  processing_timeout: 300
+
+# =============================================================================
+# 调试建议 (Debugging Guidelines)
+# =============================================================================
+# 
+# 如果生成的原子任务数量为0：
+# 1. 降低 atomicity_verification_threshold (建议从0.2降到0.1)
+# 2. 降低 conclusion_extraction_confidence (建议从0.7降到0.5)
+# 3. 增加 max_conclusions_per_corpus (建议从20增到30)
+#
+# 如果生成的任务质量过低：
+# 1. 提高 atomicity_verification_threshold (建议从0.2提高到0.4)
+# 2. 提高 overall_quality_threshold (建议从0.75提高到0.85)
+# 3. 调整 dimension_weights 突出重要维度权重
+#
+# 如果处理速度过慢：
+# 1. 增加 parallel_workers (建议从4增到8)
+# 2. 减少 max_candidate_atomic_tasks (建议从10减到5)
+# 3. 降低 max_backward_search_attempts (建议从5减到3)
+#
+# 如果深度扩展任务过于复杂：
+# 1. 降低 max_hops (建议从3降到2)
+# 2. 提高 intermediate_task_quality_threshold (建议从0.7提高到0.8)
+#
+# 如果宽度扩展任务不够多样：
+# 1. 降低 semantic_similarity_threshold (建议从0.6降到0.4)
+# 2. 增加 max_tasks_per_group (建议从3增到5)
+#

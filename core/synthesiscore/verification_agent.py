@@ -115,9 +115,10 @@ class TaskExecutor:
         
         try:
             # 直接使用LLM回答问题
-            reasoning_result = await self.llm_client.generate_reasoning(
+            reasoning_result = await self.llm_client.generate_enhanced_reasoning(
                 task_description=f"请直接回答以下问题，不要使用任何工具: {question}",
                 available_tools=[],  # 不提供工具
+                tool_descriptions="",
                 execution_context={"mode": "pure_llm_reasoning"}
             )
             
@@ -150,7 +151,7 @@ class TaskExecutor:
         
         try:
             tools_info = await self.mcp_client.list_tools()
-            return [tool.get('name', '') for tool in tools_info]
+            return [tool.name if hasattr(tool, 'name') else tool.get('name', '') for tool in tools_info]
         except Exception as e:
             logger.warning(f"⚠️ 获取工具列表失败: {e}")
             return []
@@ -164,8 +165,8 @@ class TaskExecutor:
             tools_info = await self.mcp_client.list_tools()
             descriptions = []
             for tool in tools_info:
-                name = tool.get('name', '')
-                description = tool.get('description', '')
+                name = tool.name if hasattr(tool, 'name') else tool.get('name', '')
+                description = tool.description if hasattr(tool, 'description') else tool.get('description', '')
                 descriptions.append(f"- {name}: {description}")
             return '\n'.join(descriptions)
         except Exception as e:
@@ -178,8 +179,8 @@ class TaskExecutor:
             return {"error": "MCP客户端不可用"}
         
         try:
-            result = await self.mcp_client.call_tool(tool_name, parameters)
-            return {"result": result, "success": True}
+            result = await self.mcp_client.call_tool(tool_name, "execute", parameters)
+            return {"result": result.data if hasattr(result, 'data') else result, "success": result.success if hasattr(result, 'success') else True}
         except Exception as e:
             return {"error": str(e), "success": False}
     
@@ -305,9 +306,10 @@ class AtomicityVerifier:
         """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=atomicity_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "atomicity_verification"}
             )
             
@@ -452,9 +454,10 @@ class QualityAssessor:
         """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=uniqueness_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "answer_uniqueness_assessment"}
             )
             
@@ -537,9 +540,10 @@ class QualityAssessor:
         """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=complexity_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "cognitive_complexity_assessment"}
             )
             

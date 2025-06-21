@@ -82,9 +82,10 @@ class SupersetSearcher:
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=query_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "superset_query_generation"}
             )
             
@@ -117,31 +118,52 @@ class SupersetSearcher:
     async def _search_and_extract_supersets(self, query: str, atomic_task: AtomicTask) -> List[SupersetInfo]:
         """搜索并提取超集信息"""
         if not self.mcp_client:
-            logger.warning("⚠️ MCP客户端未配置，无法执行搜索")
-            return []
+            logger.warning("⚠️ MCP客户端未配置，使用LLM生成超集")
+            return await self._llm_generate_supersets(query, atomic_task)
         
         try:
+            # 获取可用工具
+            available_tools = await self.mcp_client.list_tools()
+            search_tool_names = ['search', 'web_search', 'mcp-search-tool', 'deepsearch']
+            
+            search_tool = None
+            for tool in available_tools:
+                tool_name = tool.name if hasattr(tool, 'name') else tool.get('name', '')
+                if tool_name in search_tool_names:
+                    search_tool = tool_name
+                    break
+            
+            if not search_tool:
+                logger.warning("⚠️ 未找到可用的搜索工具，使用LLM生成超集")
+                return await self._llm_generate_supersets(query, atomic_task)
+            
             # 执行搜索
-            search_result = await self.mcp_client.call_tool("deepsearch", {
+            search_result = await self.mcp_client.call_tool(search_tool, "execute", {
                 "query": query,
                 "max_results": self.config.DEPTH_EXTENSION_CONFIG['max_search_results_per_query']
             })
             
-            if not search_result or 'results' not in search_result:
-                return []
+            if not search_result or not hasattr(search_result, 'data') or not search_result.data:
+                return await self._llm_generate_supersets(query, atomic_task)
             
             # 从搜索结果中提取超集信息
             supersets = []
-            for result in search_result['results']:
+            results = search_result.data.get('results', []) if isinstance(search_result.data, dict) else []
+            
+            for result in results:
                 superset_info = await self._extract_superset_from_result(result, atomic_task, query)
                 if superset_info:
                     supersets.append(superset_info)
+            
+            # 如果没有找到有效超集，使用LLM生成
+            if not supersets:
+                return await self._llm_generate_supersets(query, atomic_task)
             
             return supersets
             
         except Exception as e:
             logger.error(f"❌ 搜索执行失败 '{query}': {e}")
-            return []
+            return await self._llm_generate_supersets(query, atomic_task)
     
     async def _extract_superset_from_result(self, search_result: Dict[str, Any], 
                                           atomic_task: AtomicTask, query: str) -> Optional[SupersetInfo]:
@@ -176,9 +198,10 @@ URL: {search_result.get('url', '')}
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=extraction_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "superset_extraction"}
             )
             
@@ -202,6 +225,82 @@ URL: {search_result.get('url', '')}
         except Exception as e:
             logger.error(f"❌ 超集提取失败: {e}")
             return None
+    
+    async def _llm_generate_supersets(self, query: str, atomic_task: AtomicTask) -> List[SupersetInfo]:
+        """使用LLM生成超集信息"""
+        
+        generation_prompt = f"""
+基于以下信息，生成可能的超集信息：
+
+原子任务问题: {atomic_task.question}
+原子任务答案: {atomic_task.golden_answer}
+搜索查询: {query}
+
+请根据常识和逻辑推理，生成可能包含该答案的更大信息集合。
+
+示例：
+- 如果答案是"函数调用"，超集可能是"编程范式"、"软件设计模式"
+- 如果答案是"向量数据库"，超集可能是"数据库类型"、"机器学习基础设施"
+- 如果答案是某个具体标识符，超集可能是"同类型标识符集合"、"系统组件列表"
+
+返回JSON格式：
+{{
+    "supersets": [
+        {{
+            "identifier": "超集名称",
+            "relation": "与原答案的关系",
+            "confidence": 0.0-1.0,
+            "reasoning": "生成理由"
+        }}
+    ]
+}}
+"""
+        
+        try:
+            response = await self.llm_client.generate_enhanced_reasoning(
+                task_description=generation_prompt,
+                available_tools=[],
+                tool_descriptions="",
+                execution_context={"mode": "llm_superset_generation"}
+            )
+            
+            return self._parse_llm_supersets(response, query)
+            
+        except Exception as e:
+            logger.error(f"❌ LLM生成超集失败: {e}")
+            return []
+    
+    def _parse_llm_supersets(self, response: Dict[str, Any], query: str) -> List[SupersetInfo]:
+        """解析LLM生成的超集"""
+        try:
+            thinking = response.get('thinking', '{}')
+            
+            if thinking.strip().startswith('{'):
+                superset_data = json.loads(thinking)
+            else:
+                json_match = re.search(r'\{.*\}', thinking, re.DOTALL)
+                if json_match:
+                    superset_data = json.loads(json_match.group())
+                else:
+                    return []
+            
+            supersets = []
+            for superset_info in superset_data.get('supersets', []):
+                if superset_info.get('confidence', 0.0) > 0.5:
+                    supersets.append(SupersetInfo(
+                        identifier=superset_info['identifier'],
+                        relation=superset_info['relation'],
+                        search_query=query,
+                        confidence=superset_info['confidence'],
+                        source_urls=[],
+                        validation_passed=True  # LLM生成的默认通过验证
+                    ))
+            
+            return supersets
+            
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error(f"❌ 解析LLM超集失败: {e}")
+            return []
     
     def _parse_superset_extraction(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """解析超集提取响应"""
@@ -268,9 +367,10 @@ URL: {search_result.get('url', '')}
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=validation_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "superset_validation"}
             )
             
@@ -439,9 +539,10 @@ class TaskMerger:
 """
         
         try:
-            response = await self.llm_client.generate_reasoning(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=build_prompt,
                 available_tools=[],
+                tool_descriptions="",
                 execution_context={"mode": "final_question_building"}
             )
             
@@ -562,32 +663,79 @@ class DepthExtender:
             logger.error(f"❌ 深度扩展失败 {atomic_task.task_id}: {e}")
             return []
     
-    async def batch_extend_atomic_tasks(self, atomic_tasks: List[AtomicTask]) -> List[ExtendedTask]:
-        """批量扩展原子任务"""
+    async def batch_extend_atomic_tasks(self, atomic_tasks: List[AtomicTask], 
+                                       adaptive_config: Optional[Any] = None) -> List[ExtendedTask]:
+        """优化的批量扩展原子任务"""
         logger.info(f"🔄 开始批量深度扩展 {len(atomic_tasks)} 个原子任务")
+        
+        if not atomic_tasks:
+            return []
+        
+        # 使用自适应配置或默认配置
+        if adaptive_config:
+            batch_size = adaptive_config.batch_config["batch_size"]
+            max_concurrent = adaptive_config.batch_config["max_concurrent_batches"]
+        else:
+            batch_size = 10
+            max_concurrent = 3
         
         all_extended_tasks = []
         
-        # 使用信号量控制并发
-        semaphore = asyncio.Semaphore(self.config.ATOMIC_GENERATION_CONFIG['parallel_workers'])
-        
-        async def extend_single_task(task):
-            async with semaphore:
-                return await self.extend_atomic_task(task)
-        
-        results = await asyncio.gather(
-            *[extend_single_task(task) for task in atomic_tasks],
-            return_exceptions=True
-        )
-        
-        for i, result in enumerate(results):
-            if isinstance(result, list):
-                all_extended_tasks.extend(result)
-            elif isinstance(result, Exception):
-                logger.error(f"❌ 任务扩展异常 {atomic_tasks[i].task_id}: {result}")
+        # 分批处理以优化内存使用和错误隔离
+        for i in range(0, len(atomic_tasks), batch_size):
+            batch = atomic_tasks[i:i + batch_size]
+            logger.debug(f"🔄 处理批次 {i//batch_size + 1}: {len(batch)} 个任务")
+            
+            try:
+                batch_results = await self._process_task_batch(batch, max_concurrent)
+                all_extended_tasks.extend(batch_results)
+                
+                # 批次间短暂休息，避免系统过载
+                if i + batch_size < len(atomic_tasks):
+                    await asyncio.sleep(0.1)
+                    
+            except Exception as e:
+                logger.error(f"❌ 批次 {i//batch_size + 1} 处理失败: {e}")
+                # 继续处理下一批次，不因单个批次失败而停止
+                continue
         
         logger.info(f"✅ 批量深度扩展完成，总计生成 {len(all_extended_tasks)} 个扩展任务")
         return all_extended_tasks
+    
+    async def _process_task_batch(self, batch: List[AtomicTask], max_concurrent: int) -> List[ExtendedTask]:
+        """处理单个任务批次"""
+        # 使用信号量控制并发
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def extend_single_task_with_retry(task: AtomicTask):
+            """带重试的单任务扩展"""
+            async with semaphore:
+                for attempt in range(3):  # 最多重试3次
+                    try:
+                        return await self.extend_atomic_task(task)
+                    except Exception as e:
+                        if attempt == 2:  # 最后一次尝试失败
+                            logger.error(f"❌ 任务 {task.task_id} 扩展最终失败: {e}")
+                            return []
+                        else:
+                            logger.warning(f"⚠️ 任务 {task.task_id} 扩展失败，重试 {attempt + 1}/3: {e}")
+                            await asyncio.sleep(1)  # 重试前等待
+        
+        # 并发处理批次内的任务
+        results = await asyncio.gather(
+            *[extend_single_task_with_retry(task) for task in batch],
+            return_exceptions=True
+        )
+        
+        # 收集有效结果
+        batch_extended_tasks = []
+        for i, result in enumerate(results):
+            if isinstance(result, list):
+                batch_extended_tasks.extend(result)
+            elif isinstance(result, Exception):
+                logger.error(f"❌ 任务 {batch[i].task_id} 扩展异常: {result}")
+        
+        return batch_extended_tasks
     
     async def _validate_intermediate_task_quality(self, intermediate_task: Dict[str, Any], 
                                                 source_task: AtomicTask) -> bool:

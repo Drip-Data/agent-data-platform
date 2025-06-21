@@ -219,80 +219,62 @@ QualityMetrics = Dict[str, float]
 
 
 class EnhancedSynthesisConfig:
-    """增强合成配置类"""
+    """增强合成配置类 - 现在使用YAML配置文件"""
     
-    # 原子任务生成配置
-    ATOMIC_GENERATION_CONFIG = {
-        "max_conclusions_per_corpus": 20,        # 每个语料最大结论数
-        "max_candidate_atomic_tasks": 10,        # 最大候选原子任务数
-        "conclusion_extraction_confidence": 0.7, # 结论提取置信度阈值
-        "atomicity_verification_threshold": 0.8, # 原子性验证阈值
-        "parallel_workers": 4                    # 并行工作线程数
-    }
+    def __init__(self):
+        """初始化配置，使用配置加载器"""
+        from .config_loader import get_synthesis_config
+        self._config_loader = get_synthesis_config()
     
-    # 深度扩展配置
-    DEPTH_EXTENSION_CONFIG = {
-        "max_hops": 3,                          # 最大跳跃数
-        "max_backward_search_attempts": 5,      # 最大反向搜索尝试次数
-        "superset_validation_threshold": 0.8,   # 超集验证阈值
-        "intermediate_task_quality_threshold": 0.7, # 中间任务质量阈值
-        "max_search_results_per_query": 10     # 每个查询最大搜索结果数
-    }
+    @property
+    def ATOMIC_GENERATION_CONFIG(self) -> Dict[str, Any]:
+        """原子任务生成配置"""
+        return self._config_loader.get_atomic_generation_config()
     
-    # 宽度扩展配置
-    WIDTH_EXTENSION_CONFIG = {
-        "min_tasks_for_grouping": 2,            # 分组最小任务数
-        "max_tasks_per_group": 3,               # 每组最大任务数
-        "semantic_similarity_threshold": 0.6,   # 语义相似度阈值
-        "decomposition_validation_threshold": 0.8, # 分解验证阈值
-        "complexity_validation_threshold": 0.7  # 复杂性验证阈值
-    }
+    @property
+    def DEPTH_EXTENSION_CONFIG(self) -> Dict[str, Any]:
+        """深度扩展配置"""
+        return self._config_loader.get_depth_extension_config()
     
-    # 验证引擎配置
-    VERIFICATION_CONFIG = {
-        "overall_quality_threshold": 0.75,      # 总体质量阈值
-        "dimension_weight": {                   # 各维度权重
-            "executability": 0.25,
-            "difficulty": 0.15,
-            "answer_uniqueness": 0.15,
-            "tool_requirements": 0.15,
-            "language_quality": 0.15,
-            "cognitive_complexity": 0.10,
-            "atomicity": 0.05
-        },
-        "execution_timeout_seconds": 60,        # 执行超时时间
-        "max_verification_retries": 3          # 最大验证重试次数
-    }
+    @property
+    def WIDTH_EXTENSION_CONFIG(self) -> Dict[str, Any]:
+        """宽度扩展配置"""
+        return self._config_loader.get_width_extension_config()
     
-    # 自适应提示词配置
-    ADAPTIVE_PROMPT_CONFIG = {
-        "prompt_optimization_threshold": 0.1,   # 提示词优化阈值 (10%改进)
-        "few_shot_examples_per_type": 20,      # 每种类型的少样本示例数
-        "ab_test_sample_size": 50,             # A/B测试样本大小
-        "success_rate_window_size": 100,       # 成功率计算窗口大小
-        "prompt_version_retention": 5          # 保留的提示词版本数
-    }
+    @property
+    def VERIFICATION_CONFIG(self) -> Dict[str, Any]:
+        """验证引擎配置"""
+        config = self._config_loader.get_verification_config()
+        # 确保dimension_weights键存在（兼容旧代码中的dimension_weight）
+        if "dimension_weights" in config and "dimension_weight" not in config:
+            config["dimension_weight"] = config["dimension_weights"]
+        return config
     
-    # Redis队列配置
-    REDIS_CONFIG = {
-        "streams": {
-            "corpus_queue": "synthesis:v2:corpus_queue",
-            "atomic_tasks": "synthesis:v2:atomic_tasks",
-            "extended_tasks": "synthesis:v2:extended_tasks", 
-            "verification_queue": "synthesis:v2:verification_queue",
-            "training_data": "synthesis:v2:training_data",
-            "quality_reports": "synthesis:v2:quality_reports"
-        },
-        "keys": {
-            "config": "synthesis:v2:config",
-            "prompt_versions": "synthesis:v2:prompt_versions",
-            "success_rates": "synthesis:v2:success_rates",
-            "few_shot_examples": "synthesis:v2:few_shot_examples",
-            "generation_metrics": "synthesis:v2:generation_metrics"
-        },
-        "batch_size": 10,                       # 批处理大小
-        "processing_timeout": 300               # 处理超时时间 (秒)
-    }
+    @property
+    def ADAPTIVE_PROMPT_CONFIG(self) -> Dict[str, Any]:
+        """自适应提示词配置"""
+        return self._config_loader.get_adaptive_prompt_config()
+    
+    @property
+    def REDIS_CONFIG(self) -> Dict[str, Any]:
+        """Redis队列配置"""
+        return self._config_loader.get_redis_config()
+    
+    def get_config_value(self, section: str, key: str, default=None):
+        """获取指定配置值"""
+        return self._config_loader.get_config_value(section, key, default)
+    
+    def update_config_value(self, section: str, key: str, value: Any) -> None:
+        """动态更新配置值"""
+        self._config_loader.update_config_value(section, key, value)
+    
+    def reload_config(self) -> None:
+        """重新加载配置"""
+        self._config_loader.reload_config()
+    
+    def print_current_config(self) -> None:
+        """打印当前配置摘要"""
+        self._config_loader.print_current_config()
 
 
 def generate_task_id(task_type: TaskType, suffix: str = "") -> str:
@@ -336,3 +318,128 @@ def get_task_difficulty_from_score(complexity_score: float) -> TaskDifficulty:
         return TaskDifficulty.MEDIUM
     else:
         return TaskDifficulty.COMPLEX
+
+
+@dataclass
+class TaskVerificationMetrics:
+    """多维度任务验证指标"""
+    task_id: str
+    verification_dimensions: Dict[str, float] = field(default_factory=lambda: {
+        "executability": 0.0,      # 可执行性
+        "difficulty": 0.0,         # 难度适中性
+        "answer_uniqueness": 0.0,  # 答案唯一性
+        "tool_requirements": 0.0,  # 工具需求准确性
+        "language_quality": 0.0,   # 语言质量
+        "cognitive_complexity": 0.0, # 认知复杂度
+        "atomicity": 0.0           # 原子性 (仅适用于原子任务)
+    })
+    
+    dimension_weights: Dict[str, float] = field(default_factory=lambda: {
+        "executability": 0.25,
+        "difficulty": 0.15,
+        "answer_uniqueness": 0.15,
+        "tool_requirements": 0.15,
+        "language_quality": 0.15,
+        "cognitive_complexity": 0.10,
+        "atomicity": 0.05
+    })
+    
+    overall_score: float = 0.0
+    verification_passed: bool = False
+    detailed_feedback: List[str] = field(default_factory=list)
+    verification_timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    overall_quality_threshold: float = 0.75
+    
+    def calculate_overall_score(self) -> float:
+        """计算总体验证分数"""
+        total_score = 0.0
+        for dimension, score in self.verification_dimensions.items():
+            weight = self.dimension_weights.get(dimension, 0.0)
+            total_score += score * weight
+        
+        self.overall_score = total_score
+        self.verification_passed = total_score >= self.overall_quality_threshold
+        return total_score
+
+
+@dataclass
+class AdaptiveExtensionConfig:
+    """自适应扩展配置"""
+    # 深度扩展自适应参数
+    depth_config: Dict[str, Any] = field(default_factory=lambda: {
+        "max_hops": 3,
+        "superset_confidence_threshold": 0.8,  # 根据成功率动态调整
+        "max_search_results_per_query": 5,
+        "quality_threshold_adaptive": True,     # 启用自适应质量阈值
+        "success_rate_window": 100,            # 成功率统计窗口
+        "min_threshold": 0.6,                  # 最小阈值
+        "max_threshold": 0.95                  # 最大阈值
+    })
+    
+    # 宽度扩展自适应参数  
+    width_config: Dict[str, Any] = field(default_factory=lambda: {
+        "semantic_similarity_threshold": 0.6,  # 根据分组效果动态调整
+        "min_tasks_for_grouping": 2,
+        "max_tasks_per_group": 3,
+        "grouping_efficiency_target": 0.7,     # 目标分组效率
+        "adjustment_sensitivity": 0.1           # 调整敏感度
+    })
+    
+    # 批量处理优化配置
+    batch_config: Dict[str, Any] = field(default_factory=lambda: {
+        "batch_size": 10,                      # 批处理大小
+        "max_concurrent_batches": 3,           # 最大并发批次
+        "adaptive_batch_sizing": True,         # 自适应批大小
+        "performance_threshold": 0.8           # 性能阈值
+    })
+    
+    # 统计窗口
+    success_history: List[bool] = field(default_factory=list)
+    efficiency_history: List[Dict[str, float]] = field(default_factory=list)
+    last_adjustment_time: str = field(default_factory=lambda: datetime.now().isoformat())
+    
+    def adjust_thresholds(self, success_rate: float, efficiency_metrics: Dict[str, float]):
+        """根据成功率和效率指标调整阈值"""
+        if success_rate < 0.6:
+            # 降低阈值，提高通过率
+            self.depth_config["superset_confidence_threshold"] = max(
+                self.depth_config["superset_confidence_threshold"] * 0.9,
+                self.depth_config["min_threshold"]
+            )
+            self.width_config["semantic_similarity_threshold"] = max(
+                self.width_config["semantic_similarity_threshold"] * 0.9,
+                0.4
+            )
+        elif success_rate > 0.9:
+            # 提高阈值，保证质量
+            self.depth_config["superset_confidence_threshold"] = min(
+                self.depth_config["superset_confidence_threshold"] * 1.1,
+                self.depth_config["max_threshold"]
+            )
+            self.width_config["semantic_similarity_threshold"] = min(
+                self.width_config["semantic_similarity_threshold"] * 1.1,
+                0.85
+            )
+        
+        # 根据分组效率调整批处理大小
+        grouping_efficiency = efficiency_metrics.get("grouping_efficiency", 0.5)
+        if self.batch_config["adaptive_batch_sizing"]:
+            if grouping_efficiency < self.width_config["grouping_efficiency_target"]:
+                self.batch_config["batch_size"] = max(self.batch_config["batch_size"] - 2, 5)
+            elif grouping_efficiency > 0.9:
+                self.batch_config["batch_size"] = min(self.batch_config["batch_size"] + 2, 20)
+        
+        self.last_adjustment_time = datetime.now().isoformat()
+    
+    def record_success(self, success: bool):
+        """记录成功/失败"""
+        self.success_history.append(success)
+        # 保持窗口大小
+        if len(self.success_history) > self.depth_config["success_rate_window"]:
+            self.success_history.pop(0)
+    
+    def get_current_success_rate(self) -> float:
+        """获取当前成功率"""
+        if not self.success_history:
+            return 0.5  # 默认值
+        return sum(self.success_history) / len(self.success_history)

@@ -20,8 +20,14 @@ class GeminiProvider(ILLMProvider):
         self.client = httpx.AsyncClient(timeout=60.0)
         
         # 验证并使用有效的Gemini模型名称
-        self._default_model = self.config.get('gemini_default_model', 'gemini-2.5-flash-preview-05-20')
+        # 优先从配置文件中读取模型，然后是gemini_default_model，最后是默认值
+        self._default_model = (
+            self.config.get('model') or 
+            self.config.get('gemini_default_model') or 
+            'gemini-2.5-flash-preview-05-20'
+        )
         self._supported_models = self.config.get('gemini_supported_models', [
+            'gemini-2.5-flash-lite-preview-06-17',
             'gemini-2.5-flash-preview-05-20',
             'gemini-2.0-flash', 'gemini-2.0-pro', 
             'gemini-1.0-pro', 'gemini-pro', 'gemini-1.5-flash' # 添加稳定模型

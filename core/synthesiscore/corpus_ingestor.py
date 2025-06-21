@@ -49,7 +49,7 @@ class TrajectoryCorpusExtractor:
     
     async def _extract_trajectory_corpus(self, trajectory: TrajectoryResult) -> Optional[CorpusContent]:
         """提取轨迹级别的语料"""
-        if not trajectory.final_result or len(trajectory.final_result.strip()) < 50:
+        if not trajectory.final_result or len(trajectory.final_result.strip()) < 30:
             return None
         
         return CorpusContent(
@@ -74,24 +74,26 @@ class TrajectoryCorpusExtractor:
             try:
                 if step.action_type == ActionType.TOOL_CALL:
                     tool_id = step.action_params.get('tool_id', '')
+                    extracted_content = None
                     
                     if 'browser' in tool_id.lower():
                         # 从浏览器工具的输出中提取网页内容
-                        web_content = await self._extract_web_content(step)
-                        if web_content:
-                            corpus_contents.append(web_content)
+                        extracted_content = await self._extract_web_content(step)
                     
                     elif 'python' in tool_id.lower() or 'code' in tool_id.lower():
                         # 从代码执行结果中提取数据
-                        code_content = await self._extract_code_results(step)
-                        if code_content:
-                            corpus_contents.append(code_content)
+                        extracted_content = await self._extract_code_results(step)
                     
                     elif 'search' in tool_id.lower():
                         # 从搜索结果中提取内容
-                        search_content = await self._extract_search_results(step)
-                        if search_content:
-                            corpus_contents.append(search_content)
+                        extracted_content = await self._extract_search_results(step)
+                    
+                    # 如果没有匹配特定工具类型，尝试通用提取
+                    if not extracted_content and step.observation and len(step.observation.strip()) > 30:
+                        extracted_content = await self._extract_generic_tool_output(step)
+                    
+                    if extracted_content:
+                        corpus_contents.append(extracted_content)
                 
             except Exception as e:
                 logger.warning(f"⚠️ 提取步骤语料失败 {trajectory.task_id}#{step.step_id}: {e}")
@@ -101,7 +103,7 @@ class TrajectoryCorpusExtractor:
     
     async def _extract_web_content(self, step: ExecutionStep) -> Optional[CorpusContent]:
         """提取网页内容"""
-        if not step.observation or len(step.observation.strip()) < 100:
+        if not step.observation or len(step.observation.strip()) < 50:
             return None
         
         # 清理和结构化网页内容
@@ -150,15 +152,38 @@ class TrajectoryCorpusExtractor:
             return None
         
         try:
-            # 尝试解析搜索结果JSON
-            search_data = json.loads(step.observation) if isinstance(step.observation, str) else step.observation
+            observation = step.observation
             
-            if not isinstance(search_data, dict) or 'results' not in search_data:
+            # 处理"工具执行成功: "前缀
+            if observation.startswith("工具执行成功: "):
+                observation = observation[len("工具执行成功: "):]
+            
+            # 处理单引号格式（转换为有效JSON）
+            if observation.strip().startswith("{") and "'" in observation:
+                observation = observation.replace("'", '"')
+            
+            # 尝试解析搜索结果JSON
+            search_data = json.loads(observation) if isinstance(observation, str) else observation
+            
+            if not isinstance(search_data, dict):
                 return None
             
-            # 提取搜索结果中的有价值信息
-            valuable_content = self._extract_search_valuable_content(search_data)
-            if not valuable_content:
+            # 提取有价值内容（支持多种格式）
+            valuable_content = None
+            
+            # 尝试从'answer'字段提取（新格式）
+            if 'answer' in search_data and search_data['answer']:
+                valuable_content = search_data['answer']
+            
+            # 尝试从'results'字段提取（旧格式）
+            elif 'results' in search_data:
+                valuable_content = self._extract_search_valuable_content(search_data)
+            
+            # 尝试从'search_results'字段提取
+            elif 'search_results' in search_data:
+                valuable_content = str(search_data['search_results'])[:1000]
+            
+            if not valuable_content or len(valuable_content.strip()) < 30:
                 return None
             
             return CorpusContent(
@@ -167,12 +192,25 @@ class TrajectoryCorpusExtractor:
                 text_content=valuable_content,
                 metadata={
                     "query": step.action_params.get('query', ''),
-                    "results_count": len(search_data.get('results', [])),
                     "step_id": step.step_id,
                     "thinking": step.thinking
                 }
             )
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, Exception) as e:
+            logger.debug(f"搜索结果解析失败，尝试直接提取: {e}")
+            # 如果JSON解析失败，直接使用观察结果
+            if len(step.observation.strip()) > 50:
+                return CorpusContent(
+                    source=f"search_step_{step.step_id}",
+                    content_type=ContentType.WEB,
+                    text_content=step.observation[:1000],
+                    metadata={
+                        "query": step.action_params.get('query', ''),
+                        "step_id": step.step_id,
+                        "thinking": step.thinking,
+                        "extraction_method": "direct"
+                    }
+                )
             return None
     
     def _clean_web_content(self, raw_content: str) -> str:
@@ -190,9 +228,16 @@ class TrajectoryCorpusExtractor:
     
     def _extract_valuable_code_output(self, output: str) -> Optional[str]:
         """提取有价值的代码输出"""
-        # 过滤掉纯错误信息
-        if any(error_keyword in output.lower() for error_keyword in ['error', 'exception', 'traceback']):
+        # 基本长度检查
+        if len(output.strip()) < 30:
             return None
+        
+        # 只有在输出主要是错误信息时才过滤（而不是包含错误关键词）
+        error_indicators = ['traceback', 'exception occurred', 'error:']
+        if any(indicator in output.lower() for indicator in error_indicators):
+            # 检查是否有有用的信息与错误信息混合
+            if len([line for line in output.split('\n') if line.strip() and not any(err in line.lower() for err in error_indicators)]) < 3:
+                return None
         
         # 提取数值结果、表格数据等
         valuable_patterns = [
@@ -208,10 +253,10 @@ class TrajectoryCorpusExtractor:
             valuable_parts.extend(matches)
         
         if valuable_parts:
-            return ' '.join(valuable_parts)
+            return ' '.join(valuable_parts[:20])  # 限制提取数量
         
-        # 如果没有特定模式，返回前500字符
-        return output[:500] if len(output) > 100 else None
+        # 返回有意义的内容（扩大长度限制）
+        return output[:1000] if len(output) > 50 else output
     
     def _extract_search_valuable_content(self, search_data: dict) -> Optional[str]:
         """提取搜索结果中的有价值内容"""
@@ -227,6 +272,34 @@ class TrajectoryCorpusExtractor:
                 valuable_content.append(f"摘要: {snippet}")
         
         return '\n'.join(valuable_content) if valuable_content else None
+    
+    async def _extract_generic_tool_output(self, step: ExecutionStep) -> Optional[CorpusContent]:
+        """提取通用工具输出"""
+        if not step.observation or len(step.observation.strip()) < 30:
+            return None
+        
+        # 清理输出内容
+        cleaned_output = step.observation.strip()
+        
+        # 处理"工具执行成功: "前缀
+        if cleaned_output.startswith("工具执行成功: "):
+            cleaned_output = cleaned_output[len("工具执行成功: "):]
+        
+        # 限制长度
+        if len(cleaned_output) > 2000:
+            cleaned_output = cleaned_output[:2000] + "..."
+        
+        return CorpusContent(
+            source=f"generic_tool_step_{step.step_id}",
+            content_type=ContentType.CODE_OUTPUT,
+            text_content=cleaned_output,
+            metadata={
+                "tool_id": step.action_params.get('tool_id', 'unknown'),
+                "step_id": step.step_id,
+                "thinking": step.thinking,
+                "extraction_method": "generic"
+            }
+        )
 
 
 class ExternalCorpusLoader:
@@ -411,9 +484,9 @@ class ContentProcessor:
     
     def _is_quality_content(self, content: str) -> bool:
         """检查内容质量"""
-        # 检查是否包含太多重复内容
+        # 检查是否包含太多重复内容（放宽标准）
         words = content.split()
-        if len(set(words)) / len(words) < 0.3:  # 词汇多样性低于30%
+        if len(words) > 10 and len(set(words)) / len(words) < 0.2:  # 词汇多样性低于20%，且仅对较长内容检查
             return False
         
         # 检查是否包含有意义的信息

@@ -972,24 +972,28 @@ class SynthesisService:
         if trajectory.success:
             return True
         
-        # 2. 有执行步骤且runtime_id包含特定类型的轨迹
+        # 2. reasoning runtime的轨迹，即使失败也可能有价值（不要求有执行步骤）
+        runtime_id = trajectory.runtime_id.lower()
+        if 'reasoning' in runtime_id:
+            logger.info(f"🧠 Found reasoning trajectory: {trajectory.task_id}")
+            return True
+        
+        # 3. 有执行步骤的轨迹
         if len(trajectory.steps) > 0:
-            runtime_id = trajectory.runtime_id.lower()
-            
-            # reasoning runtime的轨迹，即使失败也可能有价值
-            if 'reasoning' in runtime_id:
-                logger.info(f"🧠 Found reasoning trajectory: {trajectory.task_id}")
-                return True
-            
             # 有多个步骤的复杂任务，即使失败也可能有价值
             if len(trajectory.steps) >= 2:
                 return True
         
-        # 3. 任务描述包含特定关键词
+        # 4. 任务描述包含特定关键词
         task_desc = trajectory.task_description.lower()
         valuable_keywords = ['reasoning', '推理', '分析', 'analysis', 'compare', '对比', '研究']
         if any(keyword in task_desc for keyword in valuable_keywords):
             logger.info(f"🔎 Found valuable keywords in task description: {trajectory.task_id}")
+            return True
+        
+        # 5. 有最终结果的轨迹，即使失败也可能有价值
+        if trajectory.final_result and len(trajectory.final_result.strip()) > 50:
+            logger.info(f"📝 Found trajectory with substantial final result: {trajectory.task_id}")
             return True
         
         return False
