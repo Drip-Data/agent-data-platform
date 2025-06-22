@@ -95,10 +95,8 @@ pids/
 
 # Output directories
 # output/
-data/
 temp/
 tmp/
-
 # Cache directories
 .cache/
 __pycache__/
