@@ -293,14 +293,29 @@ class TaskFuser:
 """
         
         try:
-            response = await self.llm_client.generate_enhanced_reasoning(
+            response = await self.llm_client.generate_task_summary(
                 task_description=question_prompt,
-                available_tools=[],
-                tool_descriptions="",
-                execution_context={"mode": "composite_question_generation"}
+                steps=[],
+                final_outputs=[]
             )
             
-            generated_question = response.get('thinking', '').strip()
+            # 从响应中提取实际的复合问题，而不是推理过程
+            generated_question = response.strip()
+            
+            # 如果响应包含推理过程，尝试提取最终问题
+            if "STEP" in generated_question and ":" in generated_question:
+                # 尝试找到实际的问题部分
+                lines = generated_question.split('\n')
+                for line in lines:
+                    if (not line.startswith('STEP') and 
+                        not line.startswith('根据') and 
+                        len(line.strip()) > 20 and
+                        '?' in line):
+                        generated_question = line.strip()
+                        break
+                else:
+                    # 如果找不到合适的问题，使用回退策略
+                    return self._fallback_composite_question(task_group, common_theme)
             
             # 如果生成失败，使用默认策略
             if not generated_question or len(generated_question) < 20:

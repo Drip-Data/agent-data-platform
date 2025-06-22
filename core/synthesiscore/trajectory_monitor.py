@@ -45,10 +45,19 @@ class TrajectoryFileHandler(FileSystemEventHandler):
                 self.last_processed[event.src_path] = current_time
                 logger.info(f"📁 检测到轨迹文件变化: {event.src_path}")
                 
-                # 异步处理
-                asyncio.create_task(
-                    self.trajectory_monitor.process_trajectory_changes(event.src_path)
-                )
+                # 异步处理 - 在主事件循环中创建任务
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # 使用call_soon_threadsafe从其他线程安全地调度协程
+                        asyncio.run_coroutine_threadsafe(
+                            self.trajectory_monitor.process_trajectory_changes(event.src_path),
+                            loop
+                        )
+                    else:
+                        logger.warning("⚠️ 主事件循环未运行，跳过轨迹处理")
+                except Exception as e:
+                    logger.warning(f"⚠️ 处理轨迹变化时出错: {e}")
 
 
 class TrajectoryMonitor:

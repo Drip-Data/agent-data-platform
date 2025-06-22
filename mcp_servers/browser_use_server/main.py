@@ -5,6 +5,9 @@ Browser-Use MCP Server
 """
 
 import asyncio
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 import logging
 import os
 import json
@@ -17,9 +20,13 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.outputs import LLMResult, Generation
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 
-from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
-from core.toolscore.mcp_server import MCPServer
-from core.config_manager import ConfigManager
+try:
+    from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
+    from core.toolscore.mcp_server import MCPServer
+    from core.config_manager import ConfigManager
+except ImportError as e:
+    print(f'Import error: {e}')
+    sys.exit(1)
 from core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -210,14 +217,13 @@ class BrowserUseMCPServer:
         """确保browser已初始化"""
         if self.browser is None:
             try:
-                # 增强的浏览器配置
+                # 增强的浏览器配置 - 移除不支持的chrome_path参数
                 browser_config = BrowserConfig(
                     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
                     disable_security=True,     # 允许跨域访问
-                    chrome_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",  # macOS Chrome路径
                     extra_chromium_args=[
                         "--no-sandbox",
-                        "--disable-dev-shm-usage",
+                        "--disable-dev-shm-usage", 
                         "--disable-gpu",
                         "--disable-blink-features=AutomationControlled",
                         "--disable-extensions",
@@ -238,8 +244,7 @@ class BrowserUseMCPServer:
                 # 回退到基本配置
                 browser_config = BrowserConfig(
                     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
-                    disable_security=True,
-                    chrome_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"  # macOS Chrome路径
+                    disable_security=True
                 )
                 self.browser = Browser(config=browser_config)
                 await self.browser.start()

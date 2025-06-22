@@ -18,13 +18,23 @@ from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-def find_free_port(start_port, end_port=65535):
+def find_free_port(start_port, end_port=None):
     """查找一个空闲端口"""
+    if end_port is None:
+        end_port = start_port + 100  # 限制搜索范围
+    
     for port in range(start_port, end_port + 1):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('localhost', port)) != 0:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('localhost', port))
+                logger.info(f"找到空闲端口: {port}")
                 return port
-    raise IOError("No free ports found")
+        except OSError:
+            # 端口被占用，继续尝试下一个
+            continue
+    
+    raise IOError(f"No free ports found in range {start_port}-{end_port}")
 
 class DeepSearchMCPServer:
     """深度搜索MCP服务器"""

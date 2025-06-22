@@ -399,7 +399,42 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.error(f"生成执行计划失败: {plan_err}, 使用传统执行模式")
             initial_plan = None
 
+        # 🛡️ 初始化循环检测机制
+        from collections import defaultdict, deque
+        loop_detection = {
+            'repeated_actions': defaultdict(int),
+            'repeated_errors': defaultdict(int), 
+            'recent_tool_calls': deque(maxlen=10),
+            'consecutive_failures': 0,
+            'start_time': time.time(),
+            'last_progress_time': time.time(),
+            'max_consecutive_failures': 3,
+            'max_repeated_actions': 5,
+            'max_execution_time': 300,  # 5分钟
+            'progress_timeout': 60      # 1分钟无进展超时
+        }
+        logger.info("🛡️ 循环检测机制已启用")
+
         for step_id in range(1, max_steps + 1):
+            # 🛡️ 循环检测：检查是否应该终止执行
+            current_time = time.time()
+            
+            # 检查总执行时间
+            if current_time - loop_detection['start_time'] > loop_detection['max_execution_time']:
+                logger.warning(f"🛑 执行超时终止 ({loop_detection['max_execution_time']}秒)")
+                break
+            
+            # 检查无进展超时
+            time_since_progress = current_time - loop_detection['last_progress_time']
+            if time_since_progress > loop_detection['progress_timeout']:
+                logger.warning(f"🛑 无进展超时终止 ({loop_detection['progress_timeout']}秒无成功操作)")
+                break
+            
+            # 检查连续失败
+            if loop_detection['consecutive_failures'] >= loop_detection['max_consecutive_failures']:
+                logger.warning(f"🛑 连续失败过多终止 ({loop_detection['consecutive_failures']}次)")
+                break
+            
             # 🔍 重置当前步骤的LLM交互记录
             current_step_llm_interactions = []
             
@@ -902,6 +937,38 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 llm_interactions=current_step_llm_interactions  # 🔍 新增
             )
             steps.append(step)
+            
+            # 🛡️ 循环检测：更新状态并检查重复模式
+            action_key = f"{action}:{tool_id}"
+            loop_detection['repeated_actions'][action_key] += 1
+            loop_detection['recent_tool_calls'].append((action, tool_id, tool_success))
+            
+            # 更新失败计数
+            if not tool_success:
+                loop_detection['consecutive_failures'] += 1
+                if current_attempt_err_msg:
+                    loop_detection['repeated_errors'][current_attempt_err_msg] += 1
+                    
+                # 检查重复错误
+                if loop_detection['repeated_errors'][current_attempt_err_msg] >= 3:
+                    logger.warning(f"🛑 重复相同错误3次，终止执行: {current_attempt_err_msg[:100]}")
+                    break
+            else:
+                loop_detection['consecutive_failures'] = 0
+                loop_detection['last_progress_time'] = time.time()
+            
+            # 检查重复动作
+            if loop_detection['repeated_actions'][action_key] > loop_detection['max_repeated_actions']:
+                logger.warning(f"🛑 重复执行相同动作{loop_detection['repeated_actions'][action_key]}次，终止执行: {action_key}")
+                break
+            
+            # 检查工具调用模式循环
+            if len(loop_detection['recent_tool_calls']) >= 6:  # 至少6次调用才检测模式
+                recent_actions = [f"{action}:{tool}" for action, tool, _ in list(loop_detection['recent_tool_calls'])[-6:]]
+                # 检查是否有重复的3步模式
+                if recent_actions[:3] == recent_actions[3:6]:
+                    logger.warning(f"🛑 检测到工具调用循环模式，终止执行: {' -> '.join(recent_actions[:3])}")
+                    break
             
             # === 记忆存储：将执行步骤存储到记忆管理器 ===
             try:

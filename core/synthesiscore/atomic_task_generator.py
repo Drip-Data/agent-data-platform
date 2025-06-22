@@ -19,16 +19,16 @@ from .enhanced_interfaces import (
     CorpusContent, AtomicTask, TaskConclusion, TaskDifficulty, 
     TaskType, EnhancedSynthesisConfig, generate_task_id
 )
+from .tool_validator import ToolValidator
 
 logger = logging.getLogger(__name__)
 
 
 def clean_json_string(json_str: str) -> str:
-    """清理JSON字符串，移除重复的键"""
+    """清理JSON字符串，修复常见格式错误"""
     import re
     
-    # 移除重复的content_identifier键
-    # 查找所有"content_identifier"键的位置
+    # 1. 移除重复的content_identifier键
     pattern = r'"content_identifier"\s*:\s*"[^"]*"'
     matches = list(re.finditer(pattern, json_str))
     
@@ -49,6 +49,18 @@ def clean_json_string(json_str: str) -> str:
             
             json_str = json_str[:start] + json_str[end:]
             offset += (end - start)
+    
+    # 2. 修复缺失逗号的问题
+    # 查找 },\s*{} 或 },\s*\n\s*{} 这样的模式，并在}后添加逗号
+    json_str = re.sub(r'(\})\s*(\{)', r'\1,\2', json_str)
+    
+    # 3. 修复 "key": "value"\n "key2" 这样缺失逗号的模式
+    json_str = re.sub(r'("\w+":\s*"[^"]*")\s*\n\s*(")', r'\1,\n            \2', json_str)
+    json_str = re.sub(r'("\w+":\s*[0-9.]+)\s*\n\s*(")', r'\1,\n            \2', json_str)
+    
+    # 4. 修复对象末尾多余逗号的问题
+    json_str = re.sub(r',\s*\}', '}', json_str)
+    json_str = re.sub(r',\s*\]', ']', json_str)
     
     return json_str
 
@@ -316,7 +328,7 @@ class QuestionGenerator:
 1. 问题必须是原子性的（不可再分的单一问题）
 2. 问题必须需要多步骤工具调用（搜索+分析+验证等）
 3. 不能是简单的事实查询，必须涉及推理和计算
-4. 工具需求应该是现实存在的（如web_search, python_executor, content_analyzer等）
+4. 工具需求应该是现实存在的（如web_search, python_executor, deepsearch, browser_navigator等）
 5. 任务应该测试Agent的工具组合使用能力
 
 ❌ 避免生成：
@@ -335,7 +347,7 @@ class QuestionGenerator:
         {{
             "question": "需要多工具协作的复杂问题",
             "answer": "预期的分析结果或推荐方案",
-            "required_tools": ["web_search", "python_executor", "content_analyzer"],
+            "required_tools": ["web_search", "python_executor", "deepsearch"],
             "reasoning": "为什么这个问题需要工具调用且具有挑战性",
             "complexity_score": 0.8
         }}
@@ -463,7 +475,7 @@ class QuestionGenerator:
             
             # 检查2: 必须有现实的工具需求
             realistic_tools = {
-                'web_search', 'python_executor', 'content_analyzer', 
+                'web_search', 'python_executor', 'deepsearch', 'browser_navigator', 
                 'browser_navigator', 'file_reader', 'data_processor',
                 'search_engine', 'code_executor', 'document_analyzer'
             }
@@ -574,6 +586,10 @@ class AtomicityVerifier:
             # 只依赖分数，不强制要求is_atomic为true（因为LLM对复杂任务过于保守）
             if verification_result.get('atomicity_score', 0.0) >= self.config.ATOMIC_GENERATION_CONFIG['atomicity_verification_threshold']:
                 
+                # 验证并修正工具列表
+                suggested_tools = question_info.get('required_tools', [])
+                validated_tools = await self.tool_validator.filter_available_tools(suggested_tools)
+                
                 # 创建原子任务
                 atomic_task = AtomicTask(
                     task_id=generate_task_id(TaskType.ATOMIC, question_info['content_identifier']),
@@ -582,7 +598,7 @@ class AtomicityVerifier:
                     content_identifier=question_info['content_identifier'],
                     source_corpus=question_info.get('source_conclusion').content_identifier if question_info.get('source_conclusion') else '',
                     verification_score=verification_result.get('atomicity_score', 0.0),
-                    required_tools=question_info.get('required_tools', []),
+                    required_tools=validated_tools,
                     difficulty_level=self._determine_difficulty_level(question_info),
                     atomicity_verified=True
                 )
@@ -688,6 +704,7 @@ class AtomicTaskGenerator:
         self.conclusion_extractor = ConclusionExtractor(llm_client)
         self.question_generator = QuestionGenerator(llm_client)
         self.atomicity_verifier = AtomicityVerifier(llm_client)
+        self.tool_validator = ToolValidator(mcp_client)
         self.config = EnhancedSynthesisConfig()
     
     async def generate_atomic_tasks_from_corpus(self, corpus_contents: List[CorpusContent]) -> List[AtomicTask]:

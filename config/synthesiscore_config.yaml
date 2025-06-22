@@ -8,11 +8,11 @@
 atomic_generation:
   # 每个语料最大结论数 - 控制从单个轨迹语料中提取的结论数量上限
   # 值越大提取的结论越多，但可能包含低质量结论
-  max_conclusions_per_corpus: 20
+  max_conclusions_per_corpus: 5
   
   # 最大候选原子任务数 - 控制为每个结论生成的候选问题数量
   # 影响生成的问题多样性，值越大生成的候选问题越多
-  max_candidate_atomic_tasks: 10
+  max_candidate_atomic_tasks: 3
   
   # 结论提取置信度阈值 (0.0-1.0) - 只保留高置信度的结论
   # 值越高过滤越严格，只保留高质量结论，但可能错过有用信息
@@ -28,7 +28,7 @@ atomic_generation:
   
   # 并行工作线程数 - 控制并发处理的任务验证数量
   # 值越大处理越快，但消耗更多API调用配额
-  parallel_workers: 4
+  parallel_workers: 2
 
 # =============================================================================
 # 深度扩展配置 (Depth Extension)  
@@ -36,11 +36,11 @@ atomic_generation:
 depth_extension:
   # 最大跳跃数 - 控制深度扩展的最大层级
   # 值越大生成的任务链越长，但也越复杂
-  max_hops: 3
+  max_hops: 1
   
   # 最大反向搜索尝试次数 - 控制寻找超集的重试次数
   # 影响深度扩展的成功率，值越大找到超集概率越高
-  max_backward_search_attempts: 5
+  max_backward_search_attempts: 2
   
   # 超集验证阈值 (0.0-1.0) - 验证找到的超集是否有效
   # 值越高要求超集质量越高
@@ -52,7 +52,7 @@ depth_extension:
   
   # 每个查询最大搜索结果数 - 控制搜索超集时返回的最大结果数
   # 值越大搜索越全面，但处理时间越长
-  max_search_results_per_query: 10
+  max_search_results_per_query: 3
 
 # =============================================================================
 # 宽度扩展配置 (Width Extension)
@@ -99,11 +99,11 @@ verification:
   
   # 执行超时时间 (秒) - 验证任务执行的最大等待时间
   # 防止验证过程无限等待
-  execution_timeout_seconds: 60
+  execution_timeout_seconds: 30
   
   # 最大验证重试次数 - 验证失败时的重试次数
   # 提高验证的鲁棒性
-  max_verification_retries: 3
+  max_verification_retries: 1
 
 # =============================================================================
 # 自适应提示词配置 (Adaptive Prompt)

@@ -3,6 +3,14 @@
 🚀 **智能代理数据平台** - 基于MCP协议的企业级AI任务执行与学习框架，现已集成**MicroSandbox安全执行环境**、**持久化记忆管理**和**多步推理能力**
 
 ---
+## 📖 快速启动命令
+#启动服务
+cd agent-data-platform
+python3 main.py
+
+#注入任务
+cd agent-data-platform
+python3 scripts/batch_test_tasks.py --tasks-file data/test_tasks.jsonl
 
 ## 📖 项目概述
 

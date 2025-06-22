@@ -149,8 +149,13 @@ class ReasoningResponseParser(IResponseParser):
         return result
     
     def _fallback_parse_response(self, response: str) -> Dict[str, Any]:
-        """增强的备用解析方法"""
+        """增强的备用解析方法 - 优化版本"""
         logger.info("🔄 执行增强备用解析")
+        
+        # 限制响应长度，避免处理过长文本导致性能问题
+        if len(response) > 5000:
+            logger.warning(f"⚠️ 响应过长({len(response)}字符)，截取前5000字符进行解析")
+            response = response[:5000]
         
         # 🔍 增强的字段提取
         result = {
@@ -271,11 +276,14 @@ class ReasoningResponseParser(IResponseParser):
         return 0.5
     
     def _smart_inference_and_correction(self, result: Dict[str, Any], response: str) -> Dict[str, Any]:
-        """智能推断和修正结果"""
+        """智能推断和修正结果 - 优化版本"""
+        
+        # 限制文本长度，提高性能
+        response_sample = response[:1000].lower()  # 只检查前1000字符
         
         # 如果action是error但响应中包含工具相关内容，尝试修正
         if result['action'] == 'error':
-            if any(keyword in response.lower() for keyword in ['mcp-search', 'search_and_install', 'tool']):
+            if any(keyword in response_sample for keyword in ['mcp-search', 'search_and_install', 'tool']):
                 result['action'] = 'search_and_install_tools'
                 logger.info("🔧 修正action为: search_and_install_tools")
         
@@ -286,13 +294,13 @@ class ReasoningResponseParser(IResponseParser):
         
         # 如果parameters为空但action需要参数，尝试生成
         if not result['parameters'] and result['action'] in ['search_and_install_tools', 'analyze_tool_needs']:
-            # 从thinking中提取任务相关信息
-            thinking = result['thinking']
+            # 从thinking中提取任务相关信息（限制处理长度）
+            thinking = result['thinking'][:500]  # 只处理前500字符
             params = {}
             
             if '任务' in thinking or 'task' in thinking.lower():
                 # 提取可能的任务描述
-                lines = thinking.split('\n')
+                lines = thinking.split('\n')[:10]  # 最多检查10行
                 for line in lines:
                     if '任务' in line or 'task' in line.lower():
                         # 简化的任务描述提取

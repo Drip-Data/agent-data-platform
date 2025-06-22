@@ -668,6 +668,25 @@ class DepthExtender:
         """优化的批量扩展原子任务"""
         logger.info(f"🔄 开始批量深度扩展 {len(atomic_tasks)} 个原子任务")
         
+        # 🔌 断路器机制：防止无限循环
+        if not hasattr(self, '_circuit_breaker'):
+            self._circuit_breaker = {
+                'consecutive_failures': 0,
+                'max_failures': 5,
+                'last_reset': time.time()
+            }
+        
+        # 检查断路器状态
+        if self._circuit_breaker['consecutive_failures'] >= self._circuit_breaker['max_failures']:
+            time_since_reset = time.time() - self._circuit_breaker['last_reset']
+            if time_since_reset < 300:  # 5分钟冷却期
+                logger.warning(f"🔌 断路器开启，跳过深度扩展 (冷却中: {300-time_since_reset:.0f}秒)")
+                return []
+            else:
+                logger.info("🔌 断路器重置")
+                self._circuit_breaker['consecutive_failures'] = 0
+                self._circuit_breaker['last_reset'] = time.time()
+        
         if not atomic_tasks:
             return []
         
@@ -696,8 +715,14 @@ class DepthExtender:
                     
             except Exception as e:
                 logger.error(f"❌ 批次 {i//batch_size + 1} 处理失败: {e}")
+                # 更新断路器失败计数
+                self._circuit_breaker['consecutive_failures'] += 1
                 # 继续处理下一批次，不因单个批次失败而停止
                 continue
+        
+        # 如果成功生成了扩展任务，重置断路器
+        if all_extended_tasks:
+            self._circuit_breaker['consecutive_failures'] = 0
         
         logger.info(f"✅ 批量深度扩展完成，总计生成 {len(all_extended_tasks)} 个扩展任务")
         return all_extended_tasks

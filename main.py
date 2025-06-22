@@ -48,10 +48,32 @@ from core.utils.path_utils import ensure_output_structure
 import subprocess
 
 def cleanup_ports():
-    """清理可能被占用的端口"""
-    ports = [8088, 8089, 8090, 8091, 8092, 5555, 8081, 8082, 8080]
+    """增强的端口和进程清理功能"""
+    # 扩展端口列表，包含所有可能的MCP服务器端口
+    ports = [8088, 8089, 8090, 8091, 8092, 5555, 8081, 8082, 8080, 8084, 8085, 8086, 8087, 8000]
     
-    print("🧹 开始清理端口...")
+    print("🧹 开始增强端口清理...")
+    
+    # 首先清理所有相关的Python进程
+    try:
+        print("🔍 搜索并清理相关Python进程...")
+        # 清理可能的main.py进程
+        subprocess.run(['pkill', '-f', 'main.py'], timeout=5, check=False)
+        # 清理MCP服务器进程
+        subprocess.run(['pkill', '-f', 'mcp_servers'], timeout=5, check=False)
+        subprocess.run(['pkill', '-f', 'microsandbox_server'], timeout=3, check=False)
+        subprocess.run(['pkill', '-f', 'browser_use_server'], timeout=3, check=False)
+        subprocess.run(['pkill', '-f', 'search_tool_server'], timeout=3, check=False)
+        subprocess.run(['pkill', '-f', 'deepsearch_server'], timeout=3, check=False)
+        print("✅ 进程清理完成")
+    except Exception as e:
+        print(f"⚠️ 进程清理时出错: {e}")
+    
+    # 等待进程清理完成
+    import time
+    time.sleep(2)
+    
+    # 然后清理端口
     for port in ports:
         try:
             result = subprocess.run(
@@ -64,7 +86,7 @@ def cleanup_ports():
                 for pid in pids:
                     try:
                         subprocess.run(['kill', '-9', pid], timeout=3, check=False)
-                        print(f"🔥 清理端口 {port} 的进程 {pid}")
+                        print(f"🔥 强制清理端口 {port} 的进程 {pid}")
                     except Exception as e:
                         print(f"⚠️ 清理进程 {pid} 失败: {e}")
             else:
@@ -73,7 +95,9 @@ def cleanup_ports():
         except Exception as e:
             print(f"⚠️ 检查端口 {port} 时出错: {e}")
     
-    print("✅ 端口清理完成")
+    # 最后再次等待确保清理完成
+    time.sleep(1)
+    print("✅ 增强端口清理完成")
 
 # 创建必要的目录结构
 ensure_output_structure()
@@ -113,6 +137,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Agent Data Platform")
     parser.add_argument('--config-dir', type=str, default="config", help='配置文件目录路径')
     parser.add_argument('--debug', action='store_true', help='启用调试模式')
+    parser.add_argument('--start-services', action='store_true', help='启动所有服务（默认行为）')
     return parser.parse_args()
 
 def setup_signal_handlers(service_manager):
