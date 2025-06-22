@@ -54,9 +54,11 @@ class SimpleTrajectoryMonitor:
     """简化轨迹监控器 - 专注于文件监控和种子任务生成"""
     
     def __init__(self, trajectories_dir: str = None, seed_tasks_file: str = None):
-        # 路径配置
-        self.trajectories_dir = trajectories_dir or "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/trajectories"
-        self.seed_tasks_file = seed_tasks_file or "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/seed_tasks.jsonl"
+        # 路径配置 - 使用动态路径替代硬编码
+        from core.utils.path_utils import get_output_dir
+        
+        self.trajectories_dir = trajectories_dir or str(get_output_dir("trajectories"))
+        self.seed_tasks_file = seed_tasks_file or str(get_output_dir() / "seed_tasks.jsonl")
         self.trajectories_collection_file = os.path.join(self.trajectories_dir, "trajectories_collection.json")
         self.processed_trajectories_file = os.path.join(self.trajectories_dir, "..", "processed_trajectories.json")
         

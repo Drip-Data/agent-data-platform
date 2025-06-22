@@ -1219,7 +1219,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if tool_tracker:
                     used_tools = tool_tracker.get_used_tools_summary()
                     if used_tools:
-                        key_insights.append(f"主要使用工具: {', '.join(used_tools[:3])}")
+                        # get_used_tools_summary() 返回字典，需要获取键列表
+                        tool_names = list(used_tools.keys())
+                        key_insights.append(f"主要使用工具: {', '.join(tool_names[:3])}")
             else:
                 key_insights.append(f"任务执行失败: {final_trajectory_error_message}")
             

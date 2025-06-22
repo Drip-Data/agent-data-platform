@@ -107,6 +107,23 @@ port_management:
   port_range_end: 8200       # 动态分配结束端口
   check_interval: 30         # 健康检查间隔(秒)
   
+# 🚀 连接优化配置
+connection_settings:
+  # 连接超时配置
+  connection_timeout: 10     # 连接超时(秒)
+  health_check_timeout: 5    # 健康检查超时(秒)
+  ping_interval: 20          # WebSocket ping间隔(秒)
+  ping_timeout: 10           # WebSocket ping超时(秒)
+  
+  # 重试策略
+  max_retries: 3            # 最大重试次数
+  retry_delay: 1.0          # 重试间隔(秒)
+  exponential_backoff: true # 启用指数退避
+  
+  # 缓存配置
+  port_cache_ttl: 300       # 端口发现缓存TTL(秒)
+  service_discovery_cache: true  # 启用服务发现缓存
+  
 # 🌐 反向代理配置 (可选)
 reverse_proxy:
   enabled: false

@@ -15,42 +15,63 @@ from .interfaces import ExecutionResult, ErrorType
 logger = logging.getLogger(__name__)
 
 class MCPServerConnector:
-    """MCP 服务器连接器，用于直接连接外部 MCP 服务器"""
+    """MCP 服务器连接器，用于直接连接外部 MCP 服务器 - 增强版本"""
     
     def __init__(self, endpoint: str):
         self.endpoint = endpoint
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = False
         self._lock = asyncio.Lock()  # 添加锁来防止并发问题
+        # 连接重试配置
+        self.max_retries = 3
+        self.retry_delay = 1.0
+        self.connection_timeout = 10.0
+        # 连接健康监控
+        self._last_ping_time = 0
+        self._connection_health = True
         logger.info(f"MCPServerConnector initialized for {endpoint}")
     
     async def connect(self):
-        """连接到 MCP 服务器"""
-        if self._connected and self.websocket:
+        """连接到 MCP 服务器，增强版本：支持重试和健康检查"""
+        if self._connected and self.websocket and self._connection_health:
             return
         
-        try:
-            logger.info(f"Connecting to MCP server at {self.endpoint}...")
-            logger.info(f"WebSocket库版本: {websockets.__version__}")
-            
-            # 添加更多调试信息
-            import websockets.legacy.client as websockets_client
-            self.websocket = await websockets_client.connect(
-                self.endpoint,
-                ping_interval=20,
-                ping_timeout=10,
-                close_timeout=10
-            )
-            self._connected = True
-            logger.info(f"Successfully connected to MCP server at {self.endpoint}")
-        except Exception as e:
-            logger.error(f"Failed to connect to MCP server at {self.endpoint}: {e}")
-            logger.error(f"错误类型: {type(e).__name__}")
-            logger.error(f"错误详情: {str(e)}")
-            import traceback
-            logger.error(f"完整堆栈跟踪:\n{traceback.format_exc()}")
-            self._connected = False
-            raise
+        for attempt in range(self.max_retries):
+            try:
+                logger.info(f"🔌 连接 MCP 服务器 {self.endpoint} (尝试 {attempt + 1}/{self.max_retries})")
+                
+                # 添加连接超时
+                import websockets.legacy.client as websockets_client
+                self.websocket = await asyncio.wait_for(
+                    websockets_client.connect(
+                        self.endpoint,
+                        ping_interval=20,
+                        ping_timeout=10,
+                        close_timeout=10
+                    ),
+                    timeout=self.connection_timeout
+                )
+                
+                self._connected = True
+                self._connection_health = True
+                self._last_ping_time = asyncio.get_event_loop().time()
+                logger.info(f"✅ 成功连接到 MCP 服务器: {self.endpoint}")
+                return
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ 连接超时 (尝试 {attempt + 1}): {self.endpoint}")
+            except Exception as e:
+                logger.error(f"❌ 连接失败 (尝试 {attempt + 1}): {self.endpoint} - {e}")
+                
+            # 如果不是最后一次尝试，等待后重试
+            if attempt < self.max_retries - 1:
+                await asyncio.sleep(self.retry_delay * (attempt + 1))  # 指数退避
+        
+        # 所有重试失败
+        self._connected = False
+        self._connection_health = False
+        logger.error(f"❌ 连接完全失败，已达最大重试次数: {self.endpoint}")
+        raise ConnectionError(f"无法连接到 MCP 服务器: {self.endpoint}")
     
     async def disconnect(self):
         """断开连接"""

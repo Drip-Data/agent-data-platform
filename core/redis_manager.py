@@ -18,9 +18,12 @@ from redis.asyncio.client import Redis # 导入Redis类型提示
 logger = logging.getLogger(__name__)
 
 class MockRedisClient:
-    """模拟Redis客户端，用于内存fallback模式"""
+    """模拟Redis客户端，用于内存fallback模式 - 增强版本"""
     def __init__(self, manager: 'RedisManager'):
         self.manager = manager
+        # 连接健康状态
+        self._is_connected = True
+        self._last_operation_time = time.time()
 
     async def xlen(self, name: str) -> int:
         """模拟Xlen"""
@@ -76,7 +79,7 @@ class MockRedisClient:
         pass
 
 class RedisManager:
-    """Redis管理器，支持自动启动和fallback到内存模式"""
+    """Redis管理器，支持自动启动和fallback到内存模式 - 增强版本"""
     
     def __init__(self, redis_url: str = "redis://localhost:6379"):
         self.redis_url = redis_url
@@ -86,24 +89,46 @@ class RedisManager:
         self._redis_client: Optional[Redis] = None # 存储真实的Redis客户端
         self._mock_client: Optional[MockRedisClient] = None # 存储模拟客户端
         
+        # 连接优化配置
+        self.connection_timeout = 5.0
+        self.max_retries = 3
+        self.retry_delay = 1.0
+        self.health_check_interval = 30.0
+        
+        # 连接状态监控
+        self._last_health_check = 0
+        self._connection_failures = 0
+        self._is_monitoring = False
+        
         # 内存存储 - 作为Redis的fallback
         self.memory_storage: Dict[str, Any] = {}
         self.memory_queues: Dict[str, asyncio.Queue] = {} # 实际未使用，因为lpush/rpop直接操作memory_storage
         self.memory_pubsub: Dict[str, list] = {}
         
         # 数据持久化路径
-        self.data_dir = Path(__file__).parent.parent / "data"
+        from core.utils.path_utils import get_output_dir
+        self.data_dir = get_output_dir("cache")
         self.data_dir.mkdir(exist_ok=True)
         self.backup_file = self.data_dir / "redis_backup.json"
     
     async def ensure_redis_available(self) -> bool:
-        """确保Redis可用，优先使用现有Redis，否则尝试启动或fallback"""
+        """确保Redis可用，增强版本：智能重试和连接监控"""
         
-        # 1. 检查Redis是否已经运行
-        if await self._check_redis_connection():
-            logger.info("发现运行中的Redis服务")
-            self.redis_available = True
-            self._redis_client = redis.from_url(self.redis_url)
+        # 1. 检查Redis是否已经运行（支持重试）
+        for attempt in range(self.max_retries):
+            if await self._check_redis_connection():
+                logger.info(f"✅ 发现运行中的Redis服务 (尝试 {attempt + 1})")
+                self.redis_available = True
+                self.fallback_mode = False
+                self._connection_failures = 0
+                
+                # 创建Redis客户端with连接池优化
+                self._redis_client = redis.from_url(
+                    self.redis_url,
+                    socket_timeout=self.connection_timeout,
+                    socket_connect_timeout=self.connection_timeout,
+                    health_check_interval=self.health_check_interval
+                )
             return True
         
         # 2. 尝试启动Redis

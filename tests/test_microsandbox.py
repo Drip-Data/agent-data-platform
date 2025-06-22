@@ -4,7 +4,8 @@ import sys
 import os
 
 # 添加项目根目录到Python路径
-sys.path.append('/Users/zhaoxiang/Documents/Datapresso/agent-data-platform')
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(project_root)
 
 from mcp_servers.microsandbox_server.main import MicroSandboxMCPServer
 from core.config_manager import ConfigManager

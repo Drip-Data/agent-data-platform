@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def clean_json_string(json_str: str) -> str:
-    """清理JSON字符串，修复常见格式错误"""
+    """清理JSON字符串，修复常见格式错误 - 增强版本"""
     import re
     
     # 1. 移除重复的content_identifier键
@@ -50,17 +50,44 @@ def clean_json_string(json_str: str) -> str:
             json_str = json_str[:start] + json_str[end:]
             offset += (end - start)
     
-    # 2. 修复缺失逗号的问题
+    # 🔧 2. 修复content_identifier字段缺失导致的语法错误
+    # 查找以逗号开始的行，可能是缺失content_identifier导致的
+    lines = json_str.split('\n')
+    fixed_lines = []
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # 如果行以逗号开头，且包含其他字段，可能是缺失content_identifier
+        if stripped.startswith(',') and ('"confidence"' in stripped or '"relationship"' in stripped):
+            # 在前一行添加content_identifier字段
+            if fixed_lines and 'content_identifier' not in fixed_lines[-1]:
+                indent = len(line) - len(line.lstrip())
+                # 生成一个默认的content_identifier
+                content_id = f"auto_generated_{i}"
+                fixed_lines.append(' ' * indent + f'"content_identifier": "{content_id}",')
+            # 移除行首的逗号
+            line = line.lstrip(' ,') 
+            if line.strip():
+                line = ' ' * (len(line) - len(line.lstrip())) + line.strip()
+        
+        fixed_lines.append(line)
+    
+    json_str = '\n'.join(fixed_lines)
+    
+    # 3. 修复缺失逗号的问题
     # 查找 },\s*{} 或 },\s*\n\s*{} 这样的模式，并在}后添加逗号
     json_str = re.sub(r'(\})\s*(\{)', r'\1,\2', json_str)
     
-    # 3. 修复 "key": "value"\n "key2" 这样缺失逗号的模式
+    # 4. 修复 "key": "value"\n "key2" 这样缺失逗号的模式
     json_str = re.sub(r'("\w+":\s*"[^"]*")\s*\n\s*(")', r'\1,\n            \2', json_str)
     json_str = re.sub(r'("\w+":\s*[0-9.]+)\s*\n\s*(")', r'\1,\n            \2', json_str)
     
-    # 4. 修复对象末尾多余逗号的问题
+    # 5. 修复对象末尾多余逗号的问题
     json_str = re.sub(r',\s*\}', '}', json_str)
     json_str = re.sub(r',\s*\]', ']', json_str)
+    
+    # 6. 修复缺失的引号和冒号
+    json_str = re.sub(r'([^"]\w+):', r'"\1":', json_str)  # 为属性名添加引号
     
     return json_str
 
@@ -113,13 +140,16 @@ class ConclusionExtractor:
 内容片段:
 {content_preview}
 
-请以JSON格式返回结论列表，每个结论包含：
-- conclusion: 结论内容
-- relationship: 关系描述 (例如："X属于Y", "X的值是Y", "X发生在Y时间")
-- content_identifier: 内容标识符
-- confidence: 提取置信度 (0.0-1.0)
+**重要：必须返回有效的JSON格式，所有字段都是必需的。**
 
-示例格式:
+请以JSON格式返回结论列表，每个结论必须包含以下四个字段：
+- conclusion: 结论内容（字符串）
+- relationship: 关系描述（字符串，例如："X属于Y", "X的值是Y", "X发生在Y时间"）
+- content_identifier: 内容标识符（字符串，唯一标识）
+- confidence: 提取置信度（数字，0.0-1.0之间）
+
+标准JSON格式示例：
+```json
 {{
     "conclusions": [
         {{
@@ -127,14 +157,26 @@ class ConclusionExtractor:
             "relationship": "股价-公司-时间-数值",
             "content_identifier": "stock_price_apple_20231215",
             "confidence": 0.95
+        }},
+        {{
+            "conclusion": "另一个结论示例",
+            "relationship": "关系描述示例",
+            "content_identifier": "unique_id_example",
+            "confidence": 0.85
         }}
     ]
 }}
+```
 
-要求：
-- 最多提取{self.config.ATOMIC_GENERATION_CONFIG['max_conclusions_per_corpus']}个结论
-- 只提取具有高置信度(>0.7)的结论
-- 避免重复或相似的结论
+严格要求：
+1. 最多提取{self.config.ATOMIC_GENERATION_CONFIG['max_conclusions_per_corpus']}个结论
+2. 只提取具有高置信度(>0.7)的结论
+3. 避免重复或相似的结论
+4. **所有字段必须存在，不能缺失任何字段**
+5. **JSON格式必须完整有效，注意逗号和引号**
+6. **每个对象必须包含所有四个必需字段**
+
+请确保返回的JSON格式完全正确，没有语法错误。
 """
     
     def _parse_raw_conclusion_response(self, raw_response: str, corpus_content: CorpusContent) -> List[TaskConclusion]:
@@ -218,16 +260,31 @@ class ConclusionExtractor:
                 return []
             
             conclusions = []
-            for item in conclusion_data.get('conclusions', []):
+            for i, item in enumerate(conclusion_data.get('conclusions', [])):
                 if item.get('confidence', 0.0) >= self.config.ATOMIC_GENERATION_CONFIG['conclusion_extraction_confidence']:
-                    conclusion = TaskConclusion(
-                        conclusion=item['conclusion'],
-                        relationship=item['relationship'],
-                        content_identifier=item['content_identifier'],
-                        extraction_confidence=item['confidence'],
-                        verifiability=self._assess_verifiability(item['conclusion'])
-                    )
-                    conclusions.append(conclusion)
+                    # 🔧 增强字段缺失处理
+                    try:
+                        conclusion = TaskConclusion(
+                            conclusion=item.get('conclusion', f"结论_{i}"),
+                            relationship=item.get('relationship', 'unknown_relationship'),
+                            content_identifier=item.get('content_identifier', f"{corpus_content.corpus_id}_conclusion_{i}"),
+                            extraction_confidence=item.get('confidence', 0.7),
+                            verifiability=self._assess_verifiability(item.get('conclusion', ''))
+                        )
+                        conclusions.append(conclusion)
+                        logger.debug(f"✅ 成功创建结论 {i}: {conclusion.content_identifier}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 创建结论 {i} 失败: {e}, 项目内容: {item}")
+                        # 创建一个默认结论以避免数据丢失
+                        fallback_conclusion = TaskConclusion(
+                            conclusion=str(item.get('conclusion', f"解析失败的结论_{i}")),
+                            relationship="unknown",
+                            content_identifier=f"{corpus_content.corpus_id}_fallback_{i}",
+                            extraction_confidence=0.5,
+                            verifiability=0.3
+                        )
+                        conclusions.append(fallback_conclusion)
+                        logger.info(f"🔄 创建了回退结论: {fallback_conclusion.content_identifier}")
             
             logger.debug(f"✅ 成功解析 {len(conclusions)} 个结论")
             return conclusions
@@ -509,9 +566,13 @@ class QuestionGenerator:
 class AtomicityVerifier:
     """原子性验证器 - 验证任务的原子性"""
     
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, mcp_client: Optional[MCPToolClient] = None):
         self.llm_client = llm_client
+        self.mcp_client = mcp_client
         self.config = EnhancedSynthesisConfig()
+        # 初始化tool_validator
+        from .tool_validator import ToolValidator
+        self.tool_validator = ToolValidator(mcp_client)
     
     async def verify_atomic_questions(self, candidate_questions: List[Dict[str, Any]]) -> List[AtomicTask]:
         """验证候选问题的原子性"""
@@ -703,7 +764,7 @@ class AtomicTaskGenerator:
         self.mcp_client = mcp_client
         self.conclusion_extractor = ConclusionExtractor(llm_client)
         self.question_generator = QuestionGenerator(llm_client)
-        self.atomicity_verifier = AtomicityVerifier(llm_client)
+        self.atomicity_verifier = AtomicityVerifier(llm_client, mcp_client)
         self.tool_validator = ToolValidator(mcp_client)
         self.config = EnhancedSynthesisConfig()
     

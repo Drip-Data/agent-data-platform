@@ -237,9 +237,11 @@ class SimpleSeedGenerator:
 
 def run_simple_generation():
     """运行简化的种子任务生成"""
-    trajectories_file = "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/trajectories/trajectories_collection.json"
-    seed_tasks_file = "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/seed_tasks.jsonl"
-    processed_file = "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/processed_trajectories.json"
+    from core.utils.path_utils import get_output_dir
+    
+    trajectories_file = str(get_output_dir("trajectories") / "trajectories_collection.json")
+    seed_tasks_file = str(get_output_dir() / "seed_tasks.jsonl")
+    processed_file = str(get_output_dir() / "processed_trajectories.json")
     
     generator = SimpleSeedGenerator(trajectories_file, seed_tasks_file, processed_file)
     result = generator.process_trajectories()

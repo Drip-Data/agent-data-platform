@@ -26,29 +26,106 @@ class ProcessRunner(BaseRunner):
         self.running_servers: Dict[str, Dict[str, Any]] = {}
         self.port_range_start = int(os.getenv("PROCESS_PORT_RANGE_START", "8100"))
         self.port_range_end = int(os.getenv("PROCESS_PORT_RANGE_END", "8200"))
+        # 端口使用记录，避免快速重用造成的冲突
+        self.used_ports: set = set()
+        # 连接重试配置
+        self.max_connection_retries = int(os.getenv("MAX_CONNECTION_RETRIES", "3"))
+        self.connection_retry_delay = float(os.getenv("CONNECTION_RETRY_DELAY", "1.0"))
 
     def _allocate_port(self) -> int:
-        """分配一个可用的端口，优先使用配置的端口范围。"""
-        # 先尝试配置的端口范围
+        """分配一个可用的端口，优化版本：避免端口冲突和快速重用。"""
+        # 先尝试配置的端口范围，跳过最近使用的端口
         for port in range(self.port_range_start, self.port_range_end + 1):
-            if self._is_port_available(port):
+            if port not in self.used_ports and self._is_port_available(port):
+                self.used_ports.add(port)
+                logger.info(f"🔌 分配端口 {port} (范围内分配)")
                 return port
         
-        # 如果配置范围内没有可用端口，使用系统分配
+        # 如果配置范围内没有可用端口，清理使用记录并重试
+        if self.used_ports:
+            logger.info("♻️ 清理端口使用记录，重新尝试分配")
+            self.used_ports.clear()
+            for port in range(self.port_range_start, self.port_range_end + 1):
+                if self._is_port_available(port):
+                    self.used_ports.add(port)
+                    logger.info(f"🔌 分配端口 {port} (清理后分配)")
+                    return port
+        
+        # 最后使用系统分配
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(('localhost', 0))
         port = sock.getsockname()[1]
         sock.close()
+        logger.info(f"🔌 分配端口 {port} (系统分配)")
         return port
 
     def _is_port_available(self, port: int) -> bool:
         """检查端口是否可用。"""
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.0)  # 设置超时避免长时间等待
             sock.bind(('localhost', port))
             sock.close()
             return True
         except OSError:
+            return False
+
+    async def _wait_for_service_ready(self, port: int, max_wait_time: int = 30) -> bool:
+        """等待服务启动并可用，增强版本：支持健康检查。"""
+        logger.info(f"⏳ 等待服务启动，端口: {port}")
+        
+        start_time = asyncio.get_event_loop().time()
+        check_interval = 0.5
+        
+        while (asyncio.get_event_loop().time() - start_time) < max_wait_time:
+            # 基础端口连接检查
+            if self._is_port_occupied(port):
+                # 尝试健康检查（如果可能）
+                if await self._check_service_health(port):
+                    logger.info(f"✅ 服务就绪，端口: {port}")
+                    return True
+                else:
+                    logger.debug(f"🔄 端口 {port} 已占用但健康检查失败，继续等待...")
+            
+            await asyncio.sleep(check_interval)
+        
+        logger.warning(f"⚠️ 服务启动超时，端口: {port}")
+        return False
+    
+    def _is_port_occupied(self, port: int) -> bool:
+        """检查端口是否被占用（与_is_port_available相反）。"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.0)
+            result = sock.connect_ex(('localhost', port))
+            sock.close()
+            return result == 0  # 0表示连接成功
+        except Exception:
+            return False
+    
+    async def _check_service_health(self, port: int) -> bool:
+        """检查服务健康状态，支持多种健康检查端点。"""
+        health_endpoints = ['/health', '/ping', '/status', '/']
+        
+        for endpoint in health_endpoints:
+            try:
+                timeout = httpx.Timeout(2.0)  # 短超时
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.get(f"http://localhost:{port}{endpoint}")
+                    if response.status_code < 400:
+                        logger.debug(f"✅ 健康检查成功，端点: {endpoint}")
+                        return True
+            except Exception:
+                continue
+        
+        return False
+
+    def _check_command_available(self, command: str) -> bool:
+        """检查命令是否可用。"""
+        try:
+            subprocess.run([command, "--version"], capture_output=True, check=True, timeout=10)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
     def _detect_project_type(self, project_dir: Path) -> str:
@@ -66,32 +143,122 @@ class ProcessRunner(BaseRunner):
 
     def _find_entry_point(self, project_dir: Path, project_type: str) -> Optional[str]:
         """自动查找入口点文件。"""
+        logger.info(f"🔍 正在搜索入口点: 目录={project_dir}, 类型={project_type}")
+        
+        # 列出目录内容以便调试
+        try:
+            dir_contents = list(project_dir.iterdir())
+            logger.info(f"📁 目录内容: {[f.name for f in dir_contents]}")
+        except Exception as e:
+            logger.warning(f"⚠️ 无法列出目录内容: {e}")
+        
         if project_type == "nodejs":
             package_json = project_dir / "package.json"
+            is_typescript = (project_dir / "tsconfig.json").exists()
+            
             if package_json.exists():
                 try:
                     with open(package_json, 'r') as f:
                         data = json.load(f)
                         if "main" in data:
+                            logger.info(f"✅ 从package.json找到入口点: {data['main']}")
                             return data["main"]
                         if "scripts" in data and "start" in data["scripts"]:
+                            logger.info(f"✅ 从package.json scripts找到启动命令")
                             return "npm start"
-                except Exception:
-                    pass
-            # 常见的 Node.js 入口点
-            for entry in ["index.js", "server.js", "app.js", "main.js"]:
-                if (project_dir / entry).exists():
+                except Exception as e:
+                    logger.warning(f"⚠️ 解析package.json失败: {e}")
+            
+            # 常见的 Node.js/TypeScript 入口点
+            if is_typescript:
+                logger.info("🔍 检测到TypeScript项目")
+                ts_entries = ["index.ts", "server.ts", "app.ts", "main.ts", "src/index.ts", "src/server.ts", "src/app.ts", "src/main.ts"]
+                for entry in ts_entries:
+                    entry_path = project_dir / entry
+                    if entry_path.exists():
+                        logger.info(f"✅ 找到TypeScript入口点: {entry}")
+                        return entry
+            
+            # JavaScript 入口点
+            js_entries = ["index.js", "server.js", "app.js", "main.js", "src/index.js", "src/server.js", "src/app.js", "src/main.js"]
+            for entry in js_entries:
+                entry_path = project_dir / entry
+                if entry_path.exists():
+                    logger.info(f"✅ 找到Node.js入口点: {entry}")
                     return entry
+            
+            # 检查是否有 TypeScript 文件（没有找到常见入口点时）
+            if is_typescript:
+                ts_files = list(project_dir.glob("*.ts")) + list(project_dir.glob("src/*.ts"))
+                if ts_files:
+                    logger.info(f"✅ 回退策略找到TypeScript入口点: {ts_files[0].relative_to(project_dir)}")
+                    return str(ts_files[0].relative_to(project_dir))
         
         elif project_type == "python":
-            # 常见的 Python 入口点
-            for entry in ["main.py", "server.py", "app.py", "__main__.py", "run.py"]:
-                if (project_dir / entry).exists():
+            # 🔧 增强的Python入口点搜索
+            python_entries = [
+                "main.py", 
+                "server.py", 
+                "app.py", 
+                "__main__.py", 
+                "run.py",
+                "start.py",
+                "index.py"
+            ]
+            
+            for entry in python_entries:
+                entry_path = project_dir / entry
+                if entry_path.exists():
+                    logger.info(f"✅ 找到Python入口点: {entry}")
                     return entry
+            
+            # 🔧 新增：搜索子目录中的入口点（用于MCP服务器）
+            # 检查常见的MCP服务器结构
+            mcp_patterns = [
+                "src/main.py",
+                "*/main.py", 
+                "*/server.py",
+                "*/app.py"
+            ]
+            
+            for pattern in mcp_patterns:
+                if '*' in pattern:
+                    # 搜索匹配模式的文件
+                    try:
+                        matches = list(project_dir.glob(pattern))
+                        if matches:
+                            relative_path = matches[0].relative_to(project_dir)
+                            logger.info(f"✅ 找到MCP入口点: {relative_path}")
+                            return str(relative_path)
+                    except Exception as e:
+                        logger.debug(f"模式匹配失败 {pattern}: {e}")
+                else:
+                    entry_path = project_dir / pattern
+                    if entry_path.exists():
+                        logger.info(f"✅ 找到MCP入口点: {pattern}")
+                        return pattern
+            
             # 检查是否有可执行的包
-            if (project_dir / "__main__.py").exists():
+            main_py = project_dir / "__main__.py"
+            if main_py.exists():
+                logger.info("✅ 找到Python包入口点: __main__.py")
                 return "-m ."
+            
+            # 🔧 最后的回退策略：查找任何.py文件
+            py_files = list(project_dir.glob("*.py"))
+            if py_files:
+                # 优先选择包含"main"、"server"、"app"的文件
+                for py_file in py_files:
+                    name_lower = py_file.name.lower()
+                    if any(keyword in name_lower for keyword in ["main", "server", "app", "start"]):
+                        logger.info(f"✅ 回退策略找到入口点: {py_file.name}")
+                        return py_file.name
+                
+                # 如果没有明显的入口点，选择第一个.py文件
+                logger.info(f"⚠️ 使用第一个Python文件作为入口点: {py_files[0].name}")
+                return py_files[0].name
         
+        logger.warning(f"❌ 未找到合适的入口点，目录: {project_dir}")
         return None
 
     async def install_server(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
@@ -203,7 +370,10 @@ class ProcessRunner(BaseRunner):
             allocated_port = self._allocate_port()
             endpoint = f"http://localhost:{allocated_port}"
 
-            # 对于我们简化的MCP服务器，我们创建一个简单的Python脚本来模拟服务器
+            # 根据项目类型构建启动命令
+            cmd = []
+            env = os.environ.copy()
+
             if project_type == "python":
                 # 创建简化的MCP服务器脚本
                 simple_server_script = self._create_simple_mcp_server(
@@ -215,18 +385,51 @@ class ProcessRunner(BaseRunner):
                     f.write(simple_server_script)
                 
                 cmd = [python_executable, str(script_path)]
-                env = os.environ.copy()
+                
+            elif project_type == "nodejs":
+                # Node.js/TypeScript 项目启动逻辑
+                env["PORT"] = str(allocated_port)
+                
+                # 检测是否为 TypeScript 项目
+                is_typescript = (temp_dir / "tsconfig.json").exists()
+                
+                if entry_point == "npm start":
+                    cmd = ["npm", "start"]
+                    logger.info("🚀 使用 npm start 启动 Node.js 服务")
+                elif entry_point and entry_point.endswith('.ts') and is_typescript:
+                    # TypeScript 文件，尝试使用 ts-node
+                    if self._check_command_available("npx"):
+                        cmd = ["npx", "ts-node", entry_point]
+                        logger.info(f"🚀 使用 ts-node 启动 TypeScript 服务: {entry_point}")
+                    else:
+                        logger.warning("ts-node 不可用，尝试先编译 TypeScript")
+                        # 尝试编译 TypeScript
+                        try:
+                            subprocess.run(["npx", "tsc"], cwd=temp_dir, check=True, capture_output=True, timeout=60)
+                            # 使用编译后的 JS 文件
+                            js_entry = entry_point.replace('.ts', '.js')
+                            cmd = ["node", js_entry]
+                            logger.info(f"🚀 编译后使用 Node.js 启动: {js_entry}")
+                        except subprocess.CalledProcessError:
+                            return {"success": False, "error_msg": f"TypeScript 编译失败: {entry_point}"}
+                elif entry_point:
+                    # JavaScript 文件或其他
+                    cmd = ["node", entry_point]
+                    logger.info(f"🚀 使用 Node.js 启动: {entry_point}")
+                else:
+                    return {"success": False, "error_msg": "未找到有效的 Node.js 入口点"}
                 
             else:
                 return {"success": False, "error_msg": f"不支持的项目类型: {project_type}"}
 
+            if not cmd:
+                return {"success": False, "error_msg": "无法确定启动命令"}
+
             logger.info(f"启动 MCP Server: {' '.join(cmd)} (端口: {allocated_port})")
             
             # 启动进程
-            if project_type == "nodejs" and "env" in locals():
-                process = subprocess.Popen(cmd, cwd=temp_dir, env=env, preexec_fn=os.setsid if os.name != "nt" else None)
-            else:
-                process = subprocess.Popen(cmd, cwd=temp_dir, preexec_fn=os.setsid if os.name != "nt" else None)
+            logger.info(f"🚀 启动命令: {' '.join(cmd)} (工作目录: {temp_dir})")
+            process = subprocess.Popen(cmd, cwd=temp_dir, env=env, preexec_fn=os.setsid if os.name != "nt" else None)
             
             pid = process.pid
 

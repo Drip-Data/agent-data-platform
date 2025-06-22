@@ -45,17 +45,26 @@ class TrajectoryFileHandler(FileSystemEventHandler):
                 self.last_processed[event.src_path] = current_time
                 logger.info(f"📁 检测到轨迹文件变化: {event.src_path}")
                 
-                # 异步处理 - 在主事件循环中创建任务
+                # 异步处理 - 使用线程安全的方式调度协程
                 try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # 使用call_soon_threadsafe从其他线程安全地调度协程
-                        asyncio.run_coroutine_threadsafe(
-                            self.trajectory_monitor.process_trajectory_changes(event.src_path),
-                            loop
-                        )
-                    else:
-                        logger.warning("⚠️ 主事件循环未运行，跳过轨迹处理")
+                    # 尝试获取主线程的事件循环
+                    try:
+                        # 从监控器获取事件循环引用
+                        if hasattr(self.trajectory_monitor, '_main_loop') and self.trajectory_monitor._main_loop:
+                            loop = self.trajectory_monitor._main_loop
+                            if loop.is_running():
+                                # 使用call_soon_threadsafe从其他线程安全地调度协程
+                                asyncio.run_coroutine_threadsafe(
+                                    self.trajectory_monitor.process_trajectory_changes(event.src_path),
+                                    loop
+                                )
+                            else:
+                                logger.warning("⚠️ 主事件循环未运行，跳过轨迹处理")
+                        else:
+                            logger.warning("⚠️ 无法获取主事件循环引用，跳过轨迹处理")
+                    except RuntimeError as re:
+                        # 如果获取事件循环失败，记录但不抛出异常
+                        logger.warning(f"⚠️ 无法获取事件循环: {re}")
                 except Exception as e:
                     logger.warning(f"⚠️ 处理轨迹变化时出错: {e}")
 
@@ -68,11 +77,16 @@ class TrajectoryMonitor:
         self.llm_client = llm_client
         self.mcp_client = mcp_client
         
-        # 路径配置
-        self.trajectories_dir = trajectories_dir or "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/trajectories"
-        self.seed_tasks_file = seed_tasks_file or "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/seed_tasks.jsonl"
+        # 路径配置 - 使用动态路径替代硬编码
+        from core.utils.path_utils import get_output_dir
+        
+        self.trajectories_dir = trajectories_dir or str(get_output_dir("trajectories"))
+        self.seed_tasks_file = seed_tasks_file or str(get_output_dir() / "seed_tasks.jsonl")
         self.trajectories_collection_file = os.path.join(self.trajectories_dir, "trajectories_collection.json")
         self.processed_trajectories_file = os.path.join(self.trajectories_dir, "processed_trajectories.json")
+        
+        # 事件循环引用（用于线程安全调度）
+        self._main_loop = None
         
         # SynthesisCore v2.0
         self.synthesis_core = SynthesisCoreV2(llm_client, mcp_client)
@@ -110,6 +124,13 @@ class TrajectoryMonitor:
     async def start_monitoring(self):
         """开始监控轨迹文件"""
         try:
+            # 获取当前事件循环引用（用于线程安全调度）
+            try:
+                self._main_loop = asyncio.get_running_loop()
+                logger.debug("✅ 获取主事件循环引用成功")
+            except RuntimeError:
+                logger.warning("⚠️ 无法获取当前事件循环，文件监控可能无法正常工作")
+            
             # 设置文件监控
             self.observer.schedule(
                 self.file_handler,

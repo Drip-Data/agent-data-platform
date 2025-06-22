@@ -49,6 +49,18 @@ class CoreManager:
         # WebSocket连接管理
         self.websocket_connections: Set = set()
         
+        # 运行状态
+        self.is_running = False
+        
+        # 持久化服务器配置
+        self.persistent_servers: Dict[str, Dict[str, Any]] = {}
+        
+        # 组件管理
+        self.cache_manager = None
+        self.websocket_manager = None
+        self.monitoring_api = None
+        self.dynamic_mcp_manager = None
+        
         # 预置MCP服务器配置
         self.predefined_servers = [
             {
@@ -303,26 +315,44 @@ class CoreManager:
         await self.redis_client.publish('immediate_tool_updates', json.dumps(event_data))
     
     async def _notify_websocket_clients(self, notification: dict):
-        """WebSocket通知所有客户端"""
+        """WebSocket通知所有客户端（处理事件循环冲突）"""
         if not self.websocket_connections:
             return
             
         disconnected_clients = set()
         for websocket in self.websocket_connections:
             try:
+                # 检查WebSocket是否仍然有效
+                if hasattr(websocket, 'closed') and websocket.closed:
+                    disconnected_clients.add(websocket)
+                    continue
+                    
                 payload = json.dumps(notification)
-                if hasattr(websocket, "send_str"):
-                    # aiohttp.web.WebSocketResponse
-                    await websocket.send_str(payload)
-                else:
-                    # websockets.client.ServerConnection / WebSocketCommonProtocol
-                    await websocket.send(payload)
+                
+                # 安全的WebSocket发送，处理事件循环冲突
+                try:
+                    if hasattr(websocket, "send_str"):
+                        # aiohttp.web.WebSocketResponse
+                        await websocket.send_str(payload)
+                    else:
+                        # websockets.client.ServerConnection / WebSocketCommonProtocol
+                        await websocket.send(payload)
+                except RuntimeError as e:
+                    if "different loop" in str(e).lower():
+                        logger.warning(f"WebSocket事件循环冲突，跳过通知: {e}")
+                        # 不标记为断开，可能是临时的事件循环问题
+                        continue
+                    else:
+                        raise  # 重新抛出其他运行时错误
+                        
             except Exception as e:
                 logger.warning(f"WebSocket通知失败: {e}")
                 disconnected_clients.add(websocket)
         
         # 清理断开的连接
         self.websocket_connections -= disconnected_clients
+        if disconnected_clients:
+            logger.debug(f"清理了 {len(disconnected_clients)} 个断开的WebSocket连接")
     
     async def add_websocket_connection(self, websocket):
         """添加WebSocket连接"""
@@ -339,17 +369,76 @@ class CoreManager:
     async def cache_search_result(self, cache_key: str, data: Any, ttl: int = 3600):
         """缓存搜索结果"""
         if self.redis_client:
-            await self.redis_client.setex(cache_key, ttl, json.dumps(data))
+            try:
+                # 检查是否需要重新连接（处理事件循环问题）
+                if not hasattr(self.redis_client, '_connection_pool') or self.redis_client._connection_pool is None:
+                    logger.debug("重新创建Redis连接以处理事件循环问题")
+                    self.redis_client = redis.from_url(self.redis_url)
+                
+                await self.redis_client.setex(cache_key, ttl, json.dumps(data))
+            except RuntimeError as e:
+                if "different loop" in str(e):
+                    logger.warning(f"检测到事件循环冲突，重新创建Redis连接: {e}")
+                    try:
+                        # 重新创建Redis客户端以适应当前事件循环
+                        self.redis_client = redis.from_url(self.redis_url)
+                        await self.redis_client.setex(cache_key, ttl, json.dumps(data))
+                    except Exception as retry_error:
+                        logger.error(f"重试Redis缓存操作失败: {retry_error}")
+                        # 失败时使用内存缓存作为fallback
+                        self._tool_cache[cache_key] = {"data": data, "expires": time.time() + ttl}
+                else:
+                    raise
+            except Exception as e:
+                logger.error(f"Redis缓存操作失败: {e}")
+                # 失败时使用内存缓存作为fallback
+                self._tool_cache[cache_key] = {"data": data, "expires": time.time() + ttl}
     
     async def get_cached_result(self, cache_key: str) -> Optional[Any]:
         """获取缓存结果"""
         if not self.redis_client:
+            # 检查内存缓存
+            if cache_key in self._tool_cache:
+                cache_entry = self._tool_cache[cache_key]
+                if cache_entry.get("expires", 0) > time.time():
+                    return cache_entry.get("data")
+                else:
+                    del self._tool_cache[cache_key]
             return None
             
         try:
+            # 检查是否需要重新连接（处理事件循环问题）
+            if not hasattr(self.redis_client, '_connection_pool') or self.redis_client._connection_pool is None:
+                logger.debug("重新创建Redis连接以处理事件循环问题")
+                self.redis_client = redis.from_url(self.redis_url)
+                
             cached_data = await self.redis_client.get(cache_key)
             return json.loads(cached_data) if cached_data else None
-        except:
+        except RuntimeError as e:
+            if "different loop" in str(e):
+                logger.warning(f"检测到事件循环冲突，重新创建Redis连接: {e}")
+                try:
+                    # 重新创建Redis客户端以适应当前事件循环
+                    self.redis_client = redis.from_url(self.redis_url)
+                    cached_data = await self.redis_client.get(cache_key)
+                    return json.loads(cached_data) if cached_data else None
+                except Exception as retry_error:
+                    logger.error(f"重试Redis获取操作失败: {retry_error}")
+                    # 尝试从内存缓存获取
+                    if cache_key in self._tool_cache:
+                        cache_entry = self._tool_cache[cache_key]
+                        if cache_entry.get("expires", 0) > time.time():
+                            return cache_entry.get("data")
+                    return None
+            else:
+                raise
+        except Exception as e:
+            logger.error(f"Redis获取操作失败: {e}")
+            # 尝试从内存缓存获取
+            if cache_key in self._tool_cache:
+                cache_entry = self._tool_cache[cache_key]
+                if cache_entry.get("expires", 0) > time.time():
+                    return cache_entry.get("data")
             return None
     
     # === 自动注册功能 (合并 auto_register) ===
@@ -817,3 +906,62 @@ class CoreManager:
             health_status["error"] = str(e)
         
         return health_status 
+    
+    async def initialize(self):
+        """初始化核心管理器"""
+        logger.info("🚀 正在初始化 CoreManager...")
+        
+        try:
+            # 初始化Redis连接
+            if self.redis_manager:
+                self.redis_client = await self._get_redis_client()
+                logger.info("✅ Redis连接已建立")
+            
+            # 加载持久化服务器配置
+            await self._load_persistent_servers()
+            
+            # 自动注册预置MCP服务器
+            registration_results = await self._auto_register_predefined_servers()
+            logger.info(f"✅ 预置服务器注册完成: {registration_results['success_count']} 成功, {registration_results['failed_count']} 失败")
+            
+            # 标记为已初始化
+            self.is_running = True
+            logger.info("🎯 CoreManager 初始化完成")
+            
+        except Exception as e:
+            logger.error(f"❌ CoreManager 初始化失败: {e}")
+            raise
+    
+    async def _get_redis_client(self):
+        """获取Redis客户端"""
+        if self.redis_manager:
+            return redis.from_url(self.redis_manager.get_redis_url())
+        return None
+    
+    async def _load_persistent_servers(self):
+        """加载持久化服务器配置"""
+        try:
+            config_path = Path("config/persistent_servers.json")
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    self.persistent_servers = json.load(f)
+                logger.info(f"✅ 已加载 {len(self.persistent_servers)} 个持久化服务器配置")
+            else:
+                logger.info("📝 持久化服务器配置文件不存在，使用空配置")
+                self.persistent_servers = {}
+        except Exception as e:
+            logger.error(f"❌ 加载持久化服务器配置失败: {e}")
+            self.persistent_servers = {}
+    
+    async def _save_persistent_servers(self):
+        """保存持久化服务器配置"""
+        try:
+            config_path = Path("config/persistent_servers.json")
+            config_path.parent.mkdir(exist_ok=True)
+            
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(self.persistent_servers, f, indent=2, ensure_ascii=False)
+            
+            logger.info("✅ 持久化服务器配置已保存")
+        except Exception as e:
+            logger.error(f"❌ 保存持久化服务器配置失败: {e}")

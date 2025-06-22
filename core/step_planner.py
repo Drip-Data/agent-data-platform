@@ -454,8 +454,14 @@ class StepPlanner:
             )
             
             # 解析新计划
+            from .interfaces import TaskType
             adjusted_plan = await self._parse_planning_response(
-                TaskSpec(task_id=plan.task_id, description="", max_steps=plan.max_steps),
+                TaskSpec(
+                    task_id=plan.task_id, 
+                    task_type=TaskType.REASONING,  # 添加必需的task_type参数
+                    description="",
+                    max_steps=plan.max_steps
+                ),
                 adjustment_response,
                 plan.strategy
             )
@@ -603,14 +609,32 @@ class StepPlanner:
             
             # 如果没有特定类型，添加通用分析步骤
             if not fallback_steps:
-                fallback_steps.append(PlannedStep(
-                    step_id=f"fallback_{task.task_id}_1",
-                    action="analyze",
-                    tool_id=available_tools[0] if available_tools else "general",
-                    parameters={"task": task.description},
-                    priority=StepPriority.MEDIUM,
-                    success_criteria="完成任务分析"
-                ))
+                fallback_steps.extend([
+                    PlannedStep(
+                        step_id=f"fallback_{task.task_id}_1",
+                        action="analyze",
+                        tool_id=available_tools[0] if available_tools else "deepsearch-mcp-server",
+                        parameters={"task": task.description},
+                        priority=StepPriority.MEDIUM,
+                        success_criteria="完成任务分析"
+                    ),
+                    PlannedStep(
+                        step_id=f"fallback_{task.task_id}_2",
+                        action="search_and_install_tools",
+                        tool_id="mcp-search-tool",
+                        parameters={"task_description": task.description[:200]},
+                        priority=StepPriority.HIGH,
+                        success_criteria="找到并安装相关工具"
+                    ),
+                    PlannedStep(
+                        step_id=f"fallback_{task.task_id}_3",
+                        action="complete_task",
+                        tool_id=available_tools[0] if available_tools else "deepsearch-mcp-server",
+                        parameters={"final_check": True},
+                        priority=StepPriority.MEDIUM,
+                        success_criteria="完成任务并生成结果"
+                    )
+                ])
             
             plan = ExecutionPlan(
                 plan_id=f"fallback_{task.task_id}_{int(time.time())}",
@@ -628,16 +652,27 @@ class StepPlanner:
             
         except Exception as e:
             logger.error(f"创建后备计划失败: {e}")
-            # 最基本的计划
+            # 最基本的计划 - 确保至少有一个步骤
+            minimal_steps = [
+                PlannedStep(
+                    step_id=f"minimal_{task.task_id}_1",
+                    action="search_and_install_tools",
+                    tool_id="mcp-search-tool",
+                    parameters={"task_description": task.description[:100] if task.description else "general task"},
+                    priority=StepPriority.HIGH,
+                    success_criteria="完成基本任务分析"
+                )
+            ]
+            
             return ExecutionPlan(
                 plan_id=f"minimal_{task.task_id}_{int(time.time())}",
                 task_id=task.task_id,
                 strategy=PlanningStrategy.SEQUENTIAL,
-                planned_steps=[],
-                max_steps=task.max_steps or self.default_max_steps,
+                planned_steps=minimal_steps,
+                max_steps=max(1, task.max_steps or self.default_max_steps),
                 estimated_total_duration=60.0,
                 confidence=0.3,
-                reasoning="最小化后备计划",
+                reasoning="最小化后备计划 - 包含基本步骤",
                 created_at=time.time()
             )
     

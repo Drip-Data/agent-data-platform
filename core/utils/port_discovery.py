@@ -14,11 +14,17 @@ import yaml
 logger = logging.getLogger(__name__)
 
 class PortDiscovery:
-    """端口发现和服务健康检查工具"""
+    """端口发现和服务健康检查工具 - 增强版本"""
     
     def __init__(self, config_file: Optional[str] = None):
         self.config_file = config_file or "config/ports_config.yaml"
         self.discovered_ports: Dict[str, int] = {}
+        # 端口发现缓存，避免重复扫描
+        self.port_cache: Dict[str, Dict] = {}
+        self.cache_ttl = 300  # 缓存5分钟
+        # 连接超时配置
+        self.connection_timeout = 3.0
+        self.health_check_timeout = 5.0
         
     def load_base_config(self) -> Dict:
         """加载基础端口配置"""
@@ -35,23 +41,90 @@ class PortDiscovery:
             return {}
     
     def check_port_available(self, port: int, host: str = "localhost") -> bool:
-        """检查端口是否被占用"""
+        """检查端口是否被占用，增强版本：支持超时配置"""
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(self.connection_timeout)
                 result = sock.connect_ex((host, port))
                 return result == 0  # 0表示连接成功，端口被占用
         except Exception:
             return False
     
-    async def check_service_health(self, url: str) -> bool:
-        """检查服务健康状态"""
-        try:
-            timeout = aiohttp.ClientTimeout(total=5)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as response:
-                    return response.status < 400
-        except Exception:
+    def _is_cache_valid(self, service_name: str) -> bool:
+        """检查缓存是否有效"""
+        import time
+        if service_name not in self.port_cache:
             return False
+        
+        cache_time = self.port_cache[service_name].get('timestamp', 0)
+        return (time.time() - cache_time) < self.cache_ttl
+    
+    def _update_cache(self, service_name: str, port: int, status: str):
+        """更新端口发现缓存"""
+        import time
+        self.port_cache[service_name] = {
+            'port': port,
+            'status': status,
+            'timestamp': time.time()
+        }
+    
+    async def check_service_health(self, url: str) -> bool:
+        """检查服务健康状态，增强版本：支持多端点和智能重试"""
+        try:
+            timeout = aiohttp.ClientTimeout(total=self.health_check_timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # 尝试多个健康检查端点
+                health_endpoints = ['', '/health', '/ping', '/status']
+                
+                for endpoint in health_endpoints:
+                    check_url = f"{url.rstrip('/')}{endpoint}"
+                    try:
+                        async with session.get(check_url) as response:
+                            if response.status < 400:
+                                logger.debug(f"✅ 服务健康检查成功: {check_url}")
+                                return True
+                    except Exception as e:
+                        logger.debug(f"🔄 健康检查端点失败 {check_url}: {e}")
+                        continue
+                
+                return False
+        except Exception as e:
+            logger.debug(f"❌ 服务健康检查失败 {url}: {e}")
+            return False
+    
+    async def discover_service_port(self, service_name: str, base_port: int, auto_detect_enabled: bool = True) -> Optional[int]:
+        """智能服务端口发现，带缓存和多端口扫描"""
+        # 检查缓存
+        if self._is_cache_valid(service_name):
+            cached_info = self.port_cache[service_name]
+            if cached_info['status'] == 'healthy':
+                logger.debug(f"🎯 使用缓存的端口: {service_name} -> {cached_info['port']}")
+                return cached_info['port']
+        
+        # 首先测试基础端口
+        candidate_ports = [base_port]
+        
+        # 如果启用自动检测，扩展端口范围
+        if auto_detect_enabled:
+            # 扩展到附近端口范围
+            nearby_range = range(max(base_port - 10, 8000), min(base_port + 50, 9000))
+            candidate_ports.extend([p for p in nearby_range if p != base_port])
+        
+        for port in candidate_ports:
+            if self.check_port_available(port):
+                # 进行健康检查
+                health_url = f"http://localhost:{port}"
+                if await self.check_service_health(health_url):
+                    logger.info(f"✅ 发现健康的服务: {service_name} -> 端口 {port}")
+                    self._update_cache(service_name, port, 'healthy')
+                    return port
+                else:
+                    logger.debug(f"🔄 端口 {port} 有服务但健康检查失败")
+        
+        # 未找到健康的服务
+        logger.warning(f"⚠️ 未找到健康的 {service_name} 服务")
+        self._update_cache(service_name, base_port, 'not_found')
+        return None
     
     async def discover_task_api_port(self) -> Optional[int]:
         """发现Task API的实际端口"""

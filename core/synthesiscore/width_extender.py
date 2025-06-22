@@ -276,48 +276,52 @@ class TaskFuser:
         """生成复合问题"""
         
         question_prompt = f"""
-基于以下原子任务组和共同主题，生成一个综合性问题：
+基于以下原子任务组和共同主题，生成一个综合性问题。
 
 共同主题: {common_theme}
 
 原子任务:
 {chr(10).join(f"{i+1}. {task.question}" for i, task in enumerate(task_group))}
 
-要求生成的复合问题：
+要求：
 1. 包含所有原子任务的信息需求
 2. 比单个原子任务更复杂但仍可执行
 3. 需要多步骤推理和工具调用
 4. 有明确的执行路径
 
-返回生成的复合问题。
+请直接返回JSON格式：
+{{
+    "composite_question": "生成的复合问题内容",
+    "explanation": "简要说明如何整合原子任务"
+}}
 """
         
         try:
-            response = await self.llm_client.generate_task_summary(
+            response = await self.llm_client.generate_enhanced_reasoning(
                 task_description=question_prompt,
-                steps=[],
-                final_outputs=[]
+                available_tools=[],
+                tool_descriptions="",
+                execution_context={"mode": "composite_question_generation"}
             )
             
-            # 从响应中提取实际的复合问题，而不是推理过程
-            generated_question = response.strip()
+            # 尝试从JSON响应中提取复合问题
+            thinking = response.get('thinking', '').strip()
+            if thinking:
+                try:
+                    # 尝试解析JSON
+                    import json
+                    parsed = json.loads(thinking)
+                    if 'composite_question' in parsed:
+                        generated_question = parsed['composite_question'].strip()
+                        if len(generated_question) > 20:
+                            return generated_question
+                except json.JSONDecodeError:
+                    pass
             
-            # 如果响应包含推理过程，尝试提取最终问题
-            if "STEP" in generated_question and ":" in generated_question:
-                # 尝试找到实际的问题部分
-                lines = generated_question.split('\n')
-                for line in lines:
-                    if (not line.startswith('STEP') and 
-                        not line.startswith('根据') and 
-                        len(line.strip()) > 20 and
-                        '?' in line):
-                        generated_question = line.strip()
-                        break
-                else:
-                    # 如果找不到合适的问题，使用回退策略
-                    return self._fallback_composite_question(task_group, common_theme)
+            # 如果JSON解析失败，尝试从thinking中提取
+            generated_question = self._extract_question_from_thinking(thinking)
             
-            # 如果生成失败，使用默认策略
+            # 如果仍然失败，使用回退策略
             if not generated_question or len(generated_question) < 20:
                 return self._fallback_composite_question(task_group, common_theme)
             
@@ -326,6 +330,32 @@ class TaskFuser:
         except Exception as e:
             logger.error(f"❌ 复合问题生成失败: {e}")
             return self._fallback_composite_question(task_group, common_theme)
+    
+    def _extract_question_from_thinking(self, thinking: str) -> str:
+        """从thinking中提取复合问题"""
+        if not thinking:
+            return ""
+        
+        # 尝试找到以问号结尾的句子
+        sentences = thinking.split('。')
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if sentence.endswith('？') or sentence.endswith('?'):
+                # 确保句子足够长且看起来像一个完整的问题
+                if len(sentence) > 20 and not sentence.startswith('STEP'):
+                    return sentence
+        
+        # 如果没找到问号结尾的句子，尝试找到以请求动词开头的长句子
+        lines = thinking.split('\n')
+        for line in lines:
+            line = line.strip()
+            if (line.startswith('请') or line.startswith('基于') or line.startswith('结合')) and len(line) > 30:
+                # 移除可能的编号前缀
+                if '.' in line[:10]:
+                    line = line.split('.', 1)[-1].strip()
+                return line
+        
+        return ""
     
     def _fallback_composite_question(self, task_group: List[AtomicTask], common_theme: str) -> str:
         """复合问题生成失败时的回退策略"""

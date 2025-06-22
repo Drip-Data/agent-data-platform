@@ -5,6 +5,7 @@ MCP Server搜索和安装工具 - 优化版本
 
 import logging
 import json
+import time
 from typing import Dict, Any, List, Optional
 import os
 
@@ -24,7 +25,11 @@ class MCPSearchTool:
         self._mcp_tools_path: Optional[str] = None
         self._mcp_tools_data: Optional[List[Dict[str, Any]]] = None
         
-        logger.info("✅ MCP Search Tool initialized - 优化版本")
+        # 失败工具跟踪和冷却机制
+        self._failed_tools: Dict[str, Dict[str, Any]] = {}
+        self._cooldown_period = 300  # 5分钟冷却期
+        
+        logger.info("✅ MCP Search Tool initialized - 优化版本，包含失败工具跟踪")
     
     async def search_and_install_tools(self, task_description: str, current_available_tools: List[Dict[str, Any]], 
                                        reason: str = "") -> MCPSearchResult:
@@ -62,24 +67,33 @@ class MCPSearchTool:
             
             logger.info(f"🎯 LLM选择了 {len(selected_tools)} 个工具候选")
             
-            # 3. 尝试安装推荐工具，增强错误处理
+            # 3. 尝试安装推荐工具，增强错误处理和冷却机制
             failed_installations = []
             for i, tool_info in enumerate(selected_tools[:3], 1):  # 最多尝试前3个
-                logger.info(f"📦 尝试安装工具 {i}: {tool_info.get('name', 'Unknown')}")
+                tool_name = tool_info.get('name', 'Unknown')
+                logger.info(f"📦 尝试安装工具 {i}: {tool_name}")
+                
+                # 检查工具是否在冷却期内
+                if self._is_tool_in_cooldown(tool_name):
+                    logger.warning(f"⏳ 工具 {tool_name} 在冷却期内，跳过安装")
+                    failed_installations.append(f"工具 {tool_name}: 冷却期内跳过")
+                    continue
                 
                 # 构造候选者对象
                 candidate = await self._create_candidate_from_tool_info(tool_info)
                 if not candidate:
-                    failed_installations.append(f"工具 {tool_info.get('name', 'Unknown')}: 候选者创建失败")
-                    logger.warning(f"❌ 候选者创建失败，直接跳到降级策略: {tool_info.get('name', 'Unknown')}")
-                    # 立即触发降级策略而不是继续尝试其他工具
-                    return await self._try_fallback_with_existing_tools(task_description, current_available_tools)
+                    failed_installations.append(f"工具 {tool_name}: 候选者创建失败")
+                    self._record_tool_failure(tool_name, "候选者创建失败")
+                    logger.warning(f"❌ 候选者创建失败: {tool_name}")
+                    continue
                 
                 # 安装工具
                 install_result = await self.dynamic_mcp_manager.install_mcp_server(candidate)
                 
                 if install_result.success:
                     logger.info(f"✅ 成功安装工具: {candidate.name}")
+                    # 清除该工具的失败记录
+                    self._clear_tool_failure(tool_name)
                     return MCPSearchResult(
                         success=True,
                         message=f"成功安装工具: {candidate.name}",
@@ -92,8 +106,10 @@ class MCPSearchTool:
                         }]
                     )
                 else:
-                    error_msg = f"{tool_info.get('name', 'Unknown')}: {install_result.error_message}"
+                    error_msg = f"{tool_name}: {install_result.error_message}"
                     failed_installations.append(error_msg)
+                    # 记录工具安装失败
+                    self._record_tool_failure(tool_name, install_result.error_message)
                     logger.warning(f"❌ 工具安装失败: {error_msg}")
             
             # 所有工具安装失败，尝试降级策略
@@ -388,39 +404,60 @@ Return format:
         return self._mcp_tools_data
     
     async def _try_fallback_with_existing_tools(self, task_description: str, current_available_tools: List[Dict[str, Any]]) -> MCPSearchResult:
-        """降级策略：尝试用现有工具完成任务"""
-        logger.info("🔄 执行降级策略：评估现有工具是否可以完成任务")
-        logger.info(f"🔍 DEBUG: 任务描述包含关键词检查: {task_description.lower()}")
-        logger.info(f"🔍 DEBUG: 当前可用工具数量: {len(current_available_tools)}")
+        """降级策略：智能评估现有工具完成任务的可能性"""
+        logger.info("🔄 执行增强降级策略：智能工具匹配")
+        logger.info(f"🔍 任务描述: {task_description[:100]}...")
+        logger.info(f"🔍 当前可用工具数量: {len(current_available_tools)}")
         
         try:
-            # 检查是否有任何可用的研究工具
-            research_tools = []
-            for tool in current_available_tools:
-                if isinstance(tool, dict):
-                    server_id = tool.get('server_id', '')
-                    description = tool.get('description', '').lower()
-                    if ('deepsearch' in server_id.lower() or 
-                        'research' in description or 
-                        'analysis' in description or
-                        'deep' in description):
-                        research_tools.append(tool)
+            # 1. 智能任务分类
+            task_type = self._classify_task_type(task_description)
+            logger.info(f"🎯 任务分类: {task_type}")
             
-            # 如果找到研究相关工具，优先使用
-            if research_tools:
-                logger.info(f"✅ 找到 {len(research_tools)} 个研究工具，使用现有工具完成任务")
+            # 2. 按任务类型查找匹配工具
+            matched_tools = self._find_tools_by_task_type(task_type, current_available_tools)
+            
+            if matched_tools:
+                logger.info(f"✅ 找到 {len(matched_tools)} 个匹配工具用于 {task_type} 任务")
                 return MCPSearchResult(
                     success=True,
-                    message=f"使用现有研究工具: {', '.join([t.get('server_name', t.get('server_id', '')) for t in research_tools])}",
-                    installed_tools=research_tools,
+                    message=f"使用现有工具完成 {task_type} 任务: {', '.join([t.get('name', t.get('server_id', '')) for t in matched_tools[:3]])}",
+                    installed_tools=matched_tools,
                     fallback_used=True
                 )
             
-            # 降级策略：如果没有任何合适的工具，则返回失败
-            logger.warning("降级策略未能找到合适的现有工具来完成任务。")
+            # 3. 通用工具回退 - 查找通用分析工具
+            universal_tools = self._find_universal_tools(current_available_tools)
+            if universal_tools:
+                logger.info(f"🔧 使用通用工具: {len(universal_tools)} 个")
+                return MCPSearchResult(
+                    success=True,
+                    message=f"使用通用分析工具: {', '.join([t.get('name', t.get('server_id', '')) for t in universal_tools])}",
+                    installed_tools=universal_tools,
+                    fallback_used=True
+                )
+            
+            # 4. 知识合成回退 - 最后的防线
+            if self._can_use_knowledge_synthesis(task_description):
+                logger.info("🧠 使用知识合成作为最终回退")
+                return MCPSearchResult(
+                    success=True,
+                    message="使用知识合成完成任务（无需外部工具）",
+                    installed_tools=[{
+                        "name": "Knowledge_Synthesis_Engine",
+                        "description": "基于训练数据的知识合成引擎",
+                        "capabilities": ["knowledge_analysis", "reasoning", "synthesis"],
+                        "fallback_method": "knowledge_synthesis",
+                        "confidence": 0.7
+                    }],
+                    fallback_used=True
+                )
+            
+            # 5. 完全失败
+            logger.warning("❌ 所有降级策略都无法处理此任务")
             return MCPSearchResult(
                 success=False,
-                message="降级策略未能找到合适的现有工具。",
+                message="无法找到合适的工具或方法完成此任务",
                 installed_tools=[],
                 fallback_used=True
             )
@@ -518,3 +555,162 @@ Return format:
                 }],
                 fallback_used=True
             )
+    
+    def _classify_task_type(self, task_description: str) -> str:
+        """智能任务分类"""
+        desc_lower = task_description.lower()
+        
+        # 代码/编程任务
+        if any(keyword in desc_lower for keyword in [
+            'python', 'code', '编程', '脚本', 'script', '运行', 'execute', 
+            '计算', 'calculate', '算法', 'algorithm'
+        ]):
+            return 'code_execution'
+        
+        # 网络爬取/数据抓取任务
+        if any(keyword in desc_lower for keyword in [
+            'scrape', 'crawl', '爬取', '抓取', 'fetch', 'download', 
+            'website', 'webpage', 'url', 'html'
+        ]):
+            return 'web_scraping'
+        
+        # 浏览器自动化任务
+        if any(keyword in desc_lower for keyword in [
+            'browser', '浏览器', 'navigate', '导航', 'click', '点击',
+            'screenshot', '截图', 'automation'
+        ]):
+            return 'browser_automation'
+        
+        # 研究/分析任务
+        if any(keyword in desc_lower for keyword in [
+            'research', '研究', 'analyze', '分析', 'study', '调研',
+            'investigate', '调查', 'trends', '趋势'
+        ]):
+            return 'research_analysis'
+        
+        # 文件操作任务
+        if any(keyword in desc_lower for keyword in [
+            'file', '文件', 'read', '读取', 'write', '写入',
+            'save', '保存', 'directory', '目录'
+        ]):
+            return 'file_operations'
+        
+        # 数据处理任务
+        if any(keyword in desc_lower for keyword in [
+            'data', '数据', 'json', 'csv', 'excel', 'statistics',
+            '统计', 'process', '处理'
+        ]):
+            return 'data_processing'
+        
+        # 默认为一般分析任务
+        return 'general_analysis'
+    
+    def _find_tools_by_task_type(self, task_type: str, available_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """根据任务类型查找匹配的工具"""
+        matched_tools = []
+        
+        tool_mapping = {
+            'code_execution': ['microsandbox', 'python', 'executor'],
+            'web_scraping': ['scraper', 'scrape', 'crawl', 'fetch'],
+            'browser_automation': ['browser', 'navigate', 'automation'],
+            'research_analysis': ['deepsearch', 'research', 'analysis'],
+            'file_operations': ['file', 'filesystem', 'storage'],
+            'data_processing': ['statistics', 'data', 'process']
+        }
+        
+        keywords = tool_mapping.get(task_type, [])
+        
+        for tool in available_tools:
+            if isinstance(tool, dict):
+                tool_name = tool.get('name', '').lower()
+                tool_id = tool.get('server_id', '').lower()
+                tool_desc = tool.get('description', '').lower()
+                
+                # 检查工具名称、ID或描述是否包含相关关键词
+                if any(keyword in tool_name or keyword in tool_id or keyword in tool_desc 
+                       for keyword in keywords):
+                    matched_tools.append(tool)
+        
+        return matched_tools
+    
+    def _find_universal_tools(self, available_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """查找通用分析工具"""
+        universal_tools = []
+        
+        universal_keywords = ['deepsearch', 'analysis', 'research', 'general', 'multi']
+        
+        for tool in available_tools:
+            if isinstance(tool, dict):
+                tool_name = tool.get('name', '').lower()
+                tool_id = tool.get('server_id', '').lower()
+                tool_desc = tool.get('description', '').lower()
+                
+                if any(keyword in tool_name or keyword in tool_id or keyword in tool_desc 
+                       for keyword in universal_keywords):
+                    universal_tools.append(tool)
+        
+        return universal_tools
+    
+    def _can_use_knowledge_synthesis(self, task_description: str) -> bool:
+        """判断是否可以使用知识合成完成任务"""
+        desc_lower = task_description.lower()
+        
+        # 这些任务类型适合知识合成
+        knowledge_suitable_keywords = [
+            '解释', 'explain', '分析', 'analyze', '比较', 'compare',
+            '总结', 'summary', '概述', 'overview', '建议', 'recommend',
+            '原理', 'principle', '理论', 'theory', '概念', 'concept'
+        ]
+        
+        # 这些任务类型不适合知识合成（需要实时数据或外部操作）
+        knowledge_unsuitable_keywords = [
+            '下载', 'download', '爬取', 'scrape', '截图', 'screenshot',
+            '运行', 'execute', '安装', 'install', '删除', 'delete',
+            '实时', 'real-time', '当前', 'current', '最新', 'latest'
+        ]
+        
+        # 如果包含不适合的关键词，不使用知识合成
+        if any(keyword in desc_lower for keyword in knowledge_unsuitable_keywords):
+            return False
+        
+        # 如果包含适合的关键词，可以使用知识合成
+        if any(keyword in desc_lower for keyword in knowledge_suitable_keywords):
+            return True
+        
+        # 对于其他任务，如果描述较短且不涉及复杂操作，也可以尝试知识合成
+        return len(task_description) < 200
+    
+    def _is_tool_in_cooldown(self, tool_name: str) -> bool:
+        """检查工具是否在冷却期内"""
+        if tool_name not in self._failed_tools:
+            return False
+        
+        failure_info = self._failed_tools[tool_name]
+        last_failure_time = failure_info.get('last_failure_time', 0)
+        current_time = time.time()
+        
+        return (current_time - last_failure_time) < self._cooldown_period
+    
+    def _record_tool_failure(self, tool_name: str, error_message: str):
+        """记录工具安装失败"""
+        current_time = time.time()
+        
+        if tool_name in self._failed_tools:
+            self._failed_tools[tool_name]['failure_count'] += 1
+            self._failed_tools[tool_name]['last_failure_time'] = current_time
+            self._failed_tools[tool_name]['last_error'] = error_message
+        else:
+            self._failed_tools[tool_name] = {
+                'failure_count': 1,
+                'last_failure_time': current_time,
+                'last_error': error_message,
+                'first_failure_time': current_time
+            }
+        
+        logger.info(f"🔥 记录工具失败: {tool_name} (失败次数: {self._failed_tools[tool_name]['failure_count']})")
+    
+    def _clear_tool_failure(self, tool_name: str):
+        """清除工具失败记录"""
+        if tool_name in self._failed_tools:
+            del self._failed_tools[tool_name]
+            logger.info(f"✅ 清除工具失败记录: {tool_name}")

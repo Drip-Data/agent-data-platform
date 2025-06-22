@@ -223,7 +223,8 @@ async def force_synthesis_process():
 async def get_seed_tasks(limit: int = 10):
     """查看最近生成的种子任务"""
     try:
-        seed_tasks_file = "/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/seed_tasks.jsonl"
+        from core.utils.path_utils import get_output_dir
+        seed_tasks_file = str(get_output_dir() / "seed_tasks.jsonl")
         
         if not os.path.exists(seed_tasks_file):
             return {"seed_tasks": [], "total_count": 0, "message": "No seed tasks file found"}

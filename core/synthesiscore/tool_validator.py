@@ -26,7 +26,14 @@ class ToolValidator:
             'python_executor',
             'search_tool',
             'microsandbox',
-            'file_reader'
+            'file_reader',
+            'browser_use_execute_task',
+            'browser_navigate',
+            'microsandbox_execute',
+            'microsandbox_install_package',
+            'microsandbox_get_performance_stats',
+            'python_execute',
+            'browser_use'
         }
         
         # 已知不存在的工具列表
@@ -92,7 +99,11 @@ class ToolValidator:
                     validated_tools.append(replacement)
                     logger.info(f"🔄 使用替代工具: {tool} -> {replacement}")
             else:
-                logger.warning(f"⚠️ 工具 {tool} 可用性未知，保留")
+                # 对于常见工具，使用debug级别而不是warning
+                if tool in {'web_search', 'deepsearch', 'python_execute', 'browser_use', 'search_tool'}:
+                    logger.debug(f"🔧 工具 {tool} 可用性未知，但属于常见工具，保留")
+                else:
+                    logger.warning(f"⚠️ 工具 {tool} 可用性未知，保留")
                 validated_tools.append(tool)
         
         return validated_tools

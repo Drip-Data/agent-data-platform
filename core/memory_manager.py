@@ -328,6 +328,32 @@ class MemoryManager:
             logger.error(f"Failed to generate context summary: {e}")
             return "生成上下文摘要时出错。"
     
+    def _extract_valid_tools(self, steps: List[ConversationStep]) -> List[str]:
+        """
+        从会话步骤中提取有效的工具名称，过滤掉非字符串类型
+        
+        Args:
+            steps: 会话步骤列表
+            
+        Returns:
+            有效工具名称列表
+        """
+        valid_tools = set()
+        
+        try:
+            for step in steps:
+                if hasattr(step, 'tools_used') and step.tools_used:
+                    for tool in step.tools_used:
+                        # 只保留字符串类型的工具名称
+                        if isinstance(tool, str) and tool.strip():
+                            valid_tools.add(tool.strip())
+                        else:
+                            logger.debug(f"跳过非字符串工具项: {type(tool).__name__} - {tool}")
+        except Exception as e:
+            logger.warning(f"提取工具名称时出错: {e}")
+        
+        return list(valid_tools)
+    
     async def store_session_summary(self, session_id: str, 
                                   main_topics: List[str] = None,
                                   key_insights: List[str] = None) -> bool:
@@ -358,7 +384,7 @@ class MemoryManager:
                 successful_steps=sum(1 for step in steps if step.success),
                 main_topics=main_topics or [],
                 key_insights=key_insights or [],
-                tools_used=list(set(tool for step in steps for tool in step.tools_used))
+                tools_used=self._extract_valid_tools(steps)
             )
             
             # 存储到缓存
