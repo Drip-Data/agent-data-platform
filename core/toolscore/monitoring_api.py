@@ -1015,7 +1015,7 @@ class ToolScoreMonitoringAPI:
             start_time = time.time()
             
             # 🔧 修复：对于MicroSandbox执行器，尝试直接调用避免WebSocket连接问题
-            if tool_id == "microsandbox-mcp-server" and hasattr(self, 'microsandbox_server') and self.microsandbox_server:
+            if tool_id == "microsandbox" and hasattr(self, 'microsandbox_server') and self.microsandbox_server:
                 logger.info(f"🚀 直接调用同进程的MicroSandbox Server")
                 try:
                     # 直接调用MicroSandbox Server的handle_tool_action方法
