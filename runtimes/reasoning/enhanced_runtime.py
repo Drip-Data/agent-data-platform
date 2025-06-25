@@ -2147,16 +2147,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             "",
             "Analyze the failure and provide a **corrected** tool call. Common issues to check:",
             "",
-            "### For microsandbox-mcp-server:",
+            "### For microsandbox:",
             "- ✅ **CRITICAL**: `microsandbox_execute` MUST have `code` parameter",
             "- ✅ Example: `{\"code\": \"print('Hello World')\"}` ✅",
             "- ❌ Missing `code` parameter = FAILURE",
             "",
-            "### For browser-use-mcp-server:",
+            "### For browser_use:",
             "- ✅ **CRITICAL**: `browser_navigate` MUST have `url` parameter",
             "- ✅ Example: `{\"url\": \"https://python.org\"}` ✅",
             "",
-            "### For mcp-deepsearch:",
+            "### For deepsearch:",
             "- ✅ **CRITICAL**: `research` MUST have `question` parameter",
             "- ✅ Example: `{\"question\": \"Python asyncio basics\"}` ✅",
             "",
@@ -2405,12 +2405,12 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             
             # 🛑 特定工具的关键参数校验（硬编码规则）
             validation_rules = {
-                'microsandbox-mcp-server': {
+                'microsandbox': {
                     'microsandbox_execute': ['code'],
                     'run_code': ['code'],
                     'execute': ['code']
                 },
-                'browser-use-mcp-server': {
+                'browser_use': {
                     'browser_navigate': ['url'],
                     'browser_use_execute_task': ['task'],
                     'browser_click_element': ['index'],
@@ -2418,7 +2418,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     'browser_extract_content': [],
                     'browser_search_google': ['query']
                 },
-                'mcp-deepsearch': {
+                'deepsearch': {
                     'research': ['question'],
                     'comprehensive_research': ['question'],
                     'quick_research': ['question']
@@ -2488,7 +2488,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             
             # 🔧 P1-1修复：扩展参数映射规则覆盖更多别名
             parameter_mappings = {
-                'mcp-deepsearch': {
+                'deepsearch': {
                     # 所有动作都使用question参数
                     '*': {
                         'task_description': 'question',
@@ -2552,7 +2552,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         'expression': 'search_term'
                     }
                 },
-                'microsandbox-mcp-server': {
+                'microsandbox': {
                     '*': {
                         'script': 'code',
                         'python_code': 'code',
@@ -2570,7 +2570,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         'procedure': 'code'
                     }
                 },
-                'browser-use-mcp-server': {
+                'browser_use': {
                     # 🔧 P0紧急修复1: 修正browser动作名称和参数映射
                     'browser_navigate': {
                         'link': 'url',
