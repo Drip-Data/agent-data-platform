@@ -1598,6 +1598,16 @@ class ReasoningResponseParser(IResponseParser):
                 if normalized_action == normalized_valid:
                     logger.warning(f"⚠️ Action智能纠正: {action} -> {valid_action}")
                     return valid_action
+
+            # 使用相似度匹配进一步尝试纠正
+            try:
+                import difflib
+                matches = difflib.get_close_matches(action, valid_actions, n=1, cutoff=0.6)
+                if matches:
+                    logger.warning(f"⚠️ Action智能纠正: {action} -> {matches[0]}")
+                    return matches[0]
+            except Exception:
+                pass
             
             # 如果无法纠正，记录警告并返回默认动作
             default_action = tool_manager.get_default_action(standard_tool_id)

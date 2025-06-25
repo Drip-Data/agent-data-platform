@@ -482,7 +482,19 @@ class ParameterValidator:
                     # 🔧 代码参数智能生成
                     if any(keyword in task_lower for keyword in ['代码', 'code', '计算', 'calculate', '执行', 'execute']):
                         # 基于任务类型生成代码框架
-                        if '计算' in task_lower or 'calculate' in task_lower:
+                        if '斐波那契' in task_lower or 'fibonacci' in task_lower:
+                            suggestions[param] = (
+                                "def fibonacci(n):\n"
+                                "    a, b = 0, 1\n"
+                                "    seq = []\n"
+                                "    for _ in range(n):\n"
+                                "        seq.append(b)\n"
+                                "        a, b = b, a + b\n"
+                                "    return seq\n\n"
+                                "result = fibonacci(10)\n"
+                                "print(result)"
+                            )
+                        elif '计算' in task_lower or 'calculate' in task_lower:
                             suggestions[param] = f"# 计算任务: {task_description}\n# TODO: 实现具体计算逻辑\nresult = None\nprint(f'计算结果: {{result}}')"
                         elif '数据' in task_lower or 'data' in task_lower:
                             suggestions[param] = f"# 数据处理任务: {task_description}\nimport pandas as pd\n# TODO: 实现数据处理逻辑\nprint('数据处理完成')"

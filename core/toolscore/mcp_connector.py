@@ -60,6 +60,8 @@ class MCPServerConnector:
                 
             except asyncio.TimeoutError:
                 logger.warning(f"⏰ 连接超时 (尝试 {attempt + 1}): {self.endpoint}")
+            except OSError as e:
+                logger.error(f"❌ 无法连接到 {self.endpoint}: {e.strerror}")
             except Exception as e:
                 logger.error(f"❌ 连接失败 (尝试 {attempt + 1}): {self.endpoint} - {e}")
                 
