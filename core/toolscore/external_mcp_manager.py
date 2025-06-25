@@ -123,6 +123,21 @@ class ExternalMCPManager:
             # 启动Docker容器
             logger.info(f"正在启动{server_id}服务器，端口: {port}")
             
+            # 首先检查Docker是否可用
+            try:
+                docker_check = subprocess.run(
+                    ["docker", "--version"], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=5
+                )
+                if docker_check.returncode != 0:
+                    logger.warning(f"⚠️ Docker不可用，尝试连接现有的{server_id}实例")
+                    return await self.try_connect_existing_server(server_id, config)
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                logger.warning(f"⚠️ Docker命令不可用: {e}，尝试连接现有的{server_id}实例")
+                return await self.try_connect_existing_server(server_id, config)
+            
             cmd = [
                 "docker", "run", "-d",
                 "--name", f"{server_id}-mcp-{port}",
@@ -131,7 +146,7 @@ class ExternalMCPManager:
                 docker_image
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
                 container_id = result.stdout.strip()

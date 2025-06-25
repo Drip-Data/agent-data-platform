@@ -50,9 +50,9 @@ class WebActionsResponseParser(IResponseParser):
         # 例如，如果描述包含“搜索”，可以生成一个搜索操作
         if "search" in description.lower():
             return [
-                {"action": "fill", "selector": "input[type='search'], #search, .search-box", "value": "default search query", "description": "Fallback: Fill search box"},
-                {"action": "click", "selector": "button[type='submit'], .search-button", "description": "Fallback: Click search button"}
+                {"action": "browser_input_text", "index": 0, "text": "default search query", "description": "Fallback: Fill search box"},
+                {"action": "browser_click_element", "index": 1, "description": "Fallback: Click search button"}
             ]
         return [
-            {"action": "navigate", "url": "about:blank", "description": "Fallback: Navigate to a blank page due to parsing error"}
+            {"action": "browser_navigate", "url": "about:blank", "description": "Fallback: Navigate to a blank page due to parsing error"}
         ]

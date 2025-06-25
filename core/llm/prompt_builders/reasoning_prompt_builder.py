@@ -96,26 +96,35 @@ class ReasoningPromptBuilder(IPromptBuilder):
 - 失败时分析原因并调整策略
 - 必要时考虑工具扩展
 
-**只返回JSON对象，不要其他文字！**
+**⚠️ 严格要求：**
+1. 只返回JSON对象，不要任何解释文字！
+2. 不要使用markdown代码块包装JSON！
+3. 不要添加任何注释或描述性文本！
+4. 确保JSON格式完全正确！
+5. NO explanatory text outside JSON!
+**违反此约束将导致任务失败**
+
+**FINAL REMINDER: JSON ONLY - NO OTHER TEXT!**
 """
         return [{"role": "user", "content": prompt_template}]
 
     def _build_enhanced_reasoning_prompt(self, task_description: str, available_tools: List[str],
                                          tool_descriptions: str, previous_steps: Optional[List[Dict[str, Any]]] = None,
                                          execution_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """为增强推理构建优化的提示 - 支持MCP主动选择机制"""
+        """为增强推理构建优化的提示 - 支持MCP主动选择机制，动态工具描述"""
 
         prompt_parts = [
             "# AI Agent with Dynamic Tool Expansion",
             "",
-            "You are an intelligent AI agent capable of **self-evolution** through dynamic tool acquisition.",
-            "Your core innovation: **PROACTIVELY identify tool gaps and install new MCP servers when needed**.",
+            "You are an intelligent AI agent with access to a comprehensive set of specialized tools.",
+            "**CORE PRINCIPLE: Always prioritize using existing tools before searching for new ones.**",
+            "",
+            # 🔧 动态工具描述（已移除硬编码）
+            "## 🔧 Available Tools (Live from deployment)",
+            tool_descriptions,  # 由ToolSchemaManager动态生成，反映实际部署状态
             "",
             f"## 🎯 Current Task",
             f"**Task**: {task_description}",
-            "",
-            "## 🔧 Available Tools",
-            tool_descriptions,
             "",
         ]
 
@@ -156,19 +165,20 @@ class ReasoningPromptBuilder(IPromptBuilder):
             if consecutive_failures >= 2:
                 prompt_parts.extend([
                     "🚨 **CRITICAL**: Multiple consecutive failures detected!",
-                    "**Action Required**: Use 'mcp-search-tool' → 'search_and_install_tools' to acquire new capabilities.",
+                    "**Try Alternative Approach**: Use a different existing tool or approach with current tools.",
+                    "**Last Resort**: Only if truly no existing tool can help, consider searching for new tools.",
                     ""
                 ])
             elif analyze_count >= 2 and search_count == 0:
                 prompt_parts.extend([
                     "⚠️ **LOOP DETECTED**: Analysis completed, but no action taken!",
-                    "**Next Action MUST be**: 'mcp-search-tool' → 'search_and_install_tools'",
+                    "**Recommended**: Directly use the most appropriate existing tool instead of analyzing further.",
                     ""
                 ])
             elif has_search_recommendation and search_count == 0:
                 prompt_parts.extend([
-                    "🔍 **SEARCH RECOMMENDED**: Previous analysis suggests tool installation needed.",
-                    "**Proceed with**: 'mcp-search-tool' → 'search_and_install_tools'",
+                    "🔍 **RECONSIDER**: Before searching for new tools, verify if existing tools can handle the task.",
+                    "**Check**: mcp-deepsearch, microsandbox-mcp-server, or browser-use-mcp-server capabilities.",
                     ""
                 ])
             elif tool_install_success:
@@ -180,47 +190,50 @@ class ReasoningPromptBuilder(IPromptBuilder):
         prompt_parts.extend([
             "## 🧠 Intelligent Decision Framework",
             "",
-            "### 🎨 For Image/Chart Generation Tasks:",
+            "### 🔍 For Research/Investigation Tasks (HIGHEST PRIORITY):",
             "```",
-            "if no_image_tools_available:",
+            "if task_contains_keywords(['研究', 'research', '调研', '分析', '了解']):",
+            "    → ALWAYS use 'mcp-deepsearch' with action 'research' or 'comprehensive_research'",
+            "    → PARAMETER: 'question' (NOT 'query'!)",
+            "    → NEVER use mcp-search-tool for research tasks",
+            "```",
+            "",
+            "### 💻 For Code/Programming Tasks:",
+            "```",
+            "if task_contains_keywords(['代码', 'code', '编程', 'python', '执行']):",
+            "    → use 'microsandbox-mcp-server' with action 'microsandbox_execute'",
+            "    → PARAMETER: 'code' (required!)",
+            "```",
+            "",
+            "### 🌐 For Web/Browser Tasks:",
+            "```",
+            "if task_contains_keywords(['网页', 'web', '浏览', '访问']):",
+            "    → use 'browser-use-mcp-server' with 'browser_navigate' or related actions",
+            "    → NAVIGATE: 'url' parameter required",
+            "    → CLICK: 'index' parameter (NOT 'selector'!)",
+            "    → INPUT: 'index' + 'text' parameters",
+            "```",
+            "",
+            "### 🔧 For Tool Installation Tasks ONLY:",
+            "```",
+            "if task_explicitly_requires_tool_installation:",
             "    if analyze_count == 0:",
             "        → use 'mcp-search-tool.analyze_tool_needs'",
             "    elif analyze_count >= 1:",
             "        → use 'mcp-search-tool.search_and_install_tools'",
             "    else:",
-            "        → proceed with available tools",
+            "        → try alternative approach with existing tools",
             "```",
             "",
-            "### 📄 For Document Processing Tasks:",
-            "```",
-            "if no_document_tools_available:",
-            "    → follow same pattern as image generation",
-            "```",
+            "### ⚠️ IMPORTANT: NEVER use search_and_install_tools with mcp-deepsearch!",
             "",
-            "### 🌐 For Web Scraping/API Tasks:",
-            "```",
-            "if browser_tools_sufficient:",
-            "    → use existing browser-navigator tools",
-            "else:",
-            "    → search for specialized API/scraping tools",
-            "```",
-            "",
-            "### 🔍 For Research/Investigation Tasks:",
-            "```",
-            "if task_requires_deep_research:",
-            "    if 'mcp-deepsearch' in available_tools:",
-            "        → use 'mcp-deepsearch' with action 'research' or 'comprehensive_research'",
-            "    else:",
-            "        → search for professional research capabilities",
-            "elif quick_info_needed:",
-            "    → use basic search or browser tools",
-            "```",
-            "",
-            "### ⚡ OPTIMIZATION RULES:",
-            "- **Never** call 'analyze_tool_needs' more than 2 times",
-            "- **Always** follow analysis recommendations",
-            "- **Prefer** using newly installed tools over workarounds",
-            "- **Complete task** once capabilities are sufficient",
+            "### ⚡ CRITICAL DECISION RULES:",
+            "1. **RESEARCH TASKS**: Use mcp-deepsearch DIRECTLY - no analysis needed",
+            "2. **CODE TASKS**: Use microsandbox-mcp-server DIRECTLY - no analysis needed",
+            "3. **WEB TASKS**: Use browser-use-mcp-server DIRECTLY - no analysis needed",
+            "4. **TOOL SEARCH**: Only use mcp-search-tool for truly specialized needs",
+            "5. **ANALYSIS LIMIT**: Never call 'analyze_tool_needs' more than 2 times",
+            "6. **INSTALLATION LIMIT**: Never repeat failed installations",
             "",
         ])
 
@@ -250,21 +263,56 @@ class ReasoningPromptBuilder(IPromptBuilder):
             '  "tool_id": "exact-tool-identifier",',
             '  "action": "exact_action_name",',
             '  "parameters": {',
-            '    "task_description": "copy task exactly if using mcp-search-tool",',
-            '    "reason": "explain why new tools are needed (for search actions)",',
-            '    "other_params": "as required by specific tool"',
+            '    "question": "for mcp-deepsearch research actions",',
+            '    "code": "for microsandbox_execute actions", ',
+            '    "url": "for browser_navigate actions",',
+            '    "index": "for browser click/input actions (NOT selector!)",',
+            '    "text": "for browser_input_text actions",',
+            '    "task_description": "for mcp-search-tool actions only"',
             '  }',
             "}",
             "```",
             "",
+            # 🔧 优化1修复：使用动态工具描述替换硬编码
+            "### 🎯 CRITICAL: Available Tools and Their Capabilities",
+            "",
+        ])
+        
+        # 插入动态工具描述，如果可用的话
+        if tool_descriptions:
+            prompt_parts.extend([
+                tool_descriptions,
+                "",
+            ])
+        else:
+            # 降级到基本工具列表
+            prompt_parts.extend([
+                "**Available Tools:**",
+                "\n".join([f"- {tool}" for tool in available_tools]),
+                "⚠️ **Warning**: Detailed tool descriptions not available, use with caution",
+                "",
+            ])
+        
+        prompt_parts.extend([
             "### 🎯 Key Guidelines:",
             "1. **thinking**: Use 4-step analysis format above",
             "2. **tool_id**: Must match available tool names exactly",
             "3. **action**: Must match tool's supported actions",
-            "4. **parameters**: Include all required parameters for the chosen action",
+            "4. **parameters**: MUST include ALL required parameters for the chosen action",
             "5. **confidence**: 0.8+ for tool installation, 0.9+ for task completion",
             "",
-            "**NO other text outside the JSON object!**",
+            "**⚠️ CRITICAL: microsandbox_execute MUST have 'code' parameter!**",
+            "**⚠️ CRITICAL: Check examples above for correct parameter format!**",
+            "",
+            "**⚠️ 严格要求：**",
+            "1. 只返回JSON对象，不要任何解释文字！",
+            "2. 不要使用markdown代码块包装JSON！",
+            "3. 不要添加任何注释或描述性文本！",
+            "4. 确保JSON格式完全正确！",
+            "5. NO explanatory text outside JSON!",
+            "**违反此约束将导致任务失败**",
+            "",
+            "**FINAL REMINDER: JSON ONLY - NO OTHER TEXT!**",
         ])
         
         return [{"role": "user", "content": "\n".join(prompt_parts)}]

@@ -138,7 +138,11 @@ class ConfigManager:
                 "toolscore_mcp": {"port": 8081},
                 "toolscore_http": {"port": 8082},
                 "python_executor": {"port": 8083},
-                "browser_navigator": {"port": 8084}
+                "browser_navigator": {"port": 8084},
+                "browser_use_server": {"port": 8084},
+                "microsandbox_server": {"port": 8090},
+                "search_tool_server": {"port": 8080},
+                "deepsearch_server": {"port": 8086}
             }
         }
     

@@ -17,6 +17,13 @@ from .tool_registry import ToolRegistry
 # from .unified_dispatcher import UnifiedDispatcher  # 精简版本中已移除
 from .core_manager import CoreManager
 
+# 🔧 【关键修复】导入统一工具管理器解决工具ID映射问题
+try:
+    from ..unified_tool_manager import get_tool_manager
+    UNIFIED_TOOL_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_TOOL_MANAGER_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -333,6 +340,24 @@ class UnifiedToolLibrary:
     
     async def get_tool_by_id(self, tool_id: str) -> Optional[ToolSpec]:
         """获取指定工具"""
+        # 🔧 【关键修复】使用统一工具管理器标准化工具ID
+        if UNIFIED_TOOL_MANAGER_AVAILABLE:
+            try:
+                tool_manager = get_tool_manager()
+                # 尝试获取标准化的工具ID
+                try:
+                    standard_id = tool_manager.get_standard_id(tool_id)
+                    # 首先尝试使用标准ID查找
+                    tool_spec = await self.tool_registry.get_tool_spec(standard_id)
+                    if tool_spec:
+                        return tool_spec
+                except ValueError:
+                    # 如果无法标准化，直接使用原始ID
+                    pass
+            except Exception as e:
+                logger.warning(f"统一工具管理器获取标准ID失败: {e}")
+        
+        # 回退到原始查找方式
         return await self.tool_registry.get_tool_spec(tool_id)
     
     async def search_tools_by_tags(self, tags: List[str]) -> List[ToolSpec]:
@@ -452,19 +477,57 @@ class UnifiedToolLibrary:
     async def execute_tool(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> ExecutionResult:
         """执行单个工具（精简版本）"""
         try:
-            # 获取工具规格
-            tool = await self.get_tool_by_id(tool_id)
+            # 🔧 【关键修复】使用统一工具管理器标准化工具ID和验证
+            original_tool_id = tool_id
+            registry_tool_id = tool_id
+            
+            if UNIFIED_TOOL_MANAGER_AVAILABLE:
+                try:
+                    tool_manager = get_tool_manager()
+                    # 验证工具调用
+                    is_valid, errors = tool_manager.validate_tool_call(tool_id, action, parameters)
+                    if not is_valid:
+                        return ExecutionResult(
+                            success=False,
+                            error_message=f"工具调用验证失败: {'; '.join(errors)}",
+                            error_type=ErrorType.TOOL_ERROR
+                        )
+                    
+                    # 获取标准化的工具ID
+                    try:
+                        standard_id = tool_manager.get_standard_id(tool_id)
+                        # 查找注册表中对应的工具ID（可能是旧格式）
+                        # 检查是否需要映射到旧格式
+                        legacy_mappings = {
+                            'microsandbox': 'microsandbox-mcp-server',
+                            'browser_use': 'browser-use-mcp-server', 
+                            'deepsearch': 'mcp-deepsearch',
+                            'mcp-search-tool': 'mcp-search-tool'  # 保持不变
+                        }
+                        registry_tool_id = legacy_mappings.get(standard_id, standard_id)
+                    except ValueError:
+                        # 如果无法标准化，使用原始ID
+                        pass
+                except Exception as e:
+                    logger.warning(f"统一工具管理器验证失败: {e}")
+            
+            # 获取工具规格（使用注册表ID）
+            tool = await self.tool_registry.get_tool_spec(registry_tool_id)
             if not tool:
-                return ExecutionResult(
-                    success=False,
-                    error_message=f"工具 {tool_id} 未找到",
-                    error_type=ErrorType.TOOL_ERROR
-                )
+                # 如果注册表ID失败，尝试原始ID
+                tool = await self.tool_registry.get_tool_spec(original_tool_id)
+                if not tool:
+                    return ExecutionResult(
+                        success=False,
+                        error_message=f"工具 {original_tool_id} 未找到（已尝试映射到 {registry_tool_id}）",
+                        error_type=ErrorType.TOOL_ERROR
+                    )
+                registry_tool_id = original_tool_id
             
             # 根据工具类型执行
             if tool.tool_type == ToolType.MCP_SERVER:
                 # MCP服务器工具通过直接连接执行
-                return await self.mcp_server_registry.execute_tool(tool_id, action, parameters)
+                return await self.mcp_server_registry.execute_tool(registry_tool_id, action, parameters)
             else:
                 # Function工具直接执行（简化实现）
                 return ExecutionResult(

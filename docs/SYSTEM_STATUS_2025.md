@@ -117,7 +117,7 @@ class PlanningStrategy(Enum):
   "most_used_tools": [
     "mcp-deepsearch.comprehensive_research",
     "microsandbox-mcp-server.microsandbox_execute",
-    "browser-use-mcp-server.get_page_content"
+    "browser-use-mcp-server.browser_extract_content"
   ]
 }
 ```

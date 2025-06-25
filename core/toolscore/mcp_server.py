@@ -15,6 +15,7 @@ import os
 
 from .interfaces import ToolSpec, ToolType, RegistrationResult, ExecutionResult, ToolCapability, MCPServerSpec, FunctionToolSpec, ErrorType
 from .unified_tool_library import UnifiedToolLibrary
+from .mcp_auto_registration import auto_register_mcp_servers  # 🔧 新增：MCP自动注册
 
 logger = logging.getLogger(__name__)
 
@@ -447,6 +448,14 @@ class MCPServer:
     async def websocket_handler(self, websocket: WebSocketServerProtocol, path: str):
         """WebSocket连接处理函数"""
         logger.info(f"Client connected to {self.server_name} MCP Server at path {path}: {websocket.remote_address}")
+        
+        # 改进路径验证，允许更多有效路径
+        valid_paths = ['/', '/websocket', '/mcp', '']
+        if path not in valid_paths:
+            logger.warning(f"Invalid path {path} for {self.server_name} MCP Server, closing connection")
+            await websocket.close(code=4000, reason="Invalid path")
+            return
+        
         try:
             async for message in websocket:
                 # _handle_message 现在接受 Union[str, bytes]，所以这里不需要额外的解码
@@ -556,6 +565,17 @@ class MCPServer:
                 logger.info(f"[{self.server_name}] Initializing UnifiedToolLibrary...")
                 await self.unified_tool_library.initialize()
                 logger.info(f"[{self.server_name}] UnifiedToolLibrary initialized.")
+                
+                # 🔧 新增：自动注册MCP服务器到工具库
+                logger.info(f"[{self.server_name}] Auto-registering MCP servers...")
+                try:
+                    registration_success = await auto_register_mcp_servers(self.unified_tool_library)
+                    if registration_success:
+                        logger.info(f"[{self.server_name}] All MCP servers registered successfully.")
+                    else:
+                        logger.warning(f"[{self.server_name}] Some MCP servers failed to register.")
+                except Exception as e:
+                    logger.error(f"[{self.server_name}] Failed to auto-register MCP servers: {e}", exc_info=True)
 
             logger.info(f"{self.server_name} MCP Server started successfully on {bind_host}:{port} (Original endpoint: {self.endpoint}) with ping_interval=30, ping_timeout=60")
             

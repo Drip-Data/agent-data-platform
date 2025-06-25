@@ -400,18 +400,38 @@ class ParameterValidator:
         optional_params = schema["optional"]
         patterns = schema["patterns"]
         
-        # 检查缺失的必需参数
+        # 🔧 增强的必需参数检查 - 处理更多边界情况
         missing_required = []
         for param in required_params:
-            if param not in parameters or parameters[param] is None or parameters[param] == "":
+            param_value = parameters.get(param)
+            # 检查空值、None、空字符串、空列表、空字典
+            if (param_value is None or 
+                param_value == "" or 
+                param_value == [] or 
+                param_value == {} or
+                (isinstance(param_value, str) and param_value.strip() == "")):
                 missing_required.append(param)
         
-        # 检查无效参数（不在required或optional中）
+        # 🔧 增强的参数类型和有效性检查
         valid_params = set(required_params + optional_params)
         invalid_params = []
-        for param in parameters:
+        type_errors = []
+        
+        for param, value in parameters.items():
             if param not in valid_params:
                 invalid_params.append(param)
+            else:
+                # 🔍 参数类型验证
+                try:
+                    type_error = self._validate_parameter_type(tool_id, action, param, value, patterns)
+                    if type_error:
+                        type_errors.append(f"{param}: {type_error}")
+                except Exception as e:
+                    logger.warning(f"参数类型验证异常 {param}: {e}")
+        
+        # 将类型错误也视为无效参数
+        if type_errors:
+            logger.warning(f"参数类型错误: {type_errors}")
         
         # 生成参数补齐建议
         suggestions = {}
@@ -595,6 +615,74 @@ class ParameterValidator:
         
         return validated
     
+    def _validate_parameter_type(self, tool_id: str, action: str, param: str, value: Any, patterns: Dict[str, Any]) -> Optional[str]:
+        """验证参数类型是否正确
+        
+        Returns:
+            str: 错误信息，如果验证通过则返回None
+        """
+        try:
+            # 🔧 基于工具和动作的特定类型检查
+            if tool_id == "browser_use":
+                if param == "index" and not isinstance(value, int):
+                    try:
+                        int(value)  # 尝试转换
+                    except (ValueError, TypeError):
+                        return f"index必须是整数，得到: {type(value).__name__}"
+                elif param == "url" and isinstance(value, str):
+                    if not value.startswith(('http://', 'https://', 'file://')):
+                        return "url必须以 http://, https:// 或 file:// 开头"
+                elif param == "text" and not isinstance(value, str):
+                    return f"text必须是字符串，得到: {type(value).__name__}"
+                    
+            elif tool_id == "microsandbox":
+                if param == "code" and not isinstance(value, str):
+                    return f"code必须是字符串，得到: {type(value).__name__}"
+                elif param == "timeout" and not isinstance(value, (int, float)):
+                    try:
+                        float(value)  # 尝试转换
+                    except (ValueError, TypeError):
+                        return f"timeout必须是数字，得到: {type(value).__name__}"
+                        
+            elif tool_id == "deepsearch":
+                if param == "question" and not isinstance(value, str):
+                    return f"question必须是字符串，得到: {type(value).__name__}"
+                elif param == "max_results" and not isinstance(value, int):
+                    try:
+                        int(value)  # 尝试转换
+                    except (ValueError, TypeError):
+                        return f"max_results必须是整数，得到: {type(value).__name__}"
+            
+            # 🔧 通用类型检查（基于patterns）
+            if param in patterns:
+                pattern_value = patterns[param]
+                pattern_type = type(pattern_value)
+                
+                # 如果pattern有明确的类型，验证参数类型
+                if pattern_type in (int, float, str, bool, list, dict):
+                    if not isinstance(value, pattern_type):
+                        # 尝试类型转换
+                        if pattern_type == int and isinstance(value, (str, float)):
+                            try:
+                                int(value)
+                            except (ValueError, TypeError):
+                                return f"参数{param}应为{pattern_type.__name__}类型，得到: {type(value).__name__}"
+                        elif pattern_type == float and isinstance(value, (str, int)):
+                            try:
+                                float(value)
+                            except (ValueError, TypeError):
+                                return f"参数{param}应为{pattern_type.__name__}类型，得到: {type(value).__name__}"
+                        elif pattern_type == str and not isinstance(value, str):
+                            return f"参数{param}应为字符串类型，得到: {type(value).__name__}"
+                        elif pattern_type in (list, dict) and not isinstance(value, pattern_type):
+                            return f"参数{param}应为{pattern_type.__name__}类型，得到: {type(value).__name__}"
+            
+            return None  # 验证通过
+            
+        except Exception as e:
+            logger.warning(f"参数类型验证异常: {e}")
+            return None  # 验证异常时不报错，继续执行
+    
     def auto_complete_parameters(self, tool_id: str, action: str, 
                                parameters: Dict[str, Any], task_description: str = "") -> Dict[str, Any]:
         """
@@ -621,7 +709,49 @@ class ParameterValidator:
                 completed_params[param] = suggestion
                 logger.info(f"🔧 自动补齐参数 {param}: {suggestion}")
         
+        # 🔧 新增：自动修复参数类型错误
+        completed_params = self._auto_fix_parameter_types(tool_id, action, completed_params)
+        
         return completed_params
+    
+    def _auto_fix_parameter_types(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """自动修复参数类型错误"""
+        fixed_params = parameters.copy()
+        
+        try:
+            if tool_id not in self.tool_schemas or action not in self.tool_schemas[tool_id]:
+                return fixed_params
+                
+            patterns = self.tool_schemas[tool_id][action]["patterns"]
+            
+            for param, value in fixed_params.items():
+                if param in patterns:
+                    pattern_value = patterns[param]
+                    pattern_type = type(pattern_value)
+                    
+                    # 尝试自动类型转换
+                    if not isinstance(value, pattern_type):
+                        try:
+                            if pattern_type == int:
+                                fixed_params[param] = int(value)
+                                logger.info(f"🔧 自动转换参数类型 {param}: {value} -> {fixed_params[param]} (int)")
+                            elif pattern_type == float:
+                                fixed_params[param] = float(value)
+                                logger.info(f"🔧 自动转换参数类型 {param}: {value} -> {fixed_params[param]} (float)")
+                            elif pattern_type == str and not isinstance(value, str):
+                                fixed_params[param] = str(value)
+                                logger.info(f"🔧 自动转换参数类型 {param}: {value} -> {fixed_params[param]} (str)")
+                            elif pattern_type == bool and isinstance(value, str):
+                                fixed_params[param] = value.lower() in ('true', '1', 'yes', 'on')
+                                logger.info(f"🔧 自动转换参数类型 {param}: {value} -> {fixed_params[param]} (bool)")
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"⚠️ 无法自动转换参数类型 {param}: {value} -> {pattern_type.__name__}: {e}")
+            
+            return fixed_params
+            
+        except Exception as e:
+            logger.error(f"❌ 自动修复参数类型失败: {e}")
+            return parameters
     
     def get_valid_actions(self, tool_id: str) -> List[str]:
         """获取工具的有效动作列表"""

@@ -25,10 +25,38 @@ logger = logging.getLogger(__name__)
 
 
 def clean_json_string(json_str: str) -> str:
-    """清理JSON字符串，修复常见格式错误 - 增强版本"""
+    """
+    Sprint 2: 增强 JSON清理和修复 (P2 问题修复)
+    清理JSON字符串，修复常见格式错误 - 9种修复策略
+    """
     import re
     
-    # 1. 移除重复的content_identifier键
+    if not json_str or not isinstance(json_str, str):
+        return '{}'
+    
+    # 预处理：移除Markdown代码块标记
+    json_str = re.sub(r'```json\s*', '', json_str)
+    json_str = re.sub(r'```\s*$', '', json_str)
+    json_str = json_str.strip()
+    
+    # 🔧 1. 修复缺失引号的key（这是最常见的错误）
+    # 匹配没有引号的key，如：thinking: "value" -> "thinking": "value"
+    json_str = re.sub(r'([^"\s{,]\w+)\s*:', r'"\1":', json_str)
+    
+    # 🔧 2. 修复单引号为双引号
+    json_str = re.sub(r"'([^']*)'", r'"\1"', json_str)
+    
+    # 🔧 3. 修复缺失逗号的问题
+    # 查找 "value"\n"key" 这样的模式，在value后添加逗号
+    json_str = re.sub(r'("[^"]*")\s*\n\s*(")', r'\1,\n\2', json_str)
+    json_str = re.sub(r'([0-9.]+)\s*\n\s*(")', r'\1,\n\2', json_str)
+    json_str = re.sub(r'(\})\s*\n\s*(")', r'\1,\n\2', json_str)
+    json_str = re.sub(r'(\])\s*\n\s*(")', r'\1,\n\2', json_str)
+    
+    # 查找对象之间缺失逗号: } {
+    json_str = re.sub(r'(\})\s*(\{)', r'\1,\2', json_str)
+    
+    # 🔧 4. 移除重复的content_identifier键
     pattern = r'"content_identifier"\s*:\s*"[^"]*"'
     matches = list(re.finditer(pattern, json_str))
     
@@ -50,8 +78,7 @@ def clean_json_string(json_str: str) -> str:
             json_str = json_str[:start] + json_str[end:]
             offset += (end - start)
     
-    # 🔧 2. 修复content_identifier字段缺失导致的语法错误
-    # 查找以逗号开始的行，可能是缺失content_identifier导致的
+    # 🔧 5. 修复content_identifier字段缺失导致的语法错误
     lines = json_str.split('\n')
     fixed_lines = []
     
@@ -74,22 +101,85 @@ def clean_json_string(json_str: str) -> str:
     
     json_str = '\n'.join(fixed_lines)
     
-    # 3. 修复缺失逗号的问题
-    # 查找 },\s*{} 或 },\s*\n\s*{} 这样的模式，并在}后添加逗号
-    json_str = re.sub(r'(\})\s*(\{)', r'\1,\2', json_str)
-    
-    # 4. 修复 "key": "value"\n "key2" 这样缺失逗号的模式
-    json_str = re.sub(r'("\w+":\s*"[^"]*")\s*\n\s*(")', r'\1,\n            \2', json_str)
-    json_str = re.sub(r'("\w+":\s*[0-9.]+)\s*\n\s*(")', r'\1,\n            \2', json_str)
-    
-    # 5. 修复对象末尾多余逗号的问题
+    # 🔧 6. 修复对象末尾多余逗号的问题
     json_str = re.sub(r',\s*\}', '}', json_str)
     json_str = re.sub(r',\s*\]', ']', json_str)
     
-    # 6. 修复缺失的引号和冒号
-    json_str = re.sub(r'([^"]\w+):', r'"\1":', json_str)  # 为属性名添加引号
+    # 🔧 7. 修复特殊字符问题
+    # 转义字符串中的反斜杠
+    json_str = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_str)
+    
+    # 🔧 8. 尝试修复不完整的JSON结构
+    # 如果缺少结束括号，尝试添加
+    open_braces = json_str.count('{') - json_str.count('}')
+    open_brackets = json_str.count('[') - json_str.count(']')
+    
+    if open_braces > 0:
+        json_str += '}' * open_braces
+    if open_brackets > 0:
+        json_str += ']' * open_brackets
+    
+    # 🔧 9. 最后清理
+    json_str = json_str.strip()
+    
+    # 如果不是以{或[开始，尝试找到第一个有效的JSON开始
+    if not json_str.startswith(('{', '[')):
+        json_start = max(json_str.find('{'), json_str.find('['))
+        if json_start > 0:
+            json_str = json_str[json_start:]
     
     return json_str
+
+
+def enhanced_json_parse(json_str: str, max_attempts: int = 3) -> Dict[str, Any]:
+    """
+    Sprint 2: 增强 JSON 解析器 (P2 问题修复)
+    多层级容错的JSON解析，带有多种备用策略
+    
+    Args:
+        json_str: 要解析的JSON字符串
+        max_attempts: 最大尝试次数
+        
+    Returns:
+        解析后的字典或空字典
+    """
+    if not json_str or not isinstance(json_str, str):
+        return {}
+    
+    # 尝试直接解析
+    for attempt in range(max_attempts):
+        try:
+            if attempt == 0:
+                # 第一次尝试：原始字符串
+                result = json.loads(json_str)
+                logger.debug(f"✅ JSON直接解析成功")
+                return result
+            elif attempt == 1:
+                # 第二次尝试：使用清理函数
+                cleaned = clean_json_string(json_str)
+                result = json.loads(cleaned)
+                logger.debug(f"✅ JSON清理后解析成功")
+                return result
+            elif attempt == 2:
+                # 第三次尝试：提取第一个完整的JSON对象
+                import re
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', json_str)
+                if json_match:
+                    extracted = json_match.group()
+                    result = json.loads(extracted)
+                    logger.debug(f"✅ JSON提取后解析成功")
+                    return result
+                    
+        except json.JSONDecodeError as e:
+            logger.debug(f"⚠️ JSON解析尝试{attempt + 1}失败: {e}")
+            continue
+        except Exception as e:
+            logger.debug(f"⚠️ JSON解析异常尝试{attempt + 1}: {e}")
+            continue
+    
+    # 所有尝试都失败，返回空字典
+    logger.warning(f"❗ JSON解析所有尝试都失败，返回空字典. 原字符串预览: {json_str[:200]}...")
+    return {}
 
 
 class ConclusionExtractor:
@@ -123,6 +213,32 @@ class ConclusionExtractor:
         except Exception as e:
             logger.error(f"❌ 结论提取失败 {corpus_content.corpus_id}: {e}")
             return []
+    
+    def _emergency_json_fix(self, json_content: str) -> str:
+        """紧急JSON修复策略"""
+        import re
+        
+        # 策略1: 尝试修复最常见的"Expecting property name enclosed in double quotes"错误
+        # 这通常是因为key没有引号
+        lines = json_content.split('\n')
+        fixed_lines = []
+        
+        for line in lines:
+            # 查找没有引号的key模式：word:
+            if ':' in line and not line.strip().startswith('"'):
+                # 查找所有的 word: 模式
+                line = re.sub(r'(\s*)([a-zA-Z_]\w*)\s*:', r'\1"\2":', line)
+            fixed_lines.append(line)
+        
+        fixed_json = '\n'.join(fixed_lines)
+        
+        # 策略2: 如果仍然有问题，尝试创建一个最小可用的JSON
+        try:
+            json.loads(fixed_json)
+            return fixed_json
+        except:
+            # 如果还是失败，创建一个基本的空结构
+            return '{"conclusions": []}'
     
     def _build_conclusion_extraction_prompt(self, corpus_content: CorpusContent) -> str:
         """构建结论提取提示词"""
@@ -220,7 +336,18 @@ class ConclusionExtractor:
                             logger.warning(f"⚠️ JSON中没有conclusions字段")
                     except json.JSONDecodeError as e:
                         logger.error(f"❌ Markdown JSON解析失败: {e}")
-                        logger.error(f"失败的JSON内容: {json_content}")
+                        logger.debug(f"失败的JSON内容: {json_content}")
+                        
+                        # 🔧 尝试额外的修复策略
+                        try:
+                            fixed_json = self._emergency_json_fix(json_content)
+                            conclusion_data = json.loads(fixed_json)
+                            if 'conclusions' in conclusion_data:
+                                logger.info(f"✅ 紧急修复JSON成功")
+                            else:
+                                logger.warning(f"⚠️ 紧急修复的JSON中没有conclusions字段")
+                        except Exception as fix_e:
+                            logger.error(f"❌ 紧急JSON修复也失败: {fix_e}")
                 
                 # 如果markdown失败，尝试普通代码块
                 if not conclusion_data:

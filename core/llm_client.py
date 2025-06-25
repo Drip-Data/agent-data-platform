@@ -6,6 +6,7 @@ LLM客户端统一接口
 
 import os
 import logging
+import json
 from typing import Dict, Any, Optional, List
 from enum import Enum
 import time
@@ -292,19 +293,29 @@ class LLMClient:
 
     async def _call_api(self, messages: List[Dict[str, Any]]) -> str: # 修改签名
         """调用相应的API，并记录完整的交互信息"""
+        # 🔧 新增：预调用数据验证 - 防止数据类型错误传播
+        try:
+            validated_messages = self._validate_input_messages(messages)
+        except Exception as validation_error:
+            logger.error(f"输入消息验证失败: {validation_error}")
+            raise ValueError(f"LLM API调用参数无效: {validation_error}")
+        
         # 🔍 新增：记录API调用信息
         logger.info("🚀 LLM API调用开始")
         logger.info(f"   提供商: {self.provider.value}")
-        # logger.info(f"   Prompt长度: {len(prompt)} 字符") # 移除，因为现在是消息列表
+        logger.info(f"   消息数量: {len(validated_messages)}")
         
         # 记录prompt内容（调试模式下记录更多详情）
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"   完整Messages内容:\n{messages}") # 修改为Messages
+            logger.debug(f"   完整Messages内容:\n{json.dumps(validated_messages, ensure_ascii=False, indent=2)}")
         else:
-            # 生产模式下只记录前后片段
-            # prompt_preview = prompt[:200] + "..." + prompt[-100:] if len(prompt) > 300 else prompt
-            # logger.info(f"   Prompt预览: {prompt_preview}")
-            pass # 暂时不记录预览，因为消息列表预览复杂
+            # 生产模式下记录消息概览
+            msg_summary = []
+            for i, msg in enumerate(validated_messages):
+                role = msg.get("role", "unknown")
+                content_len = len(str(msg.get("content", "")))
+                msg_summary.append(f"{role}({content_len}字符)")
+            logger.info(f"   消息概览: {' -> '.join(msg_summary)}")
         
         start_time = time.time()
         
@@ -314,13 +325,25 @@ class LLMClient:
             
             # 获取默认模型并传递给 generate_response
             model_name = self.provider_instance.get_default_model()
-            response = await self.provider_instance.generate_response(messages=messages, model=model_name) # 直接传递messages
+            response = await self.provider_instance.generate_response(messages=validated_messages, model=model_name) # 使用验证后的消息
             
-            # 🔍 新增：记录API响应信息
+            # 🔍 新增：记录API响应信息和数据流追踪
             duration = time.time() - start_time
             logger.info("✅ LLM API调用成功")
             logger.info(f"   响应时间: {duration:.2f}秒")
             logger.info(f"   响应长度: {len(response)} 字符")
+            logger.info(f"   响应类型: {type(response)}")
+            
+            # 🔍 数据流验证
+            if not isinstance(response, str):
+                logger.warning(f"⚠️ LLM API返回类型异常: {type(response)}, 尝试转换为字符串")
+                response = str(response) if response is not None else ""
+            
+            # 检查响应是否为空或异常
+            if not response or response.strip() == "":
+                logger.warning("⚠️ LLM API返回空响应")
+            elif len(response) > 10000:
+                logger.warning(f"⚠️ LLM API返回响应过长: {len(response)} 字符")
             
             # 记录响应内容
             if logger.isEnabledFor(logging.DEBUG):
@@ -351,3 +374,71 @@ class LLMClient:
             logger.error(f"   错误信息: {str(e)}")
             # 对于非HTTPStatusError，可能没有response属性
             raise
+
+    def _validate_input_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """验证和清理输入消息，防止数据类型错误传播"""
+        if not isinstance(messages, list):
+            raise ValueError(f"messages必须是列表类型，实际类型: {type(messages)}")
+        
+        validated_messages = []
+        for i, msg in enumerate(messages):
+            try:
+                # 确保每个消息都是字典
+                if not isinstance(msg, dict):
+                    logger.warning(f"消息 {i} 不是字典类型: {type(msg)}, 尝试转换")
+                    if hasattr(msg, '__dict__'):
+                        msg = msg.__dict__
+                    else:
+                        raise ValueError(f"消息 {i} 无法转换为字典")
+                
+                # 验证必需字段
+                if "role" not in msg:
+                    raise ValueError(f"消息 {i} 缺少'role'字段")
+                if "content" not in msg:
+                    raise ValueError(f"消息 {i} 缺少'content'字段")
+                
+                # 清理和验证字段值
+                validated_msg = {
+                    "role": str(msg["role"]).strip(),
+                    "content": self._validate_and_clean_content(msg["content"], i)
+                }
+                
+                # 验证role值
+                valid_roles = {"user", "assistant", "system"}
+                if validated_msg["role"] not in valid_roles:
+                    logger.warning(f"消息 {i} 的role无效: {validated_msg['role']}, 设置为'user'")
+                    validated_msg["role"] = "user"
+                
+                validated_messages.append(validated_msg)
+                
+            except Exception as e:
+                logger.error(f"验证消息 {i} 失败: {e}, 消息内容: {msg}")
+                # 跳过无效消息，但如果所有消息都无效则抛出异常
+                continue
+        
+        if not validated_messages:
+            raise ValueError("所有输入消息都无效，无法进行API调用")
+        
+        logger.debug(f"消息验证完成: {len(messages)} -> {len(validated_messages)}")
+        return validated_messages
+    
+    def _validate_and_clean_content(self, content: Any, msg_index: int) -> str:
+        """验证和清理消息内容"""
+        if content is None:
+            return ""
+        
+        if isinstance(content, str):
+            return content
+        
+        if isinstance(content, (dict, list)):
+            try:
+                # 将复杂对象转换为JSON字符串
+                json_str = json.dumps(content, ensure_ascii=False, indent=2)
+                logger.debug(f"消息 {msg_index} 的复杂content已转换为JSON字符串")
+                return json_str
+            except Exception as e:
+                logger.warning(f"消息 {msg_index} 的content JSON序列化失败: {e}")
+                return str(content)
+        
+        # 其他类型直接转换为字符串
+        return str(content)

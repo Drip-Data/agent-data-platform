@@ -236,7 +236,7 @@ class BrowserUseMCPServer:
                 )
                 
                 self.browser = Browser(config=browser_config)
-                await self.browser.start()
+                # Browser对象不需要显式调用start()，会在使用时自动启动
                 logger.info("Browser initialized with enhanced configuration")
                 
             except Exception as e:
@@ -247,7 +247,7 @@ class BrowserUseMCPServer:
                     disable_security=True
                 )
                 self.browser = Browser(config=browser_config)
-                await self.browser.start()
+                # Browser对象不需要显式调用start()，会在使用时自动启动
                 logger.info("Browser initialized with basic configuration")
             
         if self.controller is None:

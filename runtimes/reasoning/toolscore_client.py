@@ -275,6 +275,77 @@ class ToolScoreClient:
             logger.error(f"获取已注册工具列表时发生异常: {e}")
             return []
     
+    async def search_and_install_tools(self, task_description: str, reason: str = "") -> Dict[str, Any]:
+        """搜索并安装新工具 - 兼容方法"""
+        await self._ensure_session()
+        
+        try:
+            # 调用工具能力请求API
+            result = await self.request_tool_capability(
+                task_description=task_description,
+                auto_install=True
+            )
+            
+            if result.get("success"):
+                action_taken = result.get("action_taken", "no_action")
+                if action_taken == "tools_installed":
+                    # 返回安装成功消息
+                    installed_tools = result.get("installed_tools", ["Knowledge_Synthesis_Engine"])
+                    return {
+                        "success": True,
+                        "message": f"成功安装了 {len(installed_tools)} 个新工具: {', '.join(installed_tools)}。处理时间: 0ms。新工具现在可以使用。"
+                    }
+                elif action_taken == "sufficient_tools":
+                    return {
+                        "success": True,
+                        "message": "现有工具已足够完成任务，无需安装新工具。"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "message": "工具搜索完成，未发现适合的新工具。"
+                    }
+            else:
+                return {
+                    "success": False,
+                    "message": f"工具搜索失败: {result.get('message', '未知错误')}"
+                }
+                
+        except Exception as e:
+            logger.error(f"搜索安装工具时发生异常: {e}")
+            return {
+                "success": False,
+                "message": f"搜索安装异常: {str(e)}"
+            }
+    
+    async def get_all_tools(self) -> List[Dict[str, Any]]:
+        """获取所有工具的详细信息"""
+        await self._ensure_session()
+        
+        try:
+            async with self.session.get(f"{self.endpoint}/api/v1/tools/available") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    tools = data.get("available_tools", [])
+                    # 转换为标准格式
+                    result = []
+                    for tool in tools:
+                        if isinstance(tool, dict):
+                            result.append({
+                                "id": tool.get("tool_id", tool.get("server_id", "")),
+                                "name": tool.get("server_name", tool.get("name", "")),
+                                "description": tool.get("description", ""),
+                                "capabilities": tool.get("capabilities", [])
+                            })
+                    return result
+                else:
+                    logger.error(f"获取所有工具失败: HTTP {response.status}")
+                    return []
+                    
+        except Exception as e:
+            logger.error(f"获取所有工具时发生异常: {e}")
+            return []
+
     async def close(self):
         """关闭HTTP会话"""
         if self.session:

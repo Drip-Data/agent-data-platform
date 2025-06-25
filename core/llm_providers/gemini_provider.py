@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from typing import Any, Dict, List, Optional
 import httpx
 import tiktoken # Gemini也可能需要tiktoken来计算token
@@ -54,15 +55,47 @@ class GeminiProvider(ILLMProvider):
             logger.warning(f"模型 {model} 不受 GeminiProvider 支持，将使用默认模型 {self._default_model}。")
             model = self._default_model
         
-        # 将消息列表转换为Gemini的contents格式
+        # 🔧 修复消息格式转换 - 安全处理数据类型
+        logger.debug(f"🔍 Gemini消息转换开始 - 输入消息数: {len(messages)}")
         contents = []
-        for msg in messages:
-            if msg["role"] == "user":
-                contents.append({"parts": [{"text": msg["content"]}]})
-            elif msg["role"] == "assistant":
-                # Gemini的assistant角色需要特殊处理，通常是模型输出
-                # 这里简化处理，如果需要更复杂的对话历史，可能需要调整
-                contents.append({"parts": [{"text": msg["content"]}]})
+        for i, msg in enumerate(messages):
+            try:
+                # 确保msg是字典类型
+                if not isinstance(msg, dict):
+                    logger.error(f"消息 {i} 不是字典类型: {type(msg)}, 内容: {msg}")
+                    continue
+                
+                # 安全获取role和content
+                role = msg.get("role")
+                content = msg.get("content")
+                
+                if not role or not content:
+                    logger.warning(f"消息 {i} 缺少必要字段 - role: {role}, content: {content}")
+                    continue
+                
+                # 确保content是字符串
+                if not isinstance(content, str):
+                    if isinstance(content, (dict, list)):
+                        # 如果content是复杂对象，转换为JSON字符串
+                        content = json.dumps(content, ensure_ascii=False)
+                        logger.debug(f"将复杂content转换为字符串: {content[:100]}...")
+                    else:
+                        content = str(content)
+                
+                if role == "user":
+                    contents.append({"parts": [{"text": content}]})
+                elif role == "assistant":
+                    # Gemini的assistant角色需要特殊处理，通常是模型输出
+                    # 这里简化处理，如果需要更复杂的对话历史，可能需要调整
+                    contents.append({"parts": [{"text": content}]})
+                else:
+                    logger.warning(f"未知的消息角色: {role}, 跳过该消息")
+                    
+            except Exception as e:
+                logger.error(f"处理消息 {i} 时出错: {e}, 消息内容: {msg}")
+                continue
+        
+        logger.debug(f"🔍 Gemini消息转换完成 - 转换成功: {len(contents)}/{len(messages)}")
         
         payload = {
             "contents": contents,
@@ -83,6 +116,8 @@ class GeminiProvider(ILLMProvider):
         # if tool_choice:
         #     payload["tool_choice"] = tool_choice
 
+        logger.debug(f"🔍 Gemini API调用开始 - 模型: {model}, payload大小: {len(json.dumps(payload))} 字符")
+        
         try:
             # 🔧 添加DNS解析重试机制 (从llm_client.py中迁移过来)
             from httpx import Timeout
@@ -103,30 +138,59 @@ class GeminiProvider(ILLMProvider):
             
             result = response.json()
             
-            # 检查响应格式 (从llm_client.py中迁移过来)
-            if "candidates" not in result:
-                raise ValueError(f"Invalid Gemini response format: missing 'candidates' field")
-            
-            if not result["candidates"]:
-                raise ValueError(f"Empty candidates in Gemini response")
+            # 🔧 增强响应格式检查 - 安全处理嵌套数据结构
+            try:
+                logger.debug(f"Gemini API原始响应结构: {json.dumps(result, ensure_ascii=False, indent=2)[:500]}...")
                 
-            candidate = result["candidates"][0]
-            if "content" not in candidate:
-                raise ValueError(f"Invalid candidate format: missing 'content' field")
+                # 检查响应格式 - 安全字典访问
+                if not isinstance(result, dict):
+                    raise ValueError(f"响应不是字典类型: {type(result)}")
                 
-            content = candidate["content"]
-            if "parts" not in content:
-                raise ValueError(f"Invalid content format: missing 'parts' field")
+                if "candidates" not in result:
+                    raise ValueError(f"响应缺少'candidates'字段: {list(result.keys())}")
                 
-            if not content["parts"]:
-                raise ValueError(f"Empty parts in content")
+                candidates = result["candidates"]
+                if not isinstance(candidates, list) or not candidates:
+                    raise ValueError(f"candidates字段无效: {type(candidates)}, 长度: {len(candidates) if isinstance(candidates, list) else 'N/A'}")
+                    
+                candidate = candidates[0]
+                if not isinstance(candidate, dict):
+                    raise ValueError(f"候选项不是字典类型: {type(candidate)}")
                 
-            part = content["parts"][0]
-            if "text" not in part:
-                raise ValueError(f"Invalid part format: missing 'text' field")
+                if "content" not in candidate:
+                    raise ValueError(f"候选项缺少'content'字段: {list(candidate.keys())}")
+                    
+                content = candidate["content"]
+                if not isinstance(content, dict):
+                    raise ValueError(f"content不是字典类型: {type(content)}")
                 
-            await temp_client.aclose()
-            return part["text"]
+                if "parts" not in content:
+                    raise ValueError(f"content缺少'parts'字段: {list(content.keys())}")
+                    
+                parts = content["parts"]
+                if not isinstance(parts, list) or not parts:
+                    raise ValueError(f"parts字段无效: {type(parts)}, 长度: {len(parts) if isinstance(parts, list) else 'N/A'}")
+                    
+                part = parts[0]
+                if not isinstance(part, dict):
+                    raise ValueError(f"part不是字典类型: {type(part)}")
+                
+                if "text" not in part:
+                    raise ValueError(f"part缺少'text'字段: {list(part.keys())}")
+                    
+                text_content = part["text"]
+                if not isinstance(text_content, str):
+                    logger.warning(f"text字段不是字符串类型: {type(text_content)}, 尝试转换")
+                    text_content = str(text_content)
+                
+                await temp_client.aclose()
+                logger.info(f"✅ Gemini响应解析成功，内容长度: {len(text_content)}")
+                return text_content
+                
+            except Exception as parse_error:
+                logger.error(f"Gemini响应解析失败: {parse_error}")
+                logger.error(f"原始响应内容: {json.dumps(result, ensure_ascii=False, indent=2)}")
+                raise ValueError(f"Gemini响应格式解析错误: {parse_error}")
             
         except httpx.HTTPStatusError as e:
             logger.error(f"Gemini API HTTP 错误: {e.response.status_code} - {e.response.text}")
@@ -150,17 +214,28 @@ class GeminiProvider(ILLMProvider):
                     response.raise_for_status()
                     result = response.json()
                     
-                    # 同样的格式检查
-                    if ("candidates" in result and result["candidates"] and 
-                        "content" in result["candidates"][0] and
-                        "parts" in result["candidates"][0]["content"] and
-                        result["candidates"][0]["content"]["parts"] and
-                        "text" in result["candidates"][0]["content"]["parts"][0]):
-                        await backup_client.aclose()
-                        logger.info("✅ 使用备用网络配置成功恢复")
-                        return result["candidates"][0]["content"]["parts"][0]["text"]
-                    else:
-                        raise ValueError(f"Invalid backup response format")
+                    # 🔧 备用响应的安全格式检查
+                    try:
+                        if (isinstance(result, dict) and
+                            "candidates" in result and isinstance(result["candidates"], list) and
+                            len(result["candidates"]) > 0 and isinstance(result["candidates"][0], dict) and
+                            "content" in result["candidates"][0] and isinstance(result["candidates"][0]["content"], dict) and
+                            "parts" in result["candidates"][0]["content"] and isinstance(result["candidates"][0]["content"]["parts"], list) and
+                            len(result["candidates"][0]["content"]["parts"]) > 0 and isinstance(result["candidates"][0]["content"]["parts"][0], dict) and
+                            "text" in result["candidates"][0]["content"]["parts"][0]):
+                            
+                            backup_text = result["candidates"][0]["content"]["parts"][0]["text"]
+                            if not isinstance(backup_text, str):
+                                backup_text = str(backup_text)
+                            
+                            await backup_client.aclose()
+                            logger.info("✅ 使用备用网络配置成功恢复")
+                            return backup_text
+                        else:
+                            raise ValueError(f"备用响应格式无效: {list(result.keys()) if isinstance(result, dict) else type(result)}")
+                    except Exception as backup_parse_error:
+                        logger.error(f"备用响应解析失败: {backup_parse_error}")
+                        raise ValueError(f"备用响应格式解析错误: {backup_parse_error}")
                         
                 except Exception as backup_e:
                     logger.error(f"备用网络配置也失败: {backup_e}")

@@ -1,0 +1,100 @@
+{
+  "service_id": "deepsearch",
+  "name": "DeepSearch MCP Server",
+  "description": "深度搜索和分析服务",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "host": "localhost",
+  "port": 8086,
+  "capabilities": [
+    {
+      "name": "research",
+      "description": "专业级深度研究",
+      "parameters": {
+        "question": {
+          "type": "string",
+          "description": "研究问题或查询"
+        },
+        "initial_queries": {
+          "type": "array",
+          "description": "初始查询列表"
+        },
+        "max_loops": {
+          "type": "integer",
+          "description": "最大循环次数"
+        },
+        "reasoning_model": {
+          "type": "string",
+          "description": "推理模型"
+        }
+      },
+      "required_params": [
+        "question"
+      ],
+      "optional_params": [
+        "initial_queries",
+        "max_loops",
+        "reasoning_model"
+      ],
+      "examples": [
+        {
+          "question": "Python asyncio最佳实践",
+          "max_loops": 3
+        }
+      ]
+    },
+    {
+      "name": "quick_research",
+      "description": "快速研究",
+      "parameters": {
+        "question": {
+          "type": "string",
+          "description": "研究问题"
+        }
+      },
+      "required_params": [
+        "question"
+      ],
+      "optional_params": [],
+      "examples": [
+        {
+          "question": "机器学习基础概念"
+        }
+      ]
+    },
+    {
+      "name": "comprehensive_research",
+      "description": "全面深入研究",
+      "parameters": {
+        "question": {
+          "type": "string",
+          "description": "研究问题"
+        },
+        "topic_focus": {
+          "type": "string",
+          "description": "主题焦点"
+        }
+      },
+      "required_params": [
+        "question"
+      ],
+      "optional_params": [
+        "topic_focus"
+      ],
+      "examples": [
+        {
+          "question": "区块链技术发展趋势",
+          "topic_focus": "2024年最新进展"
+        }
+      ]
+    }
+  ],
+  "tags": [
+    "search",
+    "analysis",
+    "deep"
+  ],
+  "author": null,
+  "license": null,
+  "documentation_url": null
+}

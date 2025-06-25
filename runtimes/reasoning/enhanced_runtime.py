@@ -133,7 +133,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 🔍 等待关键工具完全就绪
         logger.info("⏳ 等待关键工具完全就绪...")
-        tools_ready = await self._wait_for_essential_tools(timeout=30)
+        # 🔧 智能工具就绪检测 - 增加超时时间和重试机制
+        tools_ready = await self._wait_for_essential_tools_enhanced(timeout=60, max_retries=3)
         if not tools_ready:
             logger.warning("⚠️ 部分关键工具未就绪，将在降级模式下运行")
         else:
@@ -294,6 +295,217 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         logger.warning(f"⚠️ 超时等待关键工具就绪 ({timeout}秒)")
         return False
+    
+    async def _wait_for_essential_tools_enhanced(self, timeout: int = 60, max_retries: int = 3) -> bool:
+        """增强的工具就绪等待机制 - 智能超时和重试"""
+        essential_tools = [
+            'deepsearch',
+            'microsandbox', 
+            'browser_use',
+            'mcp-search-tool'
+        ]
+        
+        for attempt in range(max_retries):
+            logger.info(f"🔍 第 {attempt + 1}/{max_retries} 次尝试检测工具就绪状态...")
+            
+            # 动态调整超时时间：首次尝试用更长时间，后续尝试递减
+            current_timeout = timeout - (attempt * 15)  # 每次尝试减少15秒
+            if current_timeout < 20:
+                current_timeout = 20  # 最少20秒
+            
+            success = await self._wait_for_essential_tools_with_adaptive_timeout(
+                essential_tools, current_timeout, attempt + 1
+            )
+            
+            if success:
+                logger.info(f"✅ 第 {attempt + 1} 次尝试成功：所有关键工具已就绪")
+                return True
+            
+            if attempt < max_retries - 1:
+                # 中间重试：触发工具刷新
+                logger.info(f"⏳ 第 {attempt + 1} 次尝试失败，触发工具状态刷新...")
+                await self._trigger_tool_refresh()
+                await asyncio.sleep(5)  # 等待5秒后重试
+        
+        logger.warning(f"❌ 所有 {max_retries} 次尝试均失败，部分工具可能未就绪")
+        
+        # 最后尝试：降级模式检查（只检查最关键的工具）
+        critical_tools = ['deepsearch', 'microsandbox']  # 最小工具集
+        logger.info(f"🔄 降级检查最关键工具: {critical_tools}")
+        
+        return await self._wait_for_essential_tools_with_adaptive_timeout(
+            critical_tools, 30, max_retries + 1, is_fallback=True
+        )
+    
+    async def _wait_for_essential_tools_with_adaptive_timeout(
+        self, 
+        essential_tools: List[str], 
+        timeout: int, 
+        attempt: int,
+        is_fallback: bool = False
+    ) -> bool:
+        """自适应超时的工具就绪检测"""
+        start_time = time.time()
+        
+        # 自适应检查间隔：开始快速检查，然后逐渐放慢
+        base_interval = 0.5 if attempt == 1 else 1.0
+        max_interval = 3.0
+        current_interval = base_interval
+        
+        consecutive_failures = 0
+        last_progress_time = start_time
+        
+        while time.time() - start_time < timeout:
+            try:
+                # 🚀 快速检查：先检查工具库就绪状态
+                if hasattr(self.toolscore_client, 'health_check'):
+                    health = await asyncio.wait_for(
+                        self.toolscore_client.health_check(), 
+                        timeout=5.0
+                    )
+                    # 🔧 修复：处理health_check返回值可能是bool或dict的情况
+                    if isinstance(health, bool):
+                        if not health:
+                            logger.debug(f"⏳ ToolScore服务未就绪（布尔返回值: {health}）")
+                            await asyncio.sleep(current_interval)
+                            continue
+                    elif isinstance(health, dict):
+                        if health.get('status') != 'healthy':
+                            logger.debug(f"⏳ ToolScore服务未就绪，状态: {health.get('status', 'unknown')}")
+                            await asyncio.sleep(current_interval)
+                            continue
+                    else:
+                        logger.debug(f"⏳ ToolScore服务健康检查返回未知类型: {type(health)}")
+                        await asyncio.sleep(current_interval)
+                        continue
+                
+                # 🔍 获取可用工具
+                available_tools = await asyncio.wait_for(
+                    self.toolscore_client.get_available_tools(),
+                    timeout=10.0
+                )
+                
+                if not available_tools:
+                    consecutive_failures += 1
+                    if consecutive_failures > 3:
+                        current_interval = min(current_interval * 1.5, max_interval)
+                    
+                    logger.debug(f"🔍 工具列表为空，继续等待... (间隔: {current_interval:.1f}s)")
+                    await asyncio.sleep(current_interval)
+                    continue
+                
+                # 🎯 智能工具ID提取
+                available_tool_ids = set()
+                for tool in available_tools:
+                    if isinstance(tool, dict):
+                        tool_id = tool.get('id') or tool.get('tool_id') or tool.get('name')
+                        if tool_id:
+                            available_tool_ids.add(tool_id)
+                    elif isinstance(tool, str):
+                        available_tool_ids.add(tool)
+                
+                logger.debug(f"📋 当前可用工具: {sorted(available_tool_ids)}")
+                
+                # 检查缺失工具
+                missing_tools = [tool for tool in essential_tools if tool not in available_tool_ids]
+                
+                if not missing_tools:
+                    logger.info(f"✅ 工具检测成功! 可用工具: {essential_tools}")
+                    
+                    # 🔧 连通性验证（仅对关键工具快速验证）
+                    if not is_fallback:
+                        connectivity_ok = await self._quick_connectivity_check(essential_tools[:2])
+                        if not connectivity_ok:
+                            logger.warning("⚠️ 连通性检查失败，但工具已注册，继续运行")
+                    
+                    return True
+                
+                # 有进展，重置失败计数和间隔
+                progress_made = len(missing_tools) < len(essential_tools)
+                if progress_made:
+                    consecutive_failures = 0
+                    current_interval = base_interval
+                    last_progress_time = time.time()
+                    logger.debug(f"📈 检测到进展! 仍需等待: {missing_tools}")
+                else:
+                    consecutive_failures += 1
+                
+                # 长时间无进展，增加检查间隔
+                time_since_progress = time.time() - last_progress_time
+                if time_since_progress > 20:  # 20秒无进展
+                    current_interval = min(current_interval * 1.2, max_interval)
+                
+                logger.debug(f"⏳ 等待工具就绪... 缺少: {missing_tools} (下次检查: {current_interval:.1f}s)")
+                await asyncio.sleep(current_interval)
+                
+            except asyncio.TimeoutError:
+                logger.debug("⏱️ 工具状态检查超时，继续重试...")
+                consecutive_failures += 1
+                current_interval = min(current_interval * 1.3, max_interval)
+                await asyncio.sleep(current_interval)
+                
+            except Exception as e:
+                consecutive_failures += 1
+                current_interval = min(current_interval * 1.5, max_interval)
+                logger.debug(f"⚠️ 检查工具状态异常: {e}")
+                await asyncio.sleep(current_interval)
+        
+        remaining_time = timeout - (time.time() - start_time)
+        mode_desc = "降级模式" if is_fallback else "标准模式"
+        logger.warning(f"⚠️ {mode_desc}超时等待工具就绪 ({timeout}秒，剩余 {remaining_time:.1f}秒)")
+        return False
+    
+    async def _trigger_tool_refresh(self):
+        """触发工具状态刷新"""
+        try:
+            # 触发ToolScore工具库刷新
+            if hasattr(self.toolscore_client, 'refresh_tools'):
+                await self.toolscore_client.refresh_tools()
+                logger.debug("🔄 已触发ToolScore工具刷新")
+            
+            # 触发工具Schema管理器刷新  
+            if hasattr(self.tool_schema_manager, 'get_live_tool_schemas'):
+                await self.tool_schema_manager.get_live_tool_schemas(force_refresh=True)
+                logger.debug("🔄 已触发Schema管理器刷新")
+                
+        except Exception as e:
+            logger.debug(f"⚠️ 触发工具刷新失败: {e}")
+    
+    async def _quick_connectivity_check(self, tool_ids: List[str]) -> bool:
+        """快速连通性检查（仅测试最关键的工具）"""
+        success_count = 0
+        
+        for tool_id in tool_ids:
+            try:
+                # 超短超时的连通性测试
+                if tool_id == 'deepsearch':
+                    test_params = {"question": "test", "max_results": 1}
+                    result = await asyncio.wait_for(
+                        self.toolscore_client.execute_tool_action(tool_id, "quick_research", test_params),
+                        timeout=8.0
+                    )
+                    if result and not result.get('error'):
+                        success_count += 1
+                        logger.debug(f"✅ {tool_id} 连通性验证通过")
+                    
+                elif tool_id == 'microsandbox':
+                    test_params = {"code": "print('test')"}
+                    result = await asyncio.wait_for(
+                        self.toolscore_client.execute_tool_action(tool_id, "microsandbox_execute", test_params),
+                        timeout=8.0
+                    )
+                    if result and not result.get('error'):
+                        success_count += 1
+                        logger.debug(f"✅ {tool_id} 连通性验证通过")
+                        
+            except asyncio.TimeoutError:
+                logger.debug(f"⏱️ {tool_id} 连通性检查超时")
+            except Exception as e:
+                logger.debug(f"⚠️ {tool_id} 连通性检查失败: {e}")
+        
+        # 至少一半工具连通即可
+        threshold = max(1, len(tool_ids) // 2)
+        return success_count >= threshold
     
     async def _verify_tools_connectivity(self, tool_ids: List[str]):
         """验证工具连通性"""

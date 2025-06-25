@@ -1,0 +1,517 @@
+# ===================================================================
+# 🔧 Agent Data Platform - 统一工具定义配置文件
+# ===================================================================
+# 
+# 📋 作用：解决系统中工具ID映射不一致的核心问题
+# 🎯 目标：建立唯一权威的工具ID和动作映射标准
+# ⚠️  重要：所有系统组件必须以此配置为准，避免误导LLM
+#
+# 更新时间: 2025-06-25
+# 版本: v1.0.0 - 初始统一版本
+# ===================================================================
+
+# 🌟 核心原则：标准工具ID定义
+# - 使用简洁、语义明确的ID
+# - 避免冗余的前缀后缀（如-mcp-server）
+# - 保持与service.json配置文件一致
+standard_tool_ids:
+  # 代码执行工具
+  code_execution: "microsandbox"
+  
+  # 网页浏览工具  
+  web_browsing: "browser_use"
+  
+  # 深度搜索工具
+  research: "deepsearch"
+  
+  # 文件搜索工具
+  file_search: "mcp-search-tool"
+
+# 🔄 兼容性映射：旧ID到新ID的转换
+# 用于向后兼容和系统迁移过程中的ID转换
+legacy_id_mapping:
+  # Microsandbox工具的各种变体
+  "microsandbox-mcp-server": "microsandbox"
+  "microsandbox_server": "microsandbox"
+  "micro-sandbox": "microsandbox"
+  
+  # Browser Use工具的各种变体
+  "browser-use-mcp-server": "browser_use"
+  "browser_use_server": "browser_use"
+  "browser-use": "browser_use"
+  "browseruse": "browser_use"
+  
+  # DeepSearch工具的各种变体
+  "mcp-deepsearch": "deepsearch"
+  "deepsearch_server": "deepsearch"
+  "deep-search": "deepsearch"
+  "deep_search": "deepsearch"
+  
+  # Search Tool保持原样
+  "search-tool": "mcp-search-tool"
+  "search_tool": "mcp-search-tool"
+
+# 📊 工具完整定义：每个工具的详细配置
+tools:
+  
+  # ====== 1. MICROSANDBOX - 代码执行工具 ======
+  microsandbox:
+    id: "microsandbox"
+    name: "MicroSandbox安全代码执行器"
+    description: "在隔离环境中安全执行Python代码，支持包管理和会话控制"
+    service_port: 8090
+    service_path: "mcp_servers/microsandbox_server"
+    
+    # 支持的所有动作
+    actions:
+      microsandbox_execute:
+        description: "在隔离环境中执行Python代码"
+        parameters:
+          code:
+            type: "string"
+            required: true
+            description: "要执行的Python代码"
+          session_id:
+            type: "string" 
+            required: false
+            description: "会话ID，用于代码状态保持"
+          timeout:
+            type: "integer"
+            required: false
+            default: 30
+            description: "执行超时时间（秒）"
+            
+      microsandbox_install_package:
+        description: "在沙盒环境中安装Python包"
+        parameters:
+          package_name:
+            type: "string"
+            required: true
+            description: "要安装的包名"
+          version:
+            type: "string"
+            required: false
+            description: "指定包版本"
+          session_id:
+            type: "string"
+            required: false
+            description: "目标会话ID"
+            
+      microsandbox_list_sessions:
+        description: "列出所有活跃的执行会话"
+        parameters: {}
+        
+      microsandbox_close_session:
+        description: "关闭指定的执行会话"
+        parameters:
+          session_id:
+            type: "string"
+            required: true
+            description: "要关闭的会话ID"
+            
+      microsandbox_cleanup_expired:
+        description: "清理过期的会话和资源"
+        parameters:
+          max_age:
+            type: "integer"
+            required: false
+            default: 3600
+            description: "会话最大存活时间（秒）"
+            
+      microsandbox_get_performance_stats:
+        description: "获取沙盒环境性能统计"
+        parameters: {}
+        
+      microsandbox_get_health_status:
+        description: "获取沙盒环境健康状态"
+        parameters: {}
+
+  # ====== 2. BROWSER_USE - 网页浏览工具 ======
+  browser_use:
+    id: "browser_use"
+    name: "智能浏览器操作工具"
+    description: "AI驱动的浏览器自动化工具，支持网页导航、交互和内容提取"
+    service_port: 8084
+    service_path: "mcp_servers/browser_use_server"
+    
+    # 支持的所有动作（基于实际实现的25个动作）
+    actions:
+      # 核心AI任务执行
+      browser_use_execute_task:
+        description: "AI驱动的复合任务执行"
+        parameters:
+          task:
+            type: "string"
+            required: true
+            description: "要执行的任务描述"
+          url:
+            type: "string"
+            required: false
+            description: "起始URL"
+            
+      # 基础导航
+      browser_navigate:
+        description: "导航到指定URL"
+        parameters:
+          url:
+            type: "string"
+            required: true
+            description: "目标URL地址"
+            
+      browser_go_back:
+        description: "返回上一页"
+        parameters: {}
+        
+      # 搜索功能
+      browser_search_google:
+        description: "执行Google搜索"
+        parameters:
+          query:
+            type: "string"
+            required: true
+            description: "搜索关键词"
+            
+      # 元素交互
+      browser_click_element:
+        description: "点击页面元素"
+        parameters:
+          element_id:
+            type: "string"
+            required: true
+            description: "元素ID或选择器"
+            
+      browser_input_text:
+        description: "在输入框中输入文本"
+        parameters:
+          element_id:
+            type: "string"
+            required: true
+            description: "输入框元素ID"
+          text:
+            type: "string"
+            required: true
+            description: "要输入的文本"
+            
+      browser_send_keys:
+        description: "发送快捷键"
+        parameters:
+          keys:
+            type: "string"
+            required: true
+            description: "快捷键组合"
+            
+      # 滚动操作
+      browser_scroll_down:
+        description: "向下滚动页面"
+        parameters:
+          pixels:
+            type: "integer"
+            required: false
+            default: 500
+            description: "滚动像素数"
+            
+      browser_scroll_up:
+        description: "向上滚动页面"
+        parameters:
+          pixels:
+            type: "integer"
+            required: false
+            default: 500
+            description: "滚动像素数"
+            
+      browser_scroll_to_text:
+        description: "滚动到包含指定文本的位置"
+        parameters:
+          text:
+            type: "string"
+            required: true
+            description: "目标文本"
+            
+      # 标签管理
+      browser_switch_tab:
+        description: "切换到指定标签页"
+        parameters:
+          tab_index:
+            type: "integer"
+            required: true
+            description: "标签页索引"
+            
+      browser_open_tab:
+        description: "打开新标签页"
+        parameters:
+          url:
+            type: "string"
+            required: false
+            description: "新标签页URL"
+            
+      browser_close_tab:
+        description: "关闭当前标签页"
+        parameters: {}
+        
+      # 内容提取
+      browser_extract_content:
+        description: "提取页面内容"
+        parameters:
+          selector:
+            type: "string"
+            required: false
+            description: "CSS选择器，提取特定内容"
+            
+      browser_get_ax_tree:
+        description: "获取页面可访问性树结构"
+        parameters: {}
+        
+      # 下拉菜单操作
+      browser_get_dropdown_options:
+        description: "获取下拉菜单选项"
+        parameters:
+          element_id:
+            type: "string"
+            required: true
+            description: "下拉菜单元素ID"
+            
+      browser_select_dropdown_option:
+        description: "选择下拉菜单选项"
+        parameters:
+          element_id:
+            type: "string"
+            required: true
+            description: "下拉菜单元素ID"
+          option_value:
+            type: "string"
+            required: true
+            description: "选项值"
+            
+      # 拖拽操作
+      browser_drag_drop:
+        description: "执行拖拽操作"
+        parameters:
+          source_element:
+            type: "string"
+            required: true
+            description: "源元素ID"
+          target_element:
+            type: "string"
+            required: true
+            description: "目标元素ID"
+            
+      # 文件操作
+      browser_save_pdf:
+        description: "保存当前页面为PDF"
+        parameters:
+          filename:
+            type: "string"
+            required: false
+            description: "PDF文件名"
+            
+      browser_screenshot:
+        description: "截取当前页面"
+        parameters:
+          filename:
+            type: "string"
+            required: false
+            description: "截图文件名"
+            
+      # 等待和完成
+      browser_wait:
+        description: "等待指定时间"
+        parameters:
+          seconds:
+            type: "integer"
+            required: true
+            description: "等待秒数"
+            
+      browser_done:
+        description: "标记任务完成"
+        parameters: {}
+        
+      # 页面信息
+      browser_get_page_info:
+        description: "获取当前页面信息"
+        parameters: {}
+        
+      browser_get_current_url:
+        description: "获取当前页面URL"
+        parameters: {}
+        
+      browser_close_session:
+        description: "关闭浏览器会话"
+        parameters: {}
+
+  # ====== 3. DEEPSEARCH - 深度搜索工具 ======
+  deepsearch:
+    id: "deepsearch"
+    name: "网络信息研究工具"
+    description: "AI驱动的深度网络研究工具，支持多层次信息挖掘和分析"
+    service_port: 8086
+    service_path: "mcp_servers/deepsearch_server"
+    
+    # 支持的所有动作
+    actions:
+      research:
+        description: "专业级深度研究，支持多轮迭代挖掘"
+        parameters:
+          question:
+            type: "string"
+            required: true
+            description: "研究问题或主题"
+          initial_queries:
+            type: "array"
+            required: false
+            description: "初始搜索查询列表"
+          max_loops:
+            type: "integer"
+            required: false
+            default: 3
+            description: "最大研究轮次"
+          reasoning_model:
+            type: "string"
+            required: false
+            default: "gemini-1.5-pro"
+            description: "推理模型名称"
+            
+      quick_research:
+        description: "快速研究，适用于简单查询"
+        parameters:
+          question:
+            type: "string"
+            required: true
+            description: "研究问题"
+            
+      comprehensive_research:
+        description: "全面深入研究，适用于复杂主题"
+        parameters:
+          question:
+            type: "string"
+            required: true
+            description: "研究问题"
+          topic_focus:
+            type: "string"
+            required: false
+            description: "研究重点领域"
+
+  # ====== 4. MCP-SEARCH-TOOL - 文件搜索工具 ======
+  mcp-search-tool:
+    id: "mcp-search-tool"
+    name: "工具管理和项目文件搜索器"
+    description: "项目文件内容搜索和工具需求分析器"
+    service_port: 8080
+    service_path: "mcp_servers/search_tool_server"
+    
+    # 支持的所有动作
+    actions:
+      search_file_content:
+        description: "在项目文件中搜索指定内容"
+        parameters:
+          file_path:
+            type: "string"
+            required: true
+            description: "目标文件路径"
+          regex_pattern:
+            type: "string"
+            required: true
+            description: "搜索的正则表达式模式"
+            
+      list_code_definitions:
+        description: "列出代码中的定义（类、函数等）"
+        parameters:
+          file_path:
+            type: "string"
+            required: false
+            description: "特定文件路径"
+          directory_path:
+            type: "string"
+            required: false
+            description: "目录路径"
+            
+      analyze_tool_needs:
+        description: "分析任务需要的工具"
+        parameters:
+          task_description:
+            type: "string"
+            required: true
+            description: "任务描述"
+            
+      search_and_install_tools:
+        description: "搜索并安装需要的工具"
+        parameters:
+          task_description:
+            type: "string"
+            required: true
+            description: "任务描述"
+          reason:
+            type: "string"
+            required: false
+            description: "安装原因"
+
+# 🎯 LLM工具展示配置：影响AI如何理解和使用工具
+llm_tool_presentation:
+  # 推荐给LLM的工具展示顺序（按使用频率）
+  display_order:
+    - "microsandbox"      # 代码执行最常用
+    - "deepsearch"        # 研究功能重要
+    - "browser_use"       # 网页操作功能强大
+    - "mcp-search-tool"   # 文件搜索辅助
+    
+  # 每个工具的简化展示名称（显示给LLM）
+  display_names:
+    microsandbox: "代码执行器"
+    deepsearch: "深度搜索"
+    browser_use: "智能浏览器"
+    mcp-search-tool: "文件搜索器"
+    
+  # 推荐的默认动作（当工具功能不明确时）
+  default_actions:
+    microsandbox: "microsandbox_execute"
+    deepsearch: "research" 
+    browser_use: "browser_use_execute_task"
+    mcp-search-tool: "search_file_content"
+
+# 🔧 系统配置：技术实现相关的配置
+system_configuration:
+  # MCP服务器配置
+  mcp_servers:
+    base_port: 8080
+    port_range: 10
+    health_check_interval: 30
+    
+  # 工具验证配置
+  validation:
+    strict_mode: true          # 严格模式：不允许未定义的工具/动作
+    auto_correct: true         # 自动纠正常见的ID变体
+    case_sensitive: false      # 工具ID大小写不敏感
+    
+  # 错误处理配置
+  error_handling:
+    max_retries: 3            # 工具调用最大重试次数
+    fallback_enabled: true    # 启用降级机制
+    log_all_mappings: false   # 是否记录所有ID映射操作
+
+# 📝 版本信息和变更记录
+metadata:
+  version: "1.0.0"
+  created_date: "2025-06-25"
+  last_modified: "2025-06-25"
+  created_by: "Agent Data Platform Team"
+  
+  changelog:
+    "1.0.0":
+      date: "2025-06-25"
+      changes:
+        - "初始版本：统一所有工具ID和动作定义"
+        - "建立权威的工具映射标准"
+        - "完整定义所有25个browser_use动作"
+        - "标准化参数名称和类型定义"
+        - "添加向后兼容的旧ID映射支持"
+
+# ===================================================================
+# 🚨 重要提醒
+# ===================================================================
+# 
+# 1. 本配置文件是系统中工具定义的唯一权威来源
+# 2. 所有代码修改必须与此配置保持一致
+# 3. 修改本文件后需要重启相关服务
+# 4. 新增工具或动作必须先在此处定义
+# 5. 不要在代码中硬编码工具ID，统一使用此配置
+#
+# ===================================================================

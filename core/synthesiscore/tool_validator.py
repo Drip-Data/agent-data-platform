@@ -27,11 +27,25 @@ class ToolValidator:
             'search_tool',
             'microsandbox',
             'file_reader',
+            # Browser工具动作（完整列表）
             'browser_use_execute_task',
-            'browser_navigate',
+            'browser_navigate', 
+            'browser_extract_content',
+            'browser_click_element',
+            'browser_input_text',
+            'browser_search_google',
+            # MicroSandbox工具动作
             'microsandbox_execute',
             'microsandbox_install_package',
+            'microsandbox_list_sessions',
+            'microsandbox_close_session',
+            'microsandbox_cleanup_expired',
             'microsandbox_get_performance_stats',
+            # DeepSearch工具动作
+            'research',
+            'quick_research', 
+            'comprehensive_research',
+            # 其他
             'python_execute',
             'browser_use'
         }

@@ -19,8 +19,15 @@ from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
 from core.toolscore.mcp_server import MCPServer
 from core.config_manager import ConfigManager
 from microsandbox import PythonSandbox
+from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "port": 8090, "timestamp": time.time()}
 
 class PerformanceMonitor:
     """性能监控器"""
@@ -857,6 +864,18 @@ except Exception as e:
                 health_status = "warning"
                 issues.append(f"活跃会话过多: {active_sessions}")
             
+            # 🔧 新增：连接状态检查
+            connection_healthy = await self._check_connection_health()
+            if not connection_healthy:
+                health_status = "unhealthy"
+                issues.append("WebSocket连接异常")
+            
+            # 🔧 新增：端口冲突检查
+            port_conflict = await self.check_port_conflicts()
+            if port_conflict:
+                health_status = "warning"
+                issues.append(f"端口 {self._listen_port} 存在冲突")
+            
             if len(issues) > 2:
                 health_status = "unhealthy"
             
@@ -891,7 +910,7 @@ except Exception as e:
         recommendations = []
         
         if status == "unhealthy":
-            recommendations.append("建议重启服务器以恢复最佳性能")
+            recommendations.append("建议使用自动重启功能恢复服务")
         
         for issue in issues:
             if "高内存使用" in issue:
@@ -902,18 +921,145 @@ except Exception as e:
                 recommendations.append("优化代码复杂度或增加超时限制")
             elif "活跃会话过多" in issue:
                 recommendations.append("设置更短的会话超时时间")
+            elif "WebSocket连接异常" in issue:
+                recommendations.append("检查网络连接并考虑重启服务")
+            elif "端口" in issue and "冲突" in issue:
+                recommendations.append("使用自动重启功能解决端口冲突")
         
         if not recommendations:
             recommendations.append("系统运行正常，继续监控")
         
         return recommendations
     
-    async def run(self):
-        """启动MCP服务器"""
+    # 🔧 新增：自动重启机制
+    async def check_port_conflicts(self) -> bool:
+        """检查端口冲突"""
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex((self._listen_host, self._listen_port))
+            sock.close()
+            
+            if result == 0:
+                # 端口被占用，检查是否是我们自己的进程
+                try:
+                    import psutil
+                    for conn in psutil.net_connections():
+                        if (hasattr(conn, 'laddr') and conn.laddr and 
+                            conn.laddr.port == self._listen_port and conn.status == 'LISTEN'):
+                            try:
+                                process = psutil.Process(conn.pid)
+                                cmdline = " ".join(process.cmdline())
+                                if "microsandbox" in cmdline.lower():
+                                    logger.warning(f"检测到同类进程占用端口 {self._listen_port}: PID {conn.pid}")
+                                    return True
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                except ImportError:
+                    logger.warning("psutil不可用，无法详细检查端口冲突")
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"端口冲突检查失败: {e}")
+            return False
+    
+    async def auto_restart_on_port_conflict(self) -> bool:
+        """自动重启以解决端口冲突"""
+        try:
+            if await self.check_port_conflicts():
+                logger.warning(f"检测到端口 {self._listen_port} 冲突，尝试自动重启...")
+                
+                # 尝试终止冲突的进程
+                success = await self._terminate_conflicting_processes()
+                if success:
+                    logger.info("✅ 成功清理冲突进程，准备重启服务")
+                    # 等待端口释放
+                    await asyncio.sleep(2)
+                    return True
+                else:
+                    logger.error("❌ 无法清理冲突进程")
+                    return False
+            return False
+        except Exception as e:
+            logger.error(f"自动重启检查失败: {e}")
+            return False
+    
+    async def _terminate_conflicting_processes(self) -> bool:
+        """终止冲突的进程"""
+        try:
+            import psutil
+            terminated_processes = []
+            
+            for conn in psutil.net_connections():
+                if (hasattr(conn, 'laddr') and conn.laddr and 
+                    conn.laddr.port == self._listen_port and conn.status == 'LISTEN'):
+                    try:
+                        process = psutil.Process(conn.pid)
+                        cmdline = " ".join(process.cmdline())
+                        
+                        # 只终止同类的microsandbox进程
+                        if "microsandbox" in cmdline.lower():
+                            logger.info(f"尝试终止冲突进程: PID {conn.pid}, 命令: {cmdline[:100]}...")
+                            
+                            # 先尝试优雅关闭
+                            process.terminate()
+                            await asyncio.sleep(1)
+                            
+                            # 如果还在运行，强制终止
+                            if process.is_running():
+                                process.kill()
+                                await asyncio.sleep(1)
+                            
+                            terminated_processes.append(conn.pid)
+                            logger.info(f"✅ 成功终止进程 PID {conn.pid}")
+                            
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        logger.warning(f"无法终止进程 PID {conn.pid}: {e}")
+            
+            return len(terminated_processes) > 0
+            
+        except ImportError:
+            logger.warning("psutil不可用，无法自动终止冲突进程")
+            return False
+        except Exception as e:
+            logger.error(f"终止冲突进程失败: {e}")
+            return False
+    
+    async def start_with_auto_restart(self) -> bool:
+        """带自动重启的启动方法"""
+        max_restart_attempts = 3
+        restart_delay = 5
+        
+        for attempt in range(max_restart_attempts):
+            try:
+                # 检查并处理端口冲突
+                if await self.auto_restart_on_port_conflict():
+                    logger.info(f"已处理端口冲突，尝试启动 (尝试 {attempt + 1}/{max_restart_attempts})")
+                
+                # 尝试启动服务（非阻塞）
+                await self._start_server_non_blocking()
+                logger.info("✅ MicroSandbox服务启动成功")
+                return True
+                
+            except Exception as e:
+                logger.error(f"启动失败 (尝试 {attempt + 1}/{max_restart_attempts}): {e}")
+                
+                if attempt < max_restart_attempts - 1:
+                    logger.info(f"等待 {restart_delay} 秒后重试...")
+                    await asyncio.sleep(restart_delay)
+                    restart_delay *= 2  # 指数退避
+                else:
+                    logger.error("❌ 所有重启尝试都失败了")
+                    return False
+        
+        return False
+    
+    async def _start_server_non_blocking(self):
+        """非阻塞的服务器启动方法"""
         logger.info(f"Starting {self.server_name}...")
         
         # 创建MCP服务器
-        mcp_server = MCPServer(
+        self.mcp_server = MCPServer(
             server_name=self.server_name,
             server_id=self.server_id,
             description="基于MicroSandbox的安全Python代码执行服务器",
@@ -924,18 +1070,57 @@ except Exception as e:
         )
         
         # 注册工具动作处理器
-        mcp_server.register_tool_action_handler(self.handle_tool_action)
+        self.mcp_server.register_tool_action_handler(self.handle_tool_action)
         
         # 配置监听地址
         os.environ["MICROSANDBOX_BIND_HOST"] = self._listen_host
         
         logger.info(f"Attempting to start MCPServer for {self.server_name} at {self.endpoint}...")
+        
+        # 启动服务器（非阻塞）
+        await self.mcp_server.start()
+        logger.info(f"MCPServer for {self.server_name} started successfully.")
+        
+        # 启动连接监控任务
+        asyncio.create_task(self._monitor_connection_health())
+    
+    async def _monitor_connection_health(self):
+        """监控连接健康状态，检测离线问题"""
+        while True:
+            try:
+                await asyncio.sleep(30)  # 每30秒检查一次
+                
+                # 检查服务器是否还在运行
+                if hasattr(self, 'mcp_server') and self.mcp_server:
+                    # 这里可以添加更多的健康检查逻辑
+                    logger.debug("🔍 连接健康检查正常")
+                else:
+                    logger.warning("⚠️ MCP服务器实例丢失，可能需要重启")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"❌ 连接健康监控异常: {e}")
+                await asyncio.sleep(5)
+    
+    async def _check_connection_health(self) -> bool:
+        """检查连接健康状态"""
         try:
-            await mcp_server.start()
-            logger.info(f"MCPServer for {self.server_name} started successfully.")
+            # 检查MCP服务器实例是否存在
+            if not hasattr(self, 'mcp_server') or not self.mcp_server:
+                return False
+            
+            # 可以添加更多的连接健康检查逻辑
+            # 例如：ping测试、连接数检查等
+            
+            return True
         except Exception as e:
-            logger.error(f"Failed to start MCPServer for {self.server_name}: {e}", exc_info=True)
-            raise
+            logger.error(f"连接健康检查失败: {e}")
+            return False
+    
+    async def run(self):
+        """启动MCP服务器（旧版兼容方法）"""
+        logger.warning("使用旧版run()方法，建议使用start_with_auto_restart()获得更好的可靠性")
+        await self._start_server_non_blocking()
     
     async def cleanup(self):
         """清理所有会话和监控资源"""
@@ -956,6 +1141,14 @@ except Exception as e:
         if hasattr(self, 'performance_monitor'):
             self.performance_monitor.stop()
             logger.info("性能监控已停止")
+        
+        # 🔧 清理MCP服务器实例
+        if hasattr(self, 'mcp_server') and self.mcp_server:
+            try:
+                await self.mcp_server.cleanup()
+                logger.info("MCP服务器已清理")
+            except Exception as e:
+                logger.warning(f"清理MCP服务器失败: {e}")
 
 async def main():
     """主函数"""
@@ -971,14 +1164,27 @@ async def main():
     server = MicroSandboxMCPServer(config_manager)
     
     try:
-        await server.run()
+        # 🔧 使用带自动重启的启动方法
+        success = await server.start_with_auto_restart()
+        if not success:
+            logger.error("❌ MicroSandbox服务启动失败，所有重试都失败了")
+            return
+        
+        # 服务启动成功，保持运行
+        logger.info("✅ MicroSandbox服务运行中，按 Ctrl+C 停止...")
+        try:
+            # 保持服务运行
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("收到中断信号，正在清理...")
+        
     except KeyboardInterrupt:
         logger.info("收到中断信号，正在清理...")
-        await server.cleanup()
     except Exception as e:
-        logger.error(f"服务器启动失败: {e}")
+        logger.error(f"服务器运行异常: {e}")
+    finally:
         await server.cleanup()
-        raise
 
 if __name__ == "__main__":
     asyncio.run(main())

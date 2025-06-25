@@ -96,18 +96,40 @@ class DynamicMCPManager:
             logger.error(f"停止动态MCP管理器时出错: {e}")
     
     async def _restore_persistent_servers(self):
-        """恢复持久化的MCP服务器"""
+        """恢复持久化的外部MCP服务器"""
         try:
-            config_path = Path("config/mcp_servers.json")
+            # 使用专门的持久化文件，而不是内置服务器配置文件
+            config_path = Path("config/persistent_servers.json")
             if not config_path.exists():
-                logger.info("没有找到持久化的MCP服务器配置")
+                logger.info("没有找到持久化的外部MCP服务器配置")
                 return
             
             with open(config_path, 'r', encoding='utf-8') as f:
                 servers_config = json.load(f)
             
+            # 如果配置为空字典，跳过处理
+            if not servers_config:
+                logger.info("持久化配置为空，无需恢复外部MCP服务器")
+                return
+            
             restored_count = 0
             for server_name, server_config in servers_config.items():
+                # 跳过空配置或无效配置
+                if not server_config or not isinstance(server_config, dict):
+                    logger.warning(f"跳过无效的服务器配置: {server_name}")
+                    continue
+                
+                # 跳过内置服务器（如果误配置在这里）
+                if server_config.get('type') == 'internal' or server_config.get('type') == 'builtin':
+                    logger.info(f"跳过内置服务器配置: {server_name}")
+                    continue
+                
+                # 确保配置包含必要字段
+                if not server_config.get('name'):
+                    server_config['name'] = server_name
+                if not server_config.get('id'):
+                    server_config['id'] = server_name
+                
                 try:
                     result = await self.runner.install_server(server_config)
                     if result.get("success"):
@@ -122,37 +144,43 @@ class DynamicMCPManager:
                         )
                         self.installed_servers[result["server_id"]] = install_result
                         restored_count += 1
-                        logger.info(f"MCP服务器 {server_name} 恢复成功")
+                        logger.info(f"外部MCP服务器 {server_name} 恢复成功")
                 except Exception as e:
-                    logger.error(f"恢复MCP服务器 {server_name} 时出错: {e}")
+                    logger.error(f"恢复外部MCP服务器 {server_name} 时出错: {e}")
             
-            logger.info(f"成功恢复 {restored_count} 个MCP服务器")
+            logger.info(f"成功恢复 {restored_count} 个外部MCP服务器")
         except Exception as e:
-            logger.error(f"恢复持久化MCP服务器失败: {e}")
+            logger.error(f"恢复持久化外部MCP服务器失败: {e}")
 
     async def _save_persistent_servers(self):
-        """保存持久化MCP服务器状态"""
+        """保存持久化外部MCP服务器状态"""
         try:
-            config_path = Path("config/mcp_servers.json")
+            # 使用专门的持久化文件，不覆盖内置服务器配置
+            config_path = Path("config/persistent_servers.json")
             config_path.parent.mkdir(exist_ok=True)
             
             servers_config = {}
             if hasattr(self.runner, 'list_running_servers'):
                 running_servers = self.runner.list_running_servers()
                 for server_id, server_info in running_servers.items():
-                    servers_config[server_info.get("name", server_id)] = {
-                        "name": server_info.get("name"),
-                        "repo_url": server_info.get("repo_url"),
-                        "project_type": server_info.get("project_type"),
-                        "entry_point": server_info.get("entry_point"),
-                    }
+                    # 只保存外部安装的服务器，排除内置服务器
+                    if (server_info.get("type") != "internal" and 
+                        server_info.get("type") != "builtin" and
+                        server_info.get("repo_url")):  # 外部服务器通常有repo_url
+                        servers_config[server_info.get("name", server_id)] = {
+                            "name": server_info.get("name"),
+                            "repo_url": server_info.get("repo_url"),
+                            "project_type": server_info.get("project_type"),
+                            "entry_point": server_info.get("entry_point"),
+                            "type": "external"
+                        }
             
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(servers_config, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"MCP服务器配置已保存到 {config_path}")
+            logger.info(f"外部MCP服务器配置已保存到 {config_path}")
         except Exception as e:
-            logger.error(f"保存MCP服务器配置时出错: {e}")
+            logger.error(f"保存外部MCP服务器配置时出错: {e}")
 
     async def search_mcp_servers(self, query: str, capability_tags: List[str] = None) -> List[MCPServerCandidate]:
         """搜索MCP服务器"""

@@ -11,6 +11,9 @@ from pathlib import Path
 import signal
 import argparse
 from dotenv import load_dotenv
+import contextlib
+import io
+from datetime import datetime
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
@@ -18,6 +21,113 @@ sys.path.insert(0, str(project_root))
 
 # 加载环境变量
 load_dotenv(project_root / '.env')
+
+class SafeFormatter(logging.Formatter):
+    """安全的日志格式化器，处理Unicode字符"""
+    def format(self, record):
+        try:
+            return super().format(record)
+        except UnicodeEncodeError:
+            msg = record.getMessage()
+            msg = msg.replace('✅', '[OK]').replace('❌', '[ERROR]').replace('⚠️', '[WARN]').replace('🚀', '[START]').replace('🔧', '[FIX]').replace('⏳', '[WAIT]').replace('🔄', '[PROC]')
+            record.msg = msg
+            record.args = ()
+            return super().format(record)
+
+class UnifiedLogCapture:
+    """统一的日志捕获系统 - 捕获所有输出到单个文件"""
+    
+    def __init__(self, log_file_path: str):
+        self.log_file_path = log_file_path
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+        self.log_file = None
+        self.original_handlers = []
+        
+    def __enter__(self):
+        # 创建日志目录
+        os.makedirs(os.path.dirname(self.log_file_path), exist_ok=True)
+        
+        # 打开统一日志文件
+        self.log_file = open(self.log_file_path, 'a', encoding='utf-8')
+        
+        # 创建一个同时写入控制台和文件的包装器
+        class UnifiedWriter:
+            def __init__(self, console, file_handle):
+                self.console = console
+                self.file = file_handle
+                
+            def write(self, text):
+                # 写入控制台
+                self.console.write(text)
+                self.console.flush()
+                
+                # 写入统一日志文件
+                if text.strip():  # 只对非空内容添加时间戳
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    # 检查是否已经有时间戳，避免重复
+                    if not text.startswith(timestamp[:10]):  # 简单检查日期部分
+                        self.file.write(f"[{timestamp}] {text}")
+                    else:
+                        self.file.write(text)
+                else:
+                    self.file.write(text)
+                self.file.flush()
+                
+            def flush(self):
+                self.console.flush()
+                self.file.flush()
+                
+            def isatty(self):
+                return self.console.isatty() if hasattr(self.console, 'isatty') else False
+                
+        # 替换stdout和stderr
+        sys.stdout = UnifiedWriter(self.original_stdout, self.log_file)
+        sys.stderr = UnifiedWriter(self.original_stderr, self.log_file)
+        
+        # 重新配置所有现有的logging handlers，让它们也输出到统一日志
+        self._reconfigure_logging()
+        
+        return self
+        
+    def _reconfigure_logging(self):
+        """重新配置logging系统，让所有日志都通过统一输出"""
+        # 保存原始handlers
+        root_logger = logging.getLogger()
+        self.original_handlers = root_logger.handlers.copy()
+        
+        # 清除所有现有handlers
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+            
+        # 创建一个新的StreamHandler，它会写入我们重定向的stdout
+        # 这样所有logging输出都会通过我们的UnifiedWriter
+        unified_handler = logging.StreamHandler(sys.stdout)
+        unified_handler.setFormatter(SafeFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        
+        # 添加新的handler
+        root_logger.addHandler(unified_handler)
+        
+        # 确保日志级别
+        root_logger.setLevel(logging.DEBUG)
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # 恢复原始的logging handlers
+        root_logger = logging.getLogger()
+        root_logger.handlers.clear()
+        for handler in self.original_handlers:
+            root_logger.addHandler(handler)
+            
+        # 恢复原始的stdout和stderr
+        sys.stdout = self.original_stdout
+        sys.stderr = self.original_stderr
+        
+        # 关闭日志文件
+        if self.log_file:
+            self.log_file.close()
+
+# 保持向后兼容
+TerminalOutputCapture = UnifiedLogCapture
 
 # 导入核心组件
 from core.config_manager import ConfigManager
@@ -106,24 +216,15 @@ os.makedirs(project_root / 'config', exist_ok=True)
 os.makedirs(project_root / 'data', exist_ok=True)
 
 # 配置日志
-class SafeFormatter(logging.Formatter):
-    """安全的日志格式化器，处理Unicode字符"""
-    def format(self, record):
-        try:
-            return super().format(record)
-        except UnicodeEncodeError:
-            msg = record.getMessage()
-            msg = msg.replace('✅', '[OK]').replace('❌', '[ERROR]').replace('⚠️', '[WARN]').replace('🚀', '[START]').replace('🔧', '[FIX]').replace('⏳', '[WAIT]').replace('🔄', '[PROC]')
-            record.msg = msg
-            record.args = ()
-            return super().format(record)
 
+# 初始的基础logging配置 - 将被UnifiedLogCapture重新配置
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # 启用DEBUG级别日志
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('logs/toolscore.log', mode='a', encoding='utf-8')
+        # 注释掉单独的文件handler，将由UnifiedLogCapture统一处理
+        # logging.FileHandler('logs/toolscore.log', mode='a', encoding='utf-8')
     ]
 )
 
@@ -244,28 +345,44 @@ async def main_async():
     cleanup_ports()
     
     logger.info("=== Agent Data Platform 启动中 ===")
+    logger.debug("🔧 开始系统初始化流程...")
     
     args = parse_arguments()
+    logger.debug(f"📝 命令行参数: {vars(args)}")
     
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         logger.debug("调试模式已启用。")
 
     # 1. 初始化 ConfigManager
+    logger.debug("🔧 步骤1: 初始化ConfigManager...")
     config_manager = ConfigManager(config_dir=args.config_dir)
+    logger.debug(f"✅ ConfigManager初始化完成，配置目录: {args.config_dir}")
     
     # 2. 加载所有必要配置
+    logger.debug("🔧 步骤2: 加载系统配置...")
     redis_url = config_manager.get_redis_url()
+    logger.debug(f"📡 Redis URL: {redis_url}")
+    
     task_file = config_manager.get_task_file_path()
+    logger.debug(f"📋 任务文件路径: {task_file}")
+    
     routing_config = config_manager.load_routing_config()
+    logger.debug(f"🚦 路由配置加载完成，任务类型映射: {routing_config.task_type_mapping}")
+    
     queue_mapping = {
         TaskType(task_type_str.lower()): queue_name
         for task_type_str, queue_name in routing_config.task_type_mapping.items()
     }
+    logger.debug(f"📋 队列映射: {queue_mapping}")
     
     # 3. 实例化核心组件
+    logger.debug("🔧 步骤3: 初始化核心组件...")
     metrics = EnhancedMetrics() # Metrics实例
+    logger.debug("✅ EnhancedMetrics初始化完成")
+    
     redis_manager = RedisManager(redis_url) # RedisManager实例
+    logger.debug("✅ RedisManager初始化完成")
     
     # ToolScore服务启动后，获取其实际端口
     # 注意：ToolScore MCP服务器和HTTP监控API可能使用不同的端口
@@ -355,7 +472,10 @@ async def main_async():
     
     service_manager.register_service(
         name="mcp_servers",
-        initialize_fn=lambda config: mcp_server_launcher.initialize(config_manager), # 传递config_manager实例
+        initialize_fn=lambda config: mcp_server_launcher.initialize(
+            config_manager, 
+            service_container=toolscore_service.get_service_container()
+        ),
         start_fn=mcp_server_launcher.start,
         stop_fn=mcp_server_launcher.stop,
         health_check_fn=mcp_server_launcher.health_check,
@@ -407,14 +527,24 @@ async def main_async():
     setup_signal_handlers(service_manager)
     
     try:
+        logger.debug("🔧 开始初始化所有服务...")
         service_manager.initialize_all({}) # config参数可能不再需要，因为组件已直接实例化
-        await service_manager.start_all()
+        logger.debug("✅ 所有服务初始化完成")
         
-        logger.info("所有服务已启动，按 Ctrl+C 停止")
+        logger.debug("🚀 开始启动所有服务...")
+        await service_manager.start_all()
+        logger.debug("✅ 所有服务启动完成")
+        
+        logger.info("🎉 所有服务已启动，系统运行中...")
+        logger.info("📊 系统状态监控已启用，按 Ctrl+C 停止")
         
         # 保持主事件循环运行
+        startup_time = asyncio.get_event_loop().time()
         while True:
-            await asyncio.sleep(3600) # 保持运行，每小时检查一次
+            await asyncio.sleep(60)  # 每分钟检查一次并输出状态
+            current_time = asyncio.get_event_loop().time()
+            uptime = int(current_time - startup_time)
+            logger.debug(f"⏰ 系统运行时间: {uptime//3600}h {(uptime%3600)//60}m {uptime%60}s")
         
     except Exception as e:
         logger.error(f"启动过程中出错: {e}", exc_info=True)
@@ -422,7 +552,28 @@ async def main_async():
         sys.exit(1)
 
 def main():
-    asyncio.run(main_async())
+    # 设置统一日志捕获
+    unified_log_path = os.path.join('logs', 'unified.log')
+    
+    # 在开始时写入分隔符
+    os.makedirs('logs', exist_ok=True)
+    with open(unified_log_path, 'a', encoding='utf-8') as f:
+        f.write(f"\n{'='*80}\n")
+        f.write(f"[系统启动] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*80}\n")
+    
+    # 使用统一日志捕获系统捕获所有输出
+    with UnifiedLogCapture(unified_log_path):
+        try:
+            print(f"🚀 Agent Data Platform 启动中... (所有日志将统一记录到 {unified_log_path})")
+            asyncio.run(main_async())
+        except KeyboardInterrupt:
+            print("\n⚡ 收到中断信号，正在优雅关闭...")
+        except Exception as e:
+            print(f"❌ 系统启动失败: {e}")
+            raise
+        finally:
+            print("📝 终端输出捕获结束")
 
 if __name__ == "__main__":
     main()

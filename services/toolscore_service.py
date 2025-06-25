@@ -10,6 +10,7 @@ from core.config_manager import ConfigManager
 from core.toolscore.mcp_server import ToolScoreMCPServer
 from core.toolscore.interfaces import ToolCapability, ToolType
 from services.mcp_server_launcher import find_available_port # 导入 find_available_port
+from core.toolscore.mcp_auto_registration import auto_register_mcp_servers  # 🔧 新增：MCP自动注册
 
 logger = logging.getLogger(__name__)
 
@@ -331,3 +332,9 @@ async def health_check(): # 将 health_check 定义为异步函数
         'dynamic_tools': 0,  # 暂时设为0，等确认实际方法后再修正
         'tool_recommendation': 'config_based'
     }
+
+def get_service_container():
+    """返回ToolScore服务的服务容器实例"""
+    if tool_library:
+        return tool_library
+    return None

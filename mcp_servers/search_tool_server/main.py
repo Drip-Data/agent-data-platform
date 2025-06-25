@@ -91,6 +91,39 @@ class SearchToolMCPServer:
                     {"file_path": "src/utils.py"},
                     {"directory_path": "src/models"}
                 ]
+            ),
+            ToolCapability(
+                name="analyze_tool_needs",
+                description="分析任务需求，确定是否需要额外的工具",
+                parameters={
+                    "task_description": {
+                        "type": "string",
+                        "description": "要分析的任务描述",
+                        "required": True
+                    }
+                },
+                examples=[
+                    {"task_description": "Create a chart showing sales data trends"}
+                ]
+            ),
+            ToolCapability(
+                name="search_and_install_tools",
+                description="搜索并安装新的工具以满足任务需求",
+                parameters={
+                    "task_description": {
+                        "type": "string",
+                        "description": "任务描述",
+                        "required": True
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "需要新工具的原因",
+                        "required": False
+                    }
+                },
+                examples=[
+                    {"task_description": "Create a chart", "reason": "Need charting capabilities"}
+                ]
             )
         ]
     
@@ -109,6 +142,15 @@ class SearchToolMCPServer:
                 file_path = parameters.get("file_path")
                 directory_path = parameters.get("directory_path")
                 result = await self.search_tool.list_code_definitions(file_path, directory_path)
+                
+            elif action == "analyze_tool_needs":
+                task_description = parameters.get("task_description", "")
+                result = await self.search_tool.analyze_tool_needs(task_description)
+                
+            elif action == "search_and_install_tools":
+                task_description = parameters.get("task_description", "")
+                reason = parameters.get("reason", "")
+                result = await self.search_tool.search_and_install_tools(task_description, reason)
                 
             else:
                 return {

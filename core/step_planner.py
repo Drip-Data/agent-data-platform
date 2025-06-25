@@ -330,7 +330,14 @@ class StepPlanner:
             "  ]",
             "}",
             "",
-            "注意:",
+            "⚠️ 重要约束:",
+            "1. 只返回JSON对象，不要任何其他文字！",
+            "2. 不要添加解释、注释或描述性文本",
+            "3. 必须是有效的JSON格式",
+            "4. NO other text outside the JSON object!",
+            "**只返回JSON，不要其他内容！**",
+            "",
+            "规划注意事项:",
             "1. 计划应该循序渐进，每步都有明确目标",
             "2. 优先使用可用工具",
             "3. 考虑步骤间的依赖关系",
@@ -508,7 +515,14 @@ class StepPlanner:
             "1. 避免之前失败的操作模式",
             "2. 利用成功步骤的经验",
             "3. 调整步骤优先级和策略",
-            "4. 提供更合适的后备方案"
+            "4. 提供更合适的后备方案",
+            "",
+            "⚠️ 重要约束:",
+            "1. 只返回JSON对象，不要任何其他文字！",
+            "2. 不要添加解释、注释或描述性文本",
+            "3. 必须是有效的JSON格式",
+            "4. NO other text outside the JSON object!",
+            "**只返回JSON，不要其他内容！**"
         ])
         
         return "\n".join(prompt_parts)
@@ -562,18 +576,57 @@ class StepPlanner:
                                current_outputs: List[str]) -> Tuple[bool, str]:
         """简单的完成检查（后备方案）"""
         try:
-            # 基本规则
+            # 基本规则 - 更加严格的检查
             successful_steps = [s for s in executed_steps if s.success]
+            tool_steps = [s for s in executed_steps if hasattr(s, 'action_type') and 'TOOL_CALL' in str(s.action_type)]
+            successful_tool_steps = [s for s in tool_steps if s.success]
             
-            # 如果有足够的成功步骤和输出
-            if len(successful_steps) >= 2 and len(current_outputs) > 0:
-                return True, "基于成功步骤和输出判断任务可能已完成"
+            # 检查是否有有意义的工具执行
+            has_meaningful_execution = len(successful_tool_steps) >= 2
             
-            # 如果执行步骤很多但成功率低
-            if len(executed_steps) > 5 and len(successful_steps) < 2:
-                return True, "执行步骤较多但成功率低，建议停止"
+            # 检查输出质量 - 不仅要有输出，还要有足够的内容
+            has_substantial_output = (
+                len(current_outputs) > 0 and 
+                any(len(output) > 100 for output in current_outputs)  # 至少有一个输出超过100字符
+            )
             
-            return False, "任务尚未完成，建议继续执行"
+            # 检查执行多样性 - 是否使用了不同的工具
+            unique_tools = set()
+            for step in successful_tool_steps:
+                if hasattr(step, 'tool_id') and step.tool_id:
+                    unique_tools.add(step.tool_id)
+            
+            has_tool_diversity = len(unique_tools) >= 2  # 至少使用了2个不同的工具
+            
+            # 成功率检查
+            success_rate = len(successful_steps) / len(executed_steps) if executed_steps else 0
+            
+            # 更严格的完成条件
+            if (has_meaningful_execution and 
+                has_substantial_output and 
+                has_tool_diversity and 
+                success_rate >= 0.7):
+                return True, f"基于严格检查判断任务已完成: {len(successful_tool_steps)}个工具成功执行，使用了{len(unique_tools)}个不同工具，成功率{success_rate:.1%}"
+            
+            # 检查是否应该停止（避免无限循环）
+            if len(executed_steps) > 8:
+                if success_rate < 0.3:
+                    return True, f"执行步骤过多({len(executed_steps)})且成功率低({success_rate:.1%})，建议停止"
+                elif len(successful_tool_steps) == 0:
+                    return True, "没有成功的工具执行，建议停止"
+            
+            # 分析未完成的原因
+            missing_reasons = []
+            if not has_meaningful_execution:
+                missing_reasons.append(f"工具执行不足(仅{len(successful_tool_steps)}个)")
+            if not has_substantial_output:
+                missing_reasons.append("输出内容不足")
+            if not has_tool_diversity:
+                missing_reasons.append(f"工具使用单一(仅{len(unique_tools)}种)")
+            if success_rate < 0.7:
+                missing_reasons.append(f"成功率过低({success_rate:.1%})")
+            
+            return False, f"任务尚未完成: {', '.join(missing_reasons)}"
             
         except Exception as e:
             logger.error(f"简单完成检查失败: {e}")
@@ -590,9 +643,9 @@ class StepPlanner:
             if any(word in task.description.lower() for word in ['搜索', 'search', '查找', '调研']):
                 fallback_steps.append(PlannedStep(
                     step_id=f"fallback_{task.task_id}_1",
-                    action="search",
-                    tool_id="deepsearch-mcp-server" if "deepsearch-mcp-server" in available_tools else "web-search",
-                    parameters={"query": task.description},
+                    action="research",
+                    tool_id="mcp-deepsearch" if "mcp-deepsearch" in available_tools else "web-search",
+                    parameters={"question": task.description},
                     priority=StepPriority.HIGH,
                     success_criteria="获得相关搜索结果"
                 ))
@@ -600,8 +653,8 @@ class StepPlanner:
             if any(word in task.description.lower() for word in ['计算', 'calculate', '代码', 'code']):
                 fallback_steps.append(PlannedStep(
                     step_id=f"fallback_{task.task_id}_2",
-                    action="execute",
-                    tool_id="python-executor-mcp-server" if "python-executor-mcp-server" in available_tools else "python",
+                    action="microsandbox_execute",
+                    tool_id="microsandbox-mcp-server" if "microsandbox-mcp-server" in available_tools else "python",
                     parameters={"code": "# 分析任务并执行相关计算"},
                     priority=StepPriority.MEDIUM,
                     success_criteria="代码执行成功"
@@ -612,9 +665,9 @@ class StepPlanner:
                 fallback_steps.extend([
                     PlannedStep(
                         step_id=f"fallback_{task.task_id}_1",
-                        action="analyze",
-                        tool_id=available_tools[0] if available_tools else "deepsearch-mcp-server",
-                        parameters={"task": task.description},
+                        action="analyze_tool_needs",
+                        tool_id=available_tools[0] if available_tools else "mcp-search-tool",
+                        parameters={"task_description": task.description},
                         priority=StepPriority.MEDIUM,
                         success_criteria="完成任务分析"
                     ),
@@ -628,9 +681,9 @@ class StepPlanner:
                     ),
                     PlannedStep(
                         step_id=f"fallback_{task.task_id}_3",
-                        action="complete_task",
-                        tool_id=available_tools[0] if available_tools else "deepsearch-mcp-server",
-                        parameters={"final_check": True},
+                        action="research",
+                        tool_id=available_tools[0] if available_tools else "mcp-deepsearch",
+                        parameters={"question": task.description},
                         priority=StepPriority.MEDIUM,
                         success_criteria="完成任务并生成结果"
                     )
@@ -700,3 +753,67 @@ class StepPlanner:
             self._execution_history.clear()
         
         logger.info(f"已清理规划缓存: {task_id or 'all'}")
+    
+    def _evaluate_output_quality(self, outputs: List[str]) -> float:
+        """评估输出质量，返回0-1的分数"""
+        if not outputs:
+            return 0.0
+        
+        total_length = sum(len(output) for output in outputs)
+        avg_length = total_length / len(outputs)
+        
+        # 基于输出数量和质量的综合评分
+        quantity_score = min(1.0, len(outputs) / 3)  # 3个输出为满分
+        length_score = min(1.0, avg_length / 200)  # 200字符为满分
+        
+        # 检查内容质量
+        quality_indicators = 0
+        for output in outputs:
+            content = output.lower()
+            # 正面指标
+            if any(indicator in content for indicator in ['成功', '完成', '结果', 'success', 'result', 'output']):
+                quality_indicators += 0.3
+            # 数据指标
+            if any(indicator in content for indicator in ['数据', '信息', '内容', 'data', 'information', 'content']):
+                quality_indicators += 0.2
+            # 避免错误指标
+            if any(indicator in content for indicator in ['错误', '失败', 'error', 'failed', 'exception']):
+                quality_indicators -= 0.2
+        
+        content_score = min(1.0, quality_indicators / len(outputs))
+        
+        # 综合评分
+        final_score = (quantity_score * 0.3 + length_score * 0.4 + content_score * 0.3)
+        return max(0.0, min(1.0, final_score))
+    
+    def _evaluate_step_quality(self, step: ExecutionStep, outputs: List[str]) -> float:
+        """评估单个步骤的质量"""
+        score = 0.0
+        
+        # 基础成功分
+        if step.success:
+            score += 0.4
+        
+        # 步骤输出质量
+        if hasattr(step, 'observation') and step.observation:
+            obs_length = len(step.observation)
+            if obs_length > 100:
+                score += 0.3
+            elif obs_length > 50:
+                score += 0.2
+            else:
+                score += 0.1
+        
+        # 执行时间合理性
+        if hasattr(step, 'duration') and step.duration:
+            if 1 <= step.duration <= 30:  # 合理时间范围
+                score += 0.1
+        
+        # 输出关联性
+        if outputs and hasattr(step, 'observation'):
+            for output in outputs:
+                if step.observation and len(step.observation) > 20:
+                    score += 0.2
+                    break
+        
+        return min(1.0, score)

@@ -166,6 +166,13 @@ class IntelligentErrorRecovery:
         # 学习和优化
         await self._learn_from_recovery(error_event, recovery_success, recovery_plan)
         
+        # 在 handle_error 方法中，使用 error_signature 检查重复
+        error_signature = create_error_signature(error_event.tool_id, error_event.context.get('action', ''), error_event.error_type)
+        recent_same_errors = [e for e in self.recent_errors if create_error_signature(e.tool_id, e.context.get('action', ''), e.error_type) == error_signature]
+        if len(recent_same_errors) >= 2:
+            # 触发智能重试或Critic
+            pass  # 这里可以添加智能重试或升级处理的逻辑
+        
         return recovery_success
     
     def _create_error_event(self, error: Exception, component: str, context: Dict[str, Any]) -> ErrorEvent:
@@ -1161,3 +1168,6 @@ class IntelligentErrorRecovery:
             return "一般"
         else:
             return "不佳"
+
+def create_error_signature(tool_id: str, action: str, error_type: str) -> str:
+    return f"{tool_id}::{action}::{error_type}"

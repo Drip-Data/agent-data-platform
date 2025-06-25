@@ -251,8 +251,8 @@
         {
           "server_id": "browser-use-mcp-server",
           "server_name": "Browser Use Mcp Server",
-          "description": "可用工具 (操作: navigate_to_url, get_page_content, click_element, fill_form)",
-          "available_actions": ["navigate_to_url", "get_page_content", "click_element", "fill_form"]
+          "description": "可用工具 (操作: browser_navigate, browser_extract_content, browser_click_element, browser_input_text, browser_search_google, browser_use_execute_task)",
+          "available_actions": ["browser_navigate", "browser_extract_content", "browser_click_element", "browser_input_text", "browser_search_google", "browser_use_execute_task"]
         },
         {
           "server_id": "mcp-deepsearch",

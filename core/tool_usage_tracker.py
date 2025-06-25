@@ -21,6 +21,7 @@ class ToolUsageRecord:
     duration: float = 0.0        # 执行时长
     success: bool = True         # 是否成功
     result: str = ""             # 执行结果
+    is_meta: bool = False        # 是否为元数据步骤（如工具快照）
 
 class ToolUsageTracker:
     """工具使用跟踪器"""
@@ -41,7 +42,8 @@ class ToolUsageTracker:
                          parameters: Dict[str, Any],
                          result: str = "",
                          success: bool = True,
-                         duration: float = 0.0) -> None:
+                         duration: float = 0.0,
+                         is_meta: bool = False) -> None:
         """记录工具使用"""
         
         # 查找对应的服务器名称
@@ -58,10 +60,14 @@ class ToolUsageTracker:
             result=result
         )
         
+        # 🔧 新增：为记录添加元数据标记
+        record.is_meta = is_meta
+        
         self.used_tools_records.append(record)
         self.used_tool_servers.add(tool_server_id)
         
-        logger.info(f"🔧 记录工具使用: {tool_server_id}.{action}")
+        log_type = "📊 记录元数据" if is_meta else "🔧 记录工具使用"
+        logger.info(f"{log_type}: {tool_server_id}.{action}")
         
     def get_available_tools_summary(self) -> List[Dict[str, Any]]:
         """获取可用工具摘要"""
@@ -101,7 +107,7 @@ class ToolUsageTracker:
         ]
     
     def _parse_available_tools(self, tools_info: str) -> List[Dict[str, Any]]:
-        """解析可用工具信息"""
+        """解析可用工具信息 - 支持多种格式"""
         available_tools = []
         
         if not tools_info or "暂无可用工具" in tools_info:
@@ -110,10 +116,45 @@ class ToolUsageTracker:
         try:
             # 解析工具描述文本
             lines = tools_info.split('\n')
+            current_tool = None
+            
             for line in lines:
                 line = line.strip()
-                if line.startswith('- ') and ':' in line:
-                    # 格式: "- server-id: 可用工具 (操作: action1, action2, action3)"
+                
+                # 检测新的结构化工具格式: "- **tool-id** (Tool Name): description"
+                if line.startswith('- **') and '**' in line[4:]:
+                    # 提取工具ID和描述
+                    parts = line[4:].split('**', 1)  # 移除 "- **" 前缀
+                    if len(parts) == 2:
+                        tool_id = parts[0].strip()
+                        rest = parts[1].strip()
+                        
+                        # 提取工具名称和描述
+                        if rest.startswith('(') and '):' in rest:
+                            name_end = rest.index('):')
+                            tool_name = rest[1:name_end]
+                            description = rest[name_end+2:].strip()
+                        else:
+                            tool_name = self._get_server_name(tool_id)
+                            description = rest.lstrip(':').strip()
+                        
+                        current_tool = {
+                            "server_id": tool_id,
+                            "server_name": tool_name,
+                            "description": description,
+                            "available_actions": []
+                        }
+                        available_tools.append(current_tool)
+                
+                # 检测操作行: "    • action_name: description"
+                elif line.startswith('    •') and current_tool is not None:
+                    action_part = line[5:].strip()  # 移除 "    •" 前缀
+                    if ':' in action_part:
+                        action_name = action_part.split(':', 1)[0].strip()
+                        current_tool["available_actions"].append(action_name)
+                
+                # 兼容旧格式: "- server-id: 可用工具 (操作: action1, action2, action3)"
+                elif line.startswith('- ') and ':' in line and '**' not in line:
                     parts = line[2:].split(':', 1)  # 移除 "- " 前缀
                     if len(parts) == 2:
                         server_id = parts[0].strip()
@@ -133,6 +174,7 @@ class ToolUsageTracker:
                             "description": description,
                             "available_actions": actions
                         })
+                        current_tool = None  # 重置当前工具，避免后续操作被误加入
                         
         except Exception as e:
             logger.warning(f"解析可用工具信息失败: {e}")
@@ -155,12 +197,17 @@ class ToolUsageTracker:
         return name_mapping.get(server_id, server_id.replace('-', ' ').title())
     
     def get_usage_statistics(self) -> Dict[str, Any]:
-        """获取使用统计信息"""
+        """获取使用统计信息 - 排除元数据步骤"""
+        # 过滤出真实的工具调用（排除元数据步骤）
+        real_tool_calls = [record for record in self.used_tools_records if not getattr(record, 'is_meta', False)]
+        
         return {
             "available_tools_count": len(self.available_tools),
             "used_servers_count": len(self.used_tool_servers),
-            "total_tool_calls": len(self.used_tools_records),
-            "successful_calls": sum(1 for record in self.used_tools_records if record.success),
-            "total_execution_time": sum(record.duration for record in self.used_tools_records),
-            "tool_usage_rate": len(self.used_tool_servers) / max(len(self.available_tools), 1)
+            "total_tool_calls": len(real_tool_calls),  # 只计算真实工具调用
+            "successful_calls": sum(1 for record in real_tool_calls if record.success),  # 只计算真实成功调用
+            "total_execution_time": sum(record.duration for record in real_tool_calls),
+            "tool_usage_rate": len(self.used_tool_servers) / max(len(self.available_tools), 1),
+            # 🔧 新增：元数据统计
+            "meta_steps_count": len(self.used_tools_records) - len(real_tool_calls)
         }

@@ -1,48 +1,53 @@
 [
   {
-    "essence_id": "essence_1750609368_aebcf7fd-f3ef-4bd3-a2b3-61d260cb6c82",
+    "essence_id": "essence_1750857400_d492cf3c-3a41-4663-b333-2f2423735064",
     "task_type": "reasoning",
-    "domain": "algorithm",
-    "query": "使用MicroSandbox执行Python代码，计算并输出斐波那契数列的前10项。此任务旨在验证代码执行能力，特别是针对基础算法的实现。",
-    "complexity_level": "simple",
-    "success_pattern": {
-      "duration": 190.857,
-      "steps_count": 2,
-      "key_features": [
-        "代码执行",
-        "算法实现",
-        "斐波那契数列",
-        "MicroSandbox工具",
-        "任务失败（LLM未指定tool_id）"
-      ],
-      "confidence": 0.95,
-      "tools_used": []
-    },
-    "extracted_at": "2025-06-23T00:22:48.254835",
-    "source_trajectory_id": "aebcf7fd-f3ef-4bd3-a2b3-61d260cb6c82"
-  },
-  {
-    "essence_id": "essence_1750609369_e7e271b2-0437-415e-a02d-0c4d7b5a6e4c",
-    "task_type": "reasoning",
-    "domain": "algorithm",
-    "query": "在项目中搜索包含'asyncio'的文件内容，并利用Knowledge_Synthesis_Engine工具进行相关知识的整合与分析。此任务需要多工具协同，并涉及对代码库的深入研究以理解异步编程的应用。",
+    "domain": "web_automation",
+    "query": "利用DeepSearch工具，深入研究Python asyncio的核心概念、基本用法、关键发现及最新发展，生成一份结构化、专业的深度分析报告，以全面掌握异步编程技术。",
     "complexity_level": "medium",
     "success_pattern": {
-      "duration": 95.366,
-      "steps_count": 4,
+      "duration": 104.981,
+      "steps_count": 3,
       "key_features": [
-        "多工具协同使用 (Search Tool, Knowledge_Synthesis_Engine)",
-        "代码库内容搜索与分析",
-        "涉及异步编程概念 ('asyncio')",
-        "知识合成与推理"
+        "深度研究与分析",
+        "利用专业研究工具",
+        "生成结构化报告",
+        "聚焦Python异步编程"
       ],
       "confidence": 0.95,
       "tools_used": [
-        "mcp-search-tool",
-        "browser_navigator"
+        "file_processor",
+        "browser_navigator",
+        "python_executor"
       ]
     },
-    "extracted_at": "2025-06-23T00:22:49.586306",
-    "source_trajectory_id": "e7e271b2-0437-415e-a02d-0c4d7b5a6e4c"
+    "extracted_at": "2025-06-25T21:16:40.588500",
+    "source_trajectory_id": "d492cf3c-3a41-4663-b333-2f2423735064"
+  },
+  {
+    "essence_id": "essence_1750857401_6c05a545-2897-4328-bc6f-60852436b2e2",
+    "task_type": "reasoning",
+    "domain": "web_automation",
+    "query": "使用浏览器工具访问Python官网首页（https://www.python.org/），并尝试提取其主要信息。该任务旨在实现网页内容的自动化抓取，但执行过程中遇到了工具调用参数的错误，导致任务未能成功完成。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 48.797,
+      "steps_count": 7,
+      "key_features": [
+        "网页内容抓取",
+        "浏览器工具使用",
+        "工具调用参数错误",
+        "任务执行失败",
+        "自动化尝试"
+      ],
+      "confidence": 0.95,
+      "tools_used": [
+        "file_processor",
+        "browser_navigator",
+        "python_executor"
+      ]
+    },
+    "extracted_at": "2025-06-25T21:16:41.709915",
+    "source_trajectory_id": "6c05a545-2897-4328-bc6f-60852436b2e2"
   }
 ]
