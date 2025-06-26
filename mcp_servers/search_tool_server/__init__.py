@@ -1,0 +1,1 @@
+# mcp_servers/search_tool_server/__init__.py

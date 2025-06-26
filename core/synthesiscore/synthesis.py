@@ -30,11 +30,14 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 import aiofiles
-import redis
+import redis  # For synchronous operations in threading contexts
 import redis.asyncio as async_redis
 
-from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType
+from ..interfaces import TaskSpec, TrajectoryResult, TaskType, ExecutionStep, ActionType, ErrorType, LLMInteraction
 from ..llm_client import LLMClient
+from ..toolscore.unified_tool_library import UnifiedToolLibrary
+from ..toolscore.interfaces import ToolType, FunctionToolSpec, ToolCapability
+from ..utils.path_utils import get_output_dir, get_trajectories_dir
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +89,7 @@ class TrajectoryHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"❌ 发送处理命令失败: {e}")
 
-class SimpleSynthesizer:
+class SynthesisService:
     """简单任务合成器 - 基于JSON文件存储"""
     
     def __init__(self, config: Dict):
@@ -94,16 +97,16 @@ class SimpleSynthesizer:
         self.redis = async_redis.from_url(config["redis_url"])  # 使用异步redis客户端
         self.llm_client = LLMClient(config)
         self.enabled = config.get("synthesis_enabled", False)
-        
-        # 使用容器内路径
-        self.task_essences_path = "/app/output/task_essences.json"
-        self.seed_tasks_path = "/app/output/seed_tasks.jsonl"
-        self.processed_trajectories_path = "/app/output/processed_trajectories.json"  # 新增：已处理轨迹记录文件
+        self.tool_library = UnifiedToolLibrary() # 初始化UnifiedToolLibrary
+          # 使用统一的路径管理
+        self.task_essences_path = str(get_output_dir() / "task_essences.json")
+        self.seed_tasks_path = str(get_output_dir() / "seed_tasks.jsonl")
+        self.processed_trajectories_path = str(get_output_dir() / "processed_trajectories.json")
         self.auto_monitor_enabled = config.get("auto_monitor_trajectories", True)
         self.auto_export_seeds = config.get("auto_export_seeds", True)
         
-        # 指定监控的轨迹集合文件 - 使用容器内路径
-        self.trajectories_collection_path = "/app/output/trajectories/trajectories_collection.json"
+        # 指定监控的轨迹集合文件
+        self.trajectories_collection_path = str(get_output_dir("trajectories") / "trajectories_collection.json")
         self.observer = None
         
         # 文件锁
@@ -210,6 +213,8 @@ class SimpleSynthesizer:
             
         logger.info("🚀 启动基于JSON的任务合成器...")
         
+        await self.tool_library.initialize() # 初始化UnifiedToolLibrary
+        
         # 启动自动轨迹监控（如果启用）
         if self.auto_monitor_enabled:
             await self._start_trajectory_monitoring()
@@ -257,10 +262,18 @@ class SimpleSynthesizer:
                 return
             
             logger.info(f"🔄 开始处理轨迹集合文件: {self.trajectories_collection_path}")
-            
+
+            if not os.path.exists(self.trajectories_collection_path) or os.path.getsize(self.trajectories_collection_path) == 0:
+                logger.info(f"📝 Trajectory collection file is empty or does not exist: {self.trajectories_collection_path}")
+                return
+
             # 读取轨迹集合数据
-            with open(self.trajectories_collection_path, 'r', encoding='utf-8') as f:
-                trajectories_data = json.load(f)
+            try:
+                with open(self.trajectories_collection_path, 'r', encoding='utf-8') as f:
+                    trajectories_data = json.load(f)
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Error decoding JSON from {self.trajectories_collection_path}: {e}")
+                return
             
             if not isinstance(trajectories_data, list):
                 logger.error("❌ 轨迹集合文件格式错误，应为轨迹数组")
@@ -294,7 +307,7 @@ class SimpleSynthesizer:
                             new_essences.append(asdict(essence))
                             
                             # 直接转换为种子任务
-                            seed_task = self._convert_essence_to_seed(essence)
+                            seed_task = await self._convert_essence_to_seed(essence)
                             if seed_task:
                                 new_seed_tasks.append(seed_task)
                                 processed_count += 1
@@ -364,7 +377,7 @@ class SimpleSynthesizer:
         else:
             logger.debug(f"⏩ 忽略非目标文件: {trajectory_path}")
     
-    def _convert_essence_to_seed(self, essence: TaskEssence) -> Optional[Dict]:
+    async def _convert_essence_to_seed(self, essence: TaskEssence) -> Optional[Dict]:
         """将任务本质直接转换为种子任务"""
         try:
             # 生成种子任务ID
@@ -374,7 +387,7 @@ class SimpleSynthesizer:
             success_pattern = essence.success_pattern
             expected_tools = success_pattern.get('tools_used', [])
             if not expected_tools:
-                expected_tools = self._infer_expected_tools(essence.task_type, essence.domain)
+                expected_tools = await self._infer_expected_tools(essence.task_type, essence.domain)
             
             # 推断最大步数
             max_steps = self._infer_max_steps(essence.complexity_level, essence.task_type)
@@ -474,25 +487,66 @@ class SimpleSynthesizer:
         hash_obj = hashlib.md5(description.encode('utf-8'))
         return hash_obj.hexdigest()[:8]
     
-    def _infer_expected_tools(self, task_type: str, domain: str) -> List[str]:
-        """根据任务类型和领域推断预期工具"""
-        tools_map = {
-            'code': ['python_executor'],
-            'web': ['browser', 'selenium'],
-            'reasoning': ['browser', 'python_executor']
+    async def _infer_expected_tools(self, task_type: str, domain: str) -> List[str]:
+        """根据任务类型和领域推断预期工具 - 动态从UnifiedToolLibrary获取"""
+        
+        all_tools = await self.tool_library.get_all_tools()
+        available_tool_ids = {tool.tool_id for tool in all_tools}
+        
+        inferred_tools = set()
+
+        # 优先匹配明确的工具ID
+        if task_type == 'code':
+            if "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+        elif task_type == 'web':
+            if "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            # 假设有其他web工具，例如"web_scraper"
+            # if "web_scraper" in available_tool_ids:
+            #     inferred_tools.add("web_scraper")
+        elif task_type == 'reasoning':
+            if "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            if "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+
+        # 根据领域进一步细化，匹配工具的tags或description
+        # 这是一个示例，实际可能需要更复杂的匹配逻辑
+        domain_keywords_map = {
+            'data_analysis': ['data', 'analysis', 'pandas', 'numpy', 'matplotlib'],
+            'web_automation': ['web', 'browser', 'scrape', 'requests', 'BeautifulSoup'],
+            'algorithm': ['algorithm', 'math', 'calculate'],
+            'research': ['search', 'research', 'query'],
+            'stock_analysis': ['stock', 'finance', 'market']
         }
+
+        domain_keywords = domain_keywords_map.get(domain, [])
         
-        base_tools = tools_map.get(task_type, [])
+        for tool in all_tools:
+            tool_description_lower = tool.description.lower()
+            tool_name_lower = tool.name.lower()
+            tool_tags_lower = [tag.lower() for tag in tool.tags] if tool.tags else []
+
+            # 检查工具描述、名称或标签是否包含领域关键词
+            if any(keyword in tool_description_lower or
+                   keyword in tool_name_lower or
+                   any(keyword in tag for tag in tool_tags_lower)
+                   for keyword in domain_keywords):
+                inferred_tools.add(tool.tool_id)
         
-        # 根据领域进一步细化
-        if domain == 'data_analysis':
-            base_tools.extend(['matplotlib', 'pandas', 'numpy'])
-        elif domain == 'web_automation':
-            base_tools.extend(['BeautifulSoup', 'requests'])
-        elif domain == 'algorithm':
-            base_tools.extend(['math'])
-        
-        return list(set(base_tools))  # 去重
+        # 如果没有推断出任何工具，则根据任务类型提供一个默认工具
+        if not inferred_tools:
+            if task_type == 'code' and "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+            elif task_type == 'web' and "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            elif task_type == 'reasoning' and "browser_navigator" in available_tool_ids:
+                inferred_tools.add("browser_navigator")
+            elif task_type == 'reasoning' and "python_executor" in available_tool_ids:
+                inferred_tools.add("python_executor")
+
+        return list(inferred_tools)
     
     def _infer_max_steps(self, complexity_level: str, task_type: str) -> int:
         """根据复杂度和任务类型推断最大步数"""
@@ -524,8 +578,9 @@ class SimpleSynthesizer:
         while True:
             try:
                 # 监听synthesis:commands队列，使用$表示从当前最新位置开始读取新消息
-                streams = {"synthesis:commands": "$"}
-                result = await self.redis.xread(streams, count=1, block=5000)  # 5秒超时
+                # 使用 type: ignore 抑制 Pylance 对 redis.asyncio.Redis.xread 类型提示的误报。
+                streams = {b"synthesis:commands": b"$"}
+                result = await self.redis.xread(streams, count=1, block=5000)  # type: ignore # 5秒超时
                 
                 if result:
                     for stream_name, messages in result:
@@ -542,7 +597,8 @@ class SimpleSynthesizer:
         """处理队列中现有的待处理命令"""
         try:
             # 读取队列中所有现有命令
-            result = await self.redis.xread({"synthesis:commands": "0"}, count=100)
+            # 使用 type: ignore 抑制 Pylance 对 redis.asyncio.Redis.xread 类型提示的误报。
+            result = await self.redis.xread({b"synthesis:commands": b"0"}, count=100)  # type: ignore
             
             if result:
                 for stream_name, messages in result:
@@ -630,13 +686,13 @@ class SimpleSynthesizer:
                 
         except Exception as e:
             logger.error(f"Error handling synthesis command: {e}")
-
+    
     async def _process_all_trajectories_once(self):
         """一次性处理所有轨迹（不循环）"""
         logger.info("🔄 Starting one-time trajectory processing...")
         
         try:
-            trajectories_dir = "/app/output/trajectories"
+            trajectories_dir = get_trajectories_dir()
             if not os.path.exists(trajectories_dir):
                 logger.warning("Trajectories directory not found")
                 return
@@ -667,9 +723,8 @@ class SimpleSynthesizer:
     async def _process_unprocessed_trajectories(self):
         """只处理未处理的轨迹"""
         logger.info("🔄 Processing only unprocessed trajectories...")
-        
         try:
-            trajectories_dir = "/app/output/trajectories"
+            trajectories_dir = get_trajectories_dir()
             if not os.path.exists(trajectories_dir):
                 logger.warning("Trajectories directory not found")
                 return
@@ -693,8 +748,16 @@ class SimpleSynthesizer:
         """处理单个文件中未处理的轨迹，返回处理数量"""
         try:
             logger.info(f"🔍 Checking for unprocessed trajectories in: {trajectory_path}")
+            if not os.path.exists(trajectory_path) or os.path.getsize(trajectory_path) == 0:
+                logger.info(f"📝 Trajectory file is empty or does not exist: {trajectory_path}")
+                return 0
+            
             with open(trajectory_path, 'r', encoding='utf-8') as f:
-                trajectory_data = json.load(f)
+                try:
+                    trajectory_data = json.load(f)
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Error decoding JSON from {trajectory_path}: {e}")
+                    return 0 #无法解析文件，返回0
             
             processed_count = 0
             new_seed_tasks = []  # 收集新生成的种子任务
@@ -720,7 +783,7 @@ class SimpleSynthesizer:
                                         self._store_essence(essence)
                                         
                                         # 立即生成种子任务
-                                        seed_task = self._convert_essence_to_seed(essence)
+                                        seed_task = await self._convert_essence_to_seed(essence)
                                         if seed_task:
                                             new_seed_tasks.append(seed_task)
                                             logger.info(f"🌱 Generated seed task from essence: {essence.essence_id}")
@@ -761,7 +824,7 @@ class SimpleSynthesizer:
                             self._store_essence(essence)
                             
                             # 立即生成种子任务
-                            seed_task = self._convert_essence_to_seed(essence)
+                            seed_task = await self._convert_essence_to_seed(essence)
                             if seed_task:
                                 await self._append_seed_tasks([seed_task])
                                 logger.info(f"🌱 Generated and saved seed task from essence: {essence.essence_id}")
@@ -909,24 +972,28 @@ class SimpleSynthesizer:
         if trajectory.success:
             return True
         
-        # 2. 有执行步骤且runtime_id包含特定类型的轨迹
+        # 2. reasoning runtime的轨迹，即使失败也可能有价值（不要求有执行步骤）
+        runtime_id = trajectory.runtime_id.lower()
+        if 'reasoning' in runtime_id:
+            logger.info(f"🧠 Found reasoning trajectory: {trajectory.task_id}")
+            return True
+        
+        # 3. 有执行步骤的轨迹
         if len(trajectory.steps) > 0:
-            runtime_id = trajectory.runtime_id.lower()
-            
-            # reasoning runtime的轨迹，即使失败也可能有价值
-            if 'reasoning' in runtime_id:
-                logger.info(f"🧠 Found reasoning trajectory: {trajectory.task_id}")
-                return True
-            
             # 有多个步骤的复杂任务，即使失败也可能有价值
             if len(trajectory.steps) >= 2:
                 return True
         
-        # 3. 任务描述包含特定关键词
+        # 4. 任务描述包含特定关键词
         task_desc = trajectory.task_description.lower()
         valuable_keywords = ['reasoning', '推理', '分析', 'analysis', 'compare', '对比', '研究']
         if any(keyword in task_desc for keyword in valuable_keywords):
             logger.info(f"🔎 Found valuable keywords in task description: {trajectory.task_id}")
+            return True
+        
+        # 5. 有最终结果的轨迹，即使失败也可能有价值
+        if trajectory.final_result and len(trajectory.final_result.strip()) > 50:
+            logger.info(f"📝 Found trajectory with substantial final result: {trajectory.task_id}")
             return True
         
         return False
@@ -989,24 +1056,47 @@ class SimpleSynthesizer:
     def _convert_trajectory_format(self, data: Dict) -> Optional[TrajectoryResult]:
         """将轨迹数据转换为TrajectoryResult格式"""
         try:
+            logger.debug(f"Attempting to convert trajectory data for task_id: {data.get('task_id', 'Unknown')}, type of data: {type(data)}")
             # 转换steps格式
             converted_steps = []
-            for step_data in data.get('steps', []):
-                # 映射字段名称
-                converted_step = ExecutionStep(
-                    step_id=step_data.get('step_id', 0),
-                    action_type=ActionType(step_data.get('action_type', 'code_generation')),
-                    action_params=step_data.get('tool_input', {}),
-                    observation=step_data.get('tool_output', ''),
-                    success=step_data.get('success', True),
-                    thinking=step_data.get('thinking'),
-                    execution_code=step_data.get('execution_code'),
-                    error_type=ErrorType(step_data['error_type']) if step_data.get('error_type') else None,
-                    error_message=step_data.get('error_message'),
-                    timestamp=step_data.get('timestamp', time.time()),
-                    duration=step_data.get('duration', 0.0)
-                )
-                converted_steps.append(converted_step)
+            steps_list = data.get('steps', [])
+            if not isinstance(steps_list, list):
+                logger.error(f"Field 'steps' is not a list for task_id: {data.get('task_id', 'Unknown')}. Got {type(steps_list)}. Skipping steps conversion.")
+                steps_list = []
+
+            for i, step_data in enumerate(steps_list):
+                logger.debug(f"Processing step {i} for task_id: {data.get('task_id', 'Unknown')}: type={type(step_data)}, content='{str(step_data)[:200]}...'")
+                
+                # 处理ExecutionStep对象
+                if hasattr(step_data, 'to_dict'):
+                    # 如果是ExecutionStep对象，直接使用
+                    converted_steps.append(step_data)
+                    continue
+                elif isinstance(step_data, str) and step_data.startswith('ExecutionStep('):
+                    # 如果是ExecutionStep的字符串表示，跳过（无法安全解析）
+                    logger.warning(f"Skipping ExecutionStep string representation for step {i} in task_id: {data.get('task_id', 'Unknown')}")
+                    continue
+                elif isinstance(step_data, dict):
+                    # 如果是字典，转换为ExecutionStep对象
+                    converted_step = ExecutionStep(
+                        step_id=step_data.get('step_id', 0),
+                        action_type=ActionType(step_data.get('action_type', 'code_generation')),
+                        action_params=step_data.get('action_params', step_data.get('tool_input', {})),
+                        observation=step_data.get('observation', step_data.get('tool_output', '')),
+                        success=step_data.get('success', True),
+                        thinking=step_data.get('thinking'),
+                        execution_code=step_data.get('execution_code'),
+                        error_type=self._safe_parse_error_type(step_data.get('error_type')), # 确保是ErrorType枚举
+                        error_message=step_data.get('error_message'),
+                        timestamp=step_data.get('timestamp', time.time()),
+                        duration=step_data.get('duration', 0.0),
+                        # llm_interactions 字段在 ExecutionStep 定义中，但原始数据中可能没有，需要处理
+                        llm_interactions=[LLMInteraction(**interaction_dict) for interaction_dict in step_data.get('llm_interactions', []) if isinstance(interaction_dict, dict)]
+                    )
+                    converted_steps.append(converted_step)
+                else:
+                    logger.error(f"Skipping step {i} for task_id: {data.get('task_id', 'Unknown')} due to unexpected format. Expected dict or ExecutionStep, got {type(step_data)}. Content: {str(step_data)[:200]}")
+                    continue
             
             # 创建TrajectoryResult对象
             return TrajectoryResult(
@@ -1017,7 +1107,7 @@ class SimpleSynthesizer:
                 success=data.get('success', False),
                 steps=converted_steps,
                 final_result=data.get('final_result', ''),
-                error_type=ErrorType(data['error_type']) if data.get('error_type') else None,
+                error_type=self._safe_parse_error_type(data.get('error_type')),
                 error_message=data.get('error_message'),
                 total_duration=data.get('total_duration', 0.0),
                 metadata=data.get('metadata', {}),
@@ -1028,6 +1118,33 @@ class SimpleSynthesizer:
             logger.error(f"Error converting trajectory format: {e}")
             return None
     
+    def _safe_parse_error_type(self, error_type_data) -> Optional[ErrorType]:
+        """安全解析错误类型"""
+        if not error_type_data:
+            return None
+        
+        try:
+            # 如果已经是ErrorType实例
+            if isinstance(error_type_data, ErrorType):
+                return error_type_data
+            
+            # 如果是字符串
+            if isinstance(error_type_data, str):
+                # 处理错误序列化的情况，如 'ErrorType.SYSTEM_ERROR'
+                if error_type_data.startswith('ErrorType.'):
+                    enum_name = error_type_data.replace('ErrorType.', '')
+                    # 将大写转换为小写下划线格式
+                    error_type_value = enum_name.lower()
+                    return ErrorType(error_type_value)
+                else:
+                    # 直接是枚举值
+                    return ErrorType(error_type_data)
+            
+            return None
+        except (ValueError, KeyError):
+            logger.warning(f"无法解析错误类型: {error_type_data}")
+            return None
+    
     async def _extract_essence(self, trajectory: TrajectoryResult) -> Optional[TaskEssence]:
         """使用LLM提取轨迹本质"""
         try:
@@ -1035,7 +1152,8 @@ class SimpleSynthesizer:
             prompt = self._build_extraction_prompt(trajectory)
             
             # 调用LLM
-            response = await self.llm_client._call_api(prompt)
+            messages = [{"role": "user", "content": prompt}]
+            response = await self.llm_client._call_api(messages)
             
             # 解析响应
             return self._parse_extraction_response(response, trajectory)
@@ -1232,32 +1350,36 @@ class SimpleSynthesizer:
         tools = set()
         
         for step in trajectory.steps:
-            # 基于action_type识别工具
-            action_type_str = str(step.action_type).lower()
-            if 'browser' in action_type_str or 'navigate' in action_type_str:
-                tools.add("browser")
-            elif 'code' in action_type_str or 'python' in action_type_str:
-                tools.add("python")
-            elif 'search' in action_type_str:
-                tools.add("search")
+            # 优先从 action_params 中提取 tool_id
+            if step.action_type == ActionType.TOOL_CALL and 'tool_id' in step.action_params:
+                tools.add(step.action_params['tool_id'])
             
-            # 基于action_params识别工具
+            # 如果没有明确的 tool_id，则基于 action_type 和 action_params 进行推断
+            action_type_str = str(step.action_type).lower()
+            
+            if 'browser_action' in action_type_str:
+                tools.add("browser_navigator") # 使用文档中定义的tool_id
+            elif 'code_execution' in action_type_str:
+                tools.add("python_executor") # 使用文档中定义的tool_id
+            
+            # 进一步基于 action_params 中的关键词推断
             if step.action_params:
                 params_str = str(step.action_params).lower()
                 if 'url' in params_str or 'navigate' in params_str:
-                    tools.add("browser")
+                    tools.add("browser_navigator")
                 if 'code' in params_str or 'python' in params_str:
-                    tools.add("python")
-                if 'search' in params_str or 'query' in params_str:
-                    tools.add("search")
+                    tools.add("python_executor")
+                # 假设有其他工具，例如文件处理工具
+                if 'file' in params_str or 'path' in params_str:
+                    tools.add("file_processor")
             
-            # 基于observation识别工具输出
+            # 基于 observation 识别工具输出 (作为补充)
             if step.observation:
                 obs_str = str(step.observation).lower()
                 if 'browser' in obs_str or 'page' in obs_str or 'website' in obs_str:
-                    tools.add("browser")
+                    tools.add("browser_navigator")
                 if 'python' in obs_str or 'execution' in obs_str:
-                    tools.add("python")
+                    tools.add("python_executor")
         
         return list(tools)
     
@@ -1408,7 +1530,7 @@ class SimpleSynthesizer:
                     )
                     
                     # 生成种子任务
-                    seed_task = self._convert_essence_to_seed(essence)
+                    seed_task = await self._convert_essence_to_seed(essence)
                     if seed_task:
                         seed_tasks.append(seed_task)
                         logger.debug(f"✅ 从本质 {essence.essence_id} 生成种子任务")
@@ -1546,7 +1668,8 @@ class SimpleSynthesizer:
 
 注意：确保生成的任务既保持原有特征，又具有创新性和实用价值。"""
             
-            response = await self.llm_client._call_api(prompt)
+            messages = [{"role": "user", "content": prompt}]
+            response = await self.llm_client._call_api(messages)
             
             # 解析响应
             import re
@@ -1627,7 +1750,7 @@ async def main():
         "synthesis_enabled": os.getenv("SYNTHESIS_ENABLED", "false").lower() == "true",
         "auto_monitor_trajectories": os.getenv("AUTO_MONITOR_TRAJECTORIES", "true").lower() == "true",
         "auto_export_seeds": os.getenv("AUTO_EXPORT_SEEDS", "true").lower() == "true",
-        "vllm_url": os.getenv("VLLM_URL", "http://vllm:8000")
+        # "vllm_url": os.getenv("VLLM_URL", "http://vllm:8000") # 用户不使用vLLM，注释掉此配置
     }
     
     # 输出配置信息
@@ -1637,7 +1760,7 @@ async def main():
     logger.info(f"  自动种子导出: {config['auto_export_seeds']}")
     logger.info(f"  存储方式: JSON文件")
     
-    synthesizer = SimpleSynthesizer(config)
+    synthesizer = SynthesisService(config)
     
     try:
         if config["synthesis_enabled"]:
@@ -1659,6 +1782,14 @@ async def main():
                 synthesizer.observer.join()
                 logger.info("📁 文件监控已停止")
             
+            # 清理UnifiedToolLibrary管理的资源
+            if hasattr(synthesizer, 'tool_library'):
+               
+               
+               
+                await synthesizer.tool_library.cleanup()
+                logger.info("🧹 UnifiedToolLibrary资源已清理")
+
             await synthesizer.redis.aclose()  # 使用aclose()替代close()
             logger.info("🔌 Redis连接已关闭")
         except Exception as e:
@@ -1666,4 +1797,4 @@ async def main():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main()) 
+    asyncio.run(main())

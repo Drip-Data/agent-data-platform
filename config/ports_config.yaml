@@ -1,0 +1,135 @@
+# Agent Data Platform 端口配置
+# 统一管理所有服务端口，避免冲突
+
+# 🚀 核心服务端口
+core_services:
+  task_api:
+    port: 8000
+    description: "任务提交和查询API"
+    health_endpoint: "/health"
+    
+  redis:
+    port: 6379
+    description: "Redis任务队列和缓存"
+    
+# 🔧 MCP服务器端口  
+mcp_servers:  
+  toolscore_mcp:
+    port: 8089 # 将端口从8090更改为8089，以避免冲突
+    description: "ToolScore MCP协议服务器"
+    protocol: "websocket"
+    endpoint: "/websocket"
+    # 明确禁用ToolScore MCP的自动端口检测，确保它始终使用8089
+    auto_detect_port: false
+    
+  toolscore_http:
+    port: 8088
+    description: "ToolScore HTTP监控API"
+    protocol: "http"
+    health_endpoint: "/health"
+    
+  # python_executor:  # 已替换为microsandbox
+  #   port: 8081
+  #   description: "Python代码执行器（已弃用）"
+  #   protocol: "websocket"
+  #   health_endpoint: "/health"
+  #   auto_start: false
+    
+  microsandbox_server:
+    port: 8090
+    description: "MicroSandbox MCP服务器 - 安全代码执行"
+    protocol: "websocket"
+    health_endpoint: "/health"
+    auto_start: true
+    type: "internal"  # 内部MCP服务器
+    
+  # microsandbox_service:  # 保留外部microsandbox服务配置供参考
+  #   port: 5555
+  #   description: "MicroSandbox外部服务（由msb server管理）"
+  #   protocol: "http"
+  #   type: "external"
+  #   auto_start: true
+  #   startup_method: "process"
+  #   start_command: "msb server start --detach --dev"
+  #   stop_command: "msb server stop"
+  #   health_endpoint: "/health"
+    
+  search_tool_server:
+    port: 8080 # 搜索工具MCP服务器
+    description: "文件内容搜索和代码定义搜索工具服务器"
+    protocol: "websocket"
+    health_endpoint: "/health"
+    auto_start: true
+    
+  browser_use_server:
+    port: 8084
+    description: "Browser-Use AI浏览器自动化服务器"
+    protocol: "websocket" 
+    health_endpoint: "/health"
+    auto_start: true
+    type: "internal"
+    
+  deepsearch_server:
+    port: 8086
+    description: "专业级深度搜索和研究工具服务器"
+    protocol: "websocket"
+    health_endpoint: "/health"
+    auto_start: true
+    type: "internal"
+
+# 🆕 未来扩展端口预留
+future_mcp_servers:
+# 🆕 未来扩展端口预留
+#   web_scraper:
+#     port: 8084
+#     description: "网页抓取工具服务器"
+#     auto_start: false
+    
+#   file_manager:
+#     port: 8085
+#     description: "文件管理工具服务器"
+#     auto_start: false
+    
+#   database_connector:
+#     port: 8086
+#     description: "数据库连接工具服务器"
+#     auto_start: false
+    
+#   image_processor:
+#     port: 8087
+#     description: "图像处理工具服务器"
+#     auto_start: false
+
+# 🔧 端口管理配置
+port_management:
+  auto_detect: false        # 禁用自动检测，使用固定端口以确保API可访问性
+  port_range_start: 8100     # 动态分配起始端口，避免与toolscore_mcp (8089) 冲突
+  port_range_end: 8200       # 动态分配结束端口
+  check_interval: 30         # 健康检查间隔(秒)
+  
+# 🚀 连接优化配置
+connection_settings:
+  # 连接超时配置
+  connection_timeout: 10     # 连接超时(秒)
+  health_check_timeout: 5    # 健康检查超时(秒)
+  ping_interval: 20          # WebSocket ping间隔(秒)
+  ping_timeout: 10           # WebSocket ping超时(秒)
+  
+  # 重试策略
+  max_retries: 3            # 最大重试次数
+  retry_delay: 1.0          # 重试间隔(秒)
+  exponential_backoff: true # 启用指数退避
+  
+  # 缓存配置
+  port_cache_ttl: 300       # 端口发现缓存TTL(秒)
+  service_discovery_cache: true  # 启用服务发现缓存
+  
+# 🌐 反向代理配置 (可选)
+reverse_proxy:
+  enabled: false
+  port: 80
+  ssl_port: 443
+  routes:
+    "/api/v1/tasks": "http://localhost:8000"
+    "/api/v1/tools": "http://localhost:8082"
+    "/ws/mcp": "ws://localhost:8089"

@@ -1,0 +1,272 @@
+# 🔧 P1-1: 配置化参数别名系统
+# 工具参数、动作和替代方案的统一配置
+
+# 参数别名映射 - 解决参数名称不一致问题
+parameter_aliases:
+  deepsearch:
+    # 统一查询参数
+    query: question
+    search_query: question
+    task_description: question
+    research_topic: question
+    research_query: question
+    search_term: question
+    search_content: question
+    topic: question
+    content: question
+    text: question
+    keywords: question
+    subject: question
+    prompt: question
+    description: question
+    objective: question
+    goal: question
+    task: question
+    requirement: question
+    request: question
+    
+  mcp-search-tool:
+    # 任务描述参数统一
+    question: task_description
+    query: task_description
+    requirement: task_description
+    need: task_description
+    description: task_description
+    objective: task_description
+    goal: task_description
+    purpose: task_description
+    task: task_description
+    request: task_description
+    prompt: task_description
+    # 搜索参数统一
+    query: search_term  # 用于search_file_content动作
+    search_query: search_term
+    term: search_term
+    content: search_term
+    pattern: search_term
+    keyword: search_term
+    text: search_term
+    string: search_term
+    phrase: search_term
+    expression: search_term
+    
+  microsandbox:
+    # 代码参数统一
+    script: code
+    python_code: code
+    command: code
+    program: code
+    source: code
+    content: code
+    text: code
+    snippet: code
+    instructions: code
+    implementation: code
+    algorithm: code
+    function: code
+    method: code
+    procedure: code
+    
+  browser_use:
+    # URL参数统一
+    link: url
+    address: url
+    site: url
+    website: url
+    page: url
+    target: url
+    destination: url
+    location: url
+    path: url
+    endpoint: url
+    resource: url
+    # 选择器参数统一
+    element: selector
+    target: selector
+    locator: selector
+    xpath: selector
+    css: selector
+    query: selector
+    path: selector
+    identifier: selector
+    reference: selector
+    element_selector: selector
+    # 文本参数统一
+    content: text
+    input: text
+    value: text
+    string: text
+    message: text
+    data: text
+
+# 动作别名映射 - 解决动作名称不一致问题
+action_aliases:
+  browser_use:
+    # 导航动作统一
+    navigate_to_url: browser_navigate
+    navigate: browser_navigate
+    browse_to: browser_navigate
+    go_to: browser_navigate
+    visit: browser_navigate
+    open: browser_navigate
+    # 点击动作统一
+    click: browser_click_element
+    click_on: browser_click_element
+    tap: browser_click_element
+    # 输入动作统一
+    type: browser_input_text
+    input: browser_input_text
+    fill: browser_input_text
+    enter: browser_input_text
+    # 提取动作统一
+    extract: browser_extract_content
+    get_content: browser_extract_content
+    scrape: browser_extract_content
+    # 搜索动作统一
+    search: browser_search_google
+    google: browser_search_google
+    
+  deepsearch:
+    # 搜索动作统一
+    search: research
+    query: research
+    investigate: research
+    analyze: research
+    deep_search: comprehensive_research
+    full_research: comprehensive_research
+    detailed_research: comprehensive_research
+    
+  microsandbox:
+    # 执行动作统一
+    execute: microsandbox_execute
+    run: microsandbox_execute
+    eval: microsandbox_execute
+    run_code: microsandbox_execute
+    exec: microsandbox_execute
+    # 安装动作统一
+    install: microsandbox_install_package
+    add_package: microsandbox_install_package
+    pip_install: microsandbox_install_package
+    
+  mcp-search-tool:
+    # 搜索动作保持原有名称
+    search: search_file_content
+    find: search_file_content
+    grep: search_file_content
+
+# 工具替代建议 - 解决工具选择错误问题
+tool_alternatives:
+  # 浏览器相关
+  navigate_tool: browser_use
+  web_browser: browser_use
+  browser_tool: browser_use
+  web_tool: browser_use
+  selenium: browser_use
+  
+  # 代码执行相关
+  code_runner: microsandbox
+  python_executor: microsandbox
+  sandbox: microsandbox
+  code_executor: microsandbox
+  interpreter: microsandbox
+  
+  # 搜索相关
+  search_engine: deepsearch
+  research_tool: deepsearch
+  deep_search: deepsearch
+  google_search: deepsearch
+  
+  # 文件搜索相关
+  file_search: mcp-search-tool
+  code_search: mcp-search-tool
+  grep_tool: mcp-search-tool
+
+# 常见错误修正映射
+error_corrections:
+  # 常见的参数错误
+  parameter_errors:
+    "缺少必需参数: url":
+      suggested_params:
+        - url
+        - link
+        - address
+      example_values:
+        url: "https://example.com"
+        
+    "缺少必需参数: code":
+      suggested_params:
+        - code
+        - script
+        - python_code
+      example_values:
+        code: "print('Hello World')"
+        
+    "缺少必需参数: question":
+      suggested_params:
+        - question
+        - query
+        - task_description
+      example_values:
+        question: "研究Python异步编程"
+        
+    "缺少必需参数: task_description":
+      suggested_params:
+        - task_description
+        - question
+        - objective
+      example_values:
+        task_description: "需要完成的具体任务描述"
+
+  # 常见的动作错误  
+  action_errors:
+    "不支持动作 navigate_to_url":
+      correct_action: browser_navigate
+      correct_tool: browser_use
+      
+    "不支持动作 execute":
+      correct_action: microsandbox_execute
+      correct_tool: microsandbox
+      
+    "不支持动作 search":
+      suggestions:
+        - action: research
+          tool: deepsearch
+          use_case: "深度研究和信息搜索"
+        - action: search_file_content
+          tool: mcp-search-tool
+          use_case: "文件内容搜索"
+
+# 智能建议配置
+smart_suggestions:
+  # 基于任务类型的工具建议
+  task_type_mapping:
+    research: deepsearch
+    browse: browser_use
+    code: microsandbox
+    search: mcp-search-tool
+    
+  # 基于关键词的动作建议
+  keyword_action_mapping:
+    deepsearch:
+      - keywords: ["研究", "调研", "分析", "了解", "调查"]
+        action: research
+      - keywords: ["深入", "详细", "全面", "comprehensive"]
+        action: comprehensive_research
+      - keywords: ["快速", "简单", "quick"]
+        action: quick_research
+        
+    browser_use:
+      - keywords: ["打开", "访问", "导航", "跳转", "navigate"]
+        action: browser_navigate
+      - keywords: ["点击", "按钮", "链接", "click"]
+        action: browser_click_element
+      - keywords: ["输入", "填写", "表单", "type"]
+        action: browser_input_text
+      - keywords: ["提取", "获取", "内容", "extract"]
+        action: browser_extract_content
+        
+    microsandbox:
+      - keywords: ["执行", "运行", "代码", "脚本", "execute"]
+        action: microsandbox_execute
+      - keywords: ["安装", "包", "库", "install"]
+        action: microsandbox_install_package

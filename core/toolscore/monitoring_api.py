@@ -1,0 +1,1318 @@
+"""
+ToolScore监控API
+提供HTTP接口查看工具注册状态和统计信息
+"""
+
+import asyncio
+import json
+import logging
+import os
+import time
+from typing import Optional
+from aiohttp import web
+import aiohttp
+from .unified_tool_library import UnifiedToolLibrary
+
+logger = logging.getLogger(__name__)
+
+class ToolScoreMonitoringAPI:
+    """ToolScore监控API服务器"""
+    
+    def __init__(self, tool_library: Optional[UnifiedToolLibrary] = None, port: int = 8082):
+        self.tool_library = tool_library
+        self.port = port
+        self.app = web.Application()
+        self._setup_routes()
+    
+    def _setup_routes(self):
+        """设置路由"""
+        self.app.router.add_get('/health', self.health_check)
+        self.app.router.add_get('/status', self.get_status)
+        self.app.router.add_get('/tools', self.list_tools)
+        self.app.router.add_get('/tools/{tool_id}', self.get_tool_detail)
+        self.app.router.add_get('/stats', self.get_stats)
+        self.app.router.add_get('/mcp/persistent', self.get_persistent_storage)
+        self.app.router.add_post('/mcp/search', self.search_mcp_servers)
+        self.app.router.add_post('/mcp/install', self.install_mcp_server)
+        
+        # 管理员工具注册接口 - 中央注册权威
+        self.app.router.add_post('/admin/tools/register', self.register_tool_admin)
+        self.app.router.add_delete('/admin/tools/{tool_id}', self.unregister_tool_admin)
+        self.app.router.add_get('/admin/tools/lifecycle', self.get_tool_lifecycle)
+        
+        # 新增：直接注册已有 MCP Server（外部已运行）
+        self.app.router.add_post('/admin/mcp/register', self.register_mcp_server_admin)
+        
+        # 新增API端点 - 支持Enhanced Reasoning Runtime
+        self.app.router.add_get('/api/v1/tools/available', self.get_available_tools_for_llm)
+        self.app.router.add_post('/api/v1/tools/request-capability', self.request_tool_capability)
+        self.app.router.add_post('/api/v1/tools/analyze-gap', self.analyze_tool_gap)
+        
+        # 🎯 新增缺失的API端点 - 支持mcp-search-tool调用
+        self.app.router.add_post('/api/v1/tools/analyze', self.analyze_tool_needs)
+        self.app.router.add_post('/api/v1/tools/search-and-install', self.search_and_install_tools)
+        self.app.router.add_post('/api/v1/tools/execute', self.execute_tool)
+        
+        # WebSocket实时事件端点 (Step 4.1)
+        self.app.router.add_get('/api/v1/events/tools', self.websocket_tools_events)
+        
+        # 🎯 智能工具推荐端点 - 支持ToolScoreClient
+        self.app.router.add_post('/api/tools/intelligent-recommend', self.intelligent_recommend)
+        
+        # 🔧 调试端点 - 帮助诊断工具注册问题
+        self.app.router.add_get('/debug/tools/raw', self.debug_get_raw_tools)
+        self.app.router.add_get('/debug/tools/formatted', self.debug_get_formatted_tools)
+        self.app.router.add_get('/debug/connectors', self.debug_get_connectors)
+    
+    async def health_check(self, request):
+        """健康检查"""
+        return web.json_response({"status": "healthy", "message": "ToolScore monitoring API is running"})
+    
+    async def get_status(self, request):
+        """获取整体状态"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            stats = await self.tool_library.get_library_stats()
+            return web.json_response({
+                "status": "healthy",
+                "tool_library_initialized": stats.get("initialized", False),
+                "stats": stats
+            })
+        except Exception as e:
+            logger.error(f"Error getting status: {e}")
+            return web.json_response({
+                "status": "error", 
+                "message": str(e)
+            }, status=500)
+    
+    async def list_tools(self, request):
+        """列出所有工具"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            tools = await self.tool_library.get_all_tools()
+            tools_data = []
+            for tool in tools:
+                tools_data.append({
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type.value,
+                    "enabled": tool.enabled,
+                    "capabilities_count": len(tool.capabilities),
+                    "capabilities": [cap.to_dict() for cap in tool.capabilities]
+                })
+            
+            return web.json_response({
+                "status": "success",
+                "tools": tools_data,
+                "total_count": len(tools_data)
+            })
+        except Exception as e:
+            logger.error(f"Error listing tools: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def get_tool_detail(self, request):
+        """获取工具详情"""
+        tool_id = request.match_info['tool_id']
+        
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            tool = await self.tool_library.get_tool_by_id(tool_id)
+            if not tool:
+                return web.json_response({
+                    "status": "error",
+                    "message": f"Tool {tool_id} not found"
+                }, status=404)
+            
+            tool_data = {
+                "tool_id": tool.tool_id,
+                "name": tool.name,
+                "description": tool.description,
+                "tool_type": tool.tool_type.value,
+                "enabled": tool.enabled,
+                "tags": tool.tags,
+                "capabilities": [cap.to_dict() for cap in tool.capabilities]
+            }
+            
+            # 添加特定类型的额外信息
+            # 添加特定类型的额外信息，使用 getattr 避免 AttributeError
+            tool_data['endpoint'] = getattr(tool, 'endpoint', None)
+            tool_data['module_path'] = getattr(tool, 'module_path', None)
+            tool_data['class_name'] = getattr(tool, 'class_name', None)
+                
+            return web.json_response({
+                "status": "success",
+                "tool": tool_data
+            })
+        except Exception as e:
+            logger.error(f"Error getting tool detail for {tool_id}: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def get_stats(self, request):
+        """获取详细统计信息"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            stats = await self.tool_library.get_library_stats()
+            return web.json_response({
+                "status": "success",
+                "stats": stats
+            })
+        except Exception as e:
+            logger.error(f"Error getting stats: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def start(self):
+        """启动HTTP服务器 (保持运行)"""
+        runner = web.AppRunner(self.app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', self.port)
+        await site.start()
+        logger.info(f"ToolScore monitoring API started on port {self.port}")
+        self.runner = runner  # 保存 runner 实例以便停止
+
+        # --- 关键修改: 保持事件循环不退出 ---
+        try:
+            while True:
+                await asyncio.sleep(3600)  # 轻量保持，占用极少 CPU
+        except asyncio.CancelledError:
+            # 外部停止时跳出循环并由 stop() 清理
+            pass
+    
+    async def stop(self):
+        """停止HTTP服务器"""
+        if hasattr(self, 'runner') and self.runner:
+            logger.info("Stopping ToolScore monitoring API...")
+            await self.runner.cleanup()
+            self.runner = None
+            logger.info("ToolScore monitoring API stopped.")
+        else:
+            logger.info("ToolScore monitoring API 未运行或已停止。")
+
+    async def get_persistent_storage(self, request):
+        """获取持久化存储状态"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 获取动态MCP管理器的持久化状态
+            stats = await self.tool_library.get_library_stats()
+            dynamic_mcp_stats = stats.get("dynamic_mcp", {})
+            
+            return web.json_response({
+                "status": "success",
+                "total_servers": dynamic_mcp_stats.get("installed_servers_count", 0),
+                "servers": dynamic_mcp_stats.get("installed_servers", {}),
+                "storage_stats": dynamic_mcp_stats.get("storage_stats", {}),
+                "redis_connected": dynamic_mcp_stats.get("storage_stats", {}).get("redis_connected", False)
+            })
+        except Exception as e:
+            logger.error(f"Error getting persistent storage: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def search_mcp_servers(self, request):
+        """搜索MCP服务器"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            query = data.get("query", "")
+            max_candidates = data.get("max_candidates", 5)
+            
+            # 获取动态MCP管理器
+            dynamic_mcp = getattr(self.tool_library, 'dynamic_mcp_manager', None)
+            if not dynamic_mcp:
+                return web.json_response({
+                    "status": "error",
+                    "message": "Dynamic MCP manager not available"
+                }, status=500)
+            
+            # 执行搜索 - 修复方法名
+            if hasattr(dynamic_mcp, 'search_mcp_servers'):
+                candidates = await dynamic_mcp.search_mcp_servers(query, [])
+            else:
+                # 降级处理：直接返回空结果
+                logger.warning("DynamicMCPManager没有search_mcp_servers方法，返回空结果")
+                candidates = []
+            
+            # 转换为API响应格式
+            candidates_data = []
+            for candidate in candidates[:max_candidates]:
+                candidates_data.append({
+                    "name": candidate.name,
+                    "description": candidate.description,
+                    "github_url": candidate.github_url,
+                    "author": candidate.author,
+                    "tags": candidate.tags,
+                    "install_method": candidate.install_method,
+                    "capabilities": candidate.capabilities,
+                    "security_score": candidate.security_score,
+                    "popularity_score": candidate.popularity_score
+                })
+            
+            return web.json_response({
+                "status": "success",
+                "candidates": candidates_data,
+                "total_found": len(candidates_data)
+            })
+        except Exception as e:
+            logger.error(f"Error searching MCP servers: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def register_tool_admin(self, request):
+        """管理员工具注册接口 - 中央注册权威"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            tool_spec_data = data.get("tool_spec")
+            
+            if not tool_spec_data:
+                return web.json_response({
+                    "success": False,
+                    "message": "Missing tool_spec in request"
+                }, status=400)
+            
+            # 验证和创建工具规范
+            tool_spec = self._create_tool_spec_from_dict(tool_spec_data)
+            
+            # 注册到工具库
+            result = await self.tool_library.register_function_tool(tool_spec)
+            
+            if result.success:
+                # 发布工具注册事件到Redis Pub/Sub
+                await self._publish_tool_registration_event(tool_spec_data, "register")
+                
+                logger.info(f"✅ 工具已成功注册并发布事件: {tool_spec.tool_id}")
+            
+            return web.json_response({
+                "success": result.success,
+                "tool_id": result.tool_id if result.success else None,
+                "message": result.error if not result.success else "工具注册成功"
+            })
+            
+        except Exception as e:
+            logger.error(f"Admin tool registration failed: {e}")
+            return web.json_response({
+                "success": False,
+                "message": f"注册失败: {str(e)}"
+            }, status=400)
+    
+    async def unregister_tool_admin(self, request):
+        """管理员工具注销接口"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            tool_id = request.match_info.get('tool_id')
+            if not tool_id:
+                return web.json_response({
+                    "success": False,
+                    "message": "Missing tool_id in request"
+                }, status=400)
+            
+            # 获取工具信息用于事件发布
+            tool = await self.tool_library.get_tool_by_id(tool_id)
+            
+            # 注销工具
+            result = await self.tool_library.unregister_tool(tool_id)
+            
+            if result.success and tool:
+                # 发布工具注销事件
+                await self._publish_tool_registration_event({
+                    "tool_id": tool_id,
+                    "name": tool.name
+                }, "unregister")
+                
+                logger.info(f"✅ 工具已成功注销并发布事件: {tool_id}")
+            
+            return web.json_response({
+                "success": result.success,
+                "message": result.error if not result.success else "工具注销成功"
+            })
+            
+        except Exception as e:
+            logger.error(f"Admin tool unregistration failed: {e}")
+            return web.json_response({
+                "success": False,
+                "message": f"注销失败: {str(e)}"
+            }, status=400)
+    
+    async def _publish_tool_registration_event(self, tool_spec_data: dict, event_type: str):
+        """发布工具注册事件到Redis Pub/Sub"""
+        try:
+            import redis.asyncio as redis
+            
+            redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://redis:6379'))
+            
+            event_data = {
+                "event_type": event_type,
+                "tool_id": tool_spec_data.get("tool_id"),
+                "tool_spec": tool_spec_data,
+                "source_service": "toolscore",
+                "timestamp": time.time()
+            }
+            
+            await redis_client.publish('tool_events', json.dumps(event_data))
+            logger.info(f"📢 已发布工具{event_type}事件: {tool_spec_data.get('tool_id')}")
+            
+            await redis_client.close()
+            
+        except Exception as e:
+            logger.error(f"❌ 发布工具注册事件失败: {e}")
+    
+    async def get_tool_lifecycle(self, request):
+        """获取工具生命周期管理信息"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 获取所有工具的生命周期信息
+            tools = await self.tool_library.get_all_tools()
+            lifecycle_info = []
+            
+            for tool in tools:
+                tool_info = {
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "enabled": tool.enabled,
+                    "registration_time": getattr(tool, 'registration_time', None),
+                    "last_used": getattr(tool, 'last_used', None),
+                    "usage_count": getattr(tool, 'usage_count', 0),
+                    "success_rate": getattr(tool, 'success_rate', 0.0),
+                    "health_status": getattr(tool, 'health_status', True)
+                }
+                lifecycle_info.append(tool_info)
+            
+            return web.json_response({
+                "status": "success",
+                "tools": lifecycle_info,
+                "total_count": len(lifecycle_info)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting tool lifecycle: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    def _create_tool_spec_from_dict(self, tool_spec_data):
+        """从字典创建工具规范"""
+        from .interfaces import FunctionToolSpec, ToolCapability, ToolType
+        
+        # 创建工具能力列表
+        capabilities_data = tool_spec_data.get("capabilities", [])
+        capabilities = []
+        
+        for cap_data in capabilities_data:
+            if isinstance(cap_data, dict):
+                capabilities.append(ToolCapability(**cap_data))
+        
+        # 创建Function Tool规范
+        tool_spec = FunctionToolSpec(
+            tool_id=tool_spec_data.get("tool_id"),
+            name=tool_spec_data.get("name"),
+            description=tool_spec_data.get("description"),
+            tool_type=ToolType.FUNCTION,
+            capabilities=capabilities,
+            tags=tool_spec_data.get("tags", []),
+            enabled=tool_spec_data.get("enabled", True),
+            module_path=tool_spec_data.get("module_path"),
+            class_name=tool_spec_data.get("class_name")
+        )
+        
+        return tool_spec
+
+    async def install_mcp_server(self, request):
+        """安装MCP服务器"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            
+            # 获取动态MCP管理器
+            dynamic_mcp = getattr(self.tool_library, 'dynamic_mcp_manager', None)
+            if not dynamic_mcp:
+                return web.json_response({
+                    "status": "error",
+                    "message": "Dynamic MCP manager not available"
+                }, status=500)
+            
+            # 执行安装
+            success = await dynamic_mcp.install_and_register_mcp_server(data)
+            
+            return web.json_response({
+                "status": "success" if success else "error",
+                "success": success,
+                "message": "Installation completed" if success else "Installation failed"
+            })
+        except Exception as e:
+            logger.error(f"Error installing MCP server: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+
+    async def get_available_tools_for_llm(self, request):
+        """获取LLM可用的工具列表 - Step 1.6 新增API"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 获取所有可用工具
+            tools = await self.tool_library.get_all_tools()
+            
+            # 转换为LLM友好的格式
+            available_tools = []
+            for tool in tools:
+                if tool.enabled:  # 只包含启用的工具
+                    tool_info = {
+                        "tool_id": tool.tool_id,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "tool_type": tool.tool_type.value,
+                        "capabilities": [
+                            {
+                                "name": cap.name,
+                                "description": cap.description,
+                                "parameters": cap.parameters
+                            } for cap in tool.capabilities
+                        ],
+                        "tags": tool.tags,
+                        "usage_example": getattr(tool, 'usage_example', None)
+                    }
+                    
+                    # 添加特定类型的额外信息，使用 getattr 避免 AttributeError
+                    tool_info['endpoint'] = getattr(tool, 'endpoint', None)
+                    
+                    available_tools.append(tool_info)
+            
+            return web.json_response({
+                "status": "success",
+                "available_tools": available_tools,
+                "total_count": len(available_tools),
+                "timestamp": time.time()
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting available tools for LLM: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def request_tool_capability(self, request):
+        """请求工具能力 - 一站式搜索安装服务 - Step 1.6 新增API"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            required_capabilities = data.get('required_capabilities', [])
+            current_tools = data.get('current_tools', [])
+            auto_install = data.get('auto_install', True)
+            security_level = data.get('security_level', 'medium')
+            
+            if not task_description and not required_capabilities:
+                return web.json_response({
+                    "status": "error",
+                    "message": "task_description or required_capabilities is required"
+                }, status=400)
+            
+            # 获取MCP搜索工具
+            mcp_search_tool = getattr(self.tool_library, 'mcp_search_tool', None)
+            if not mcp_search_tool:
+                return web.json_response({
+                    "status": "error",
+                    "message": "MCP search tool not available"
+                }, status=500)
+            
+            start_time = time.time()
+            
+            # 如果启用自动安装，直接搜索和安装
+            if auto_install and task_description:
+                install_result = await mcp_search_tool.search_and_install_tools(
+                    task_description=task_description,
+                    current_available_tools=current_tools,
+                    reason="API request for tool capability"
+                )
+                
+                processing_time_ms = int((time.time() - start_time) * 1000)
+                
+                if install_result.success:
+                    # 获取更新后的工具列表
+                    total_tools = len(await self.tool_library.get_all_tools())
+                    
+                    return web.json_response({
+                        "success": True,
+                        "action_taken": "installed_new_tools",
+                        "installed_tools": install_result.installed_tools,
+                        "total_available_tools": total_tools,
+                        "processing_time_ms": processing_time_ms
+                    })
+                else:
+                    return web.json_response({
+                        "success": False,
+                        "action_taken": "installation_failed",
+                        "message": install_result.message,
+                        "processing_time_ms": processing_time_ms
+                    })
+            
+            # 如果不自动安装，只分析工具需求
+            else:
+                analysis_result = await mcp_search_tool.analyze_tool_needs(
+                    task_description=task_description,
+                    current_available_tools=current_tools
+                )
+                
+                processing_time_ms = int((time.time() - start_time) * 1000)
+                
+                return web.json_response({
+                    "success": True,
+                    "action_taken": "analysis_only",
+                    "analysis": analysis_result,
+                    "processing_time_ms": processing_time_ms
+                })
+                
+        except Exception as e:
+            logger.error(f"Error requesting tool capability: {e}")
+            return web.json_response({
+                "success": False,
+                "action_taken": "error",
+                "message": str(e)
+            }, status=500)
+    
+    async def analyze_tool_gap(self, request):
+        """分析工具缺口 - Step 1.6 新增API"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            current_tools = data.get('current_tools', [])
+            context = data.get('context', {})
+            
+            if not task_description:
+                return web.json_response({
+                    "status": "error",
+                    "message": "task_description is required"
+                }, status=400)
+            
+            # 获取工具缺口检测器
+            tool_gap_detector = getattr(self.tool_library, 'tool_gap_detector', None)
+            if not tool_gap_detector:
+                return web.json_response({
+                    "status": "error",
+                    "message": "Tool gap detector not available"
+                }, status=500)
+            
+            start_time = time.time()
+            
+            # 执行工具充分性分析
+            analysis = await tool_gap_detector.analyze_tool_sufficiency(
+                task_description, current_tools
+            )
+            
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            # 构建响应
+            response_data = {
+                "has_sufficient_tools": analysis.has_sufficient_tools,
+                "gap_analysis": {
+                    "missing_capabilities": [req.needed for req in analysis.tool_requirements if req.needed],
+                    "confidence_score": analysis.confidence_score if hasattr(analysis, 'confidence_score') else 0.8,
+                    "reasoning": analysis.overall_assessment
+                },
+                "recommendations": [
+                    {
+                        "capability": req.needed,
+                        "priority": "high" if req.confidence_score > 0.8 else "medium",
+                        "suggested_keywords": req.suggested_search_keywords
+                    } for req in analysis.tool_requirements if req.needed
+                ],
+                "cache_info": {
+                    "cached": False,  # 暂时不实现缓存
+                    "cache_age_seconds": 0
+                },
+                "processing_time_ms": processing_time_ms
+            }
+            
+            return web.json_response(response_data)
+            
+        except Exception as e:
+            logger.error(f"Error analyzing tool gap: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+
+    async def websocket_tools_events(self, request):
+        """WebSocket工具事件流 - Step 4.1 新增端点"""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        
+        client_ip = request.remote if request.remote else "unknown"
+        logger.info(f"🔌 WebSocket连接建立: {client_ip}")
+        
+        try:
+            # 获取实时注册器
+            real_time_registry = getattr(self.tool_library, 'real_time_registry', None)
+            if real_time_registry:
+                # 将WebSocket连接添加到实时注册器管理
+                real_time_registry.websocket_connections.add(ws)
+                
+                # 发送当前工具列表给新连接的客户端
+                try:
+                    current_tools = []
+                    tools = await self.tool_library.get_all_tools() if self.tool_library else []
+                    for tool in tools:
+                        if tool.enabled:
+                            current_tools.append({
+                                "tool_id": tool.tool_id,
+                                "name": tool.name,
+                                "capabilities": [cap.name for cap in tool.capabilities],
+                                "type": tool.tool_type.value,
+                                "enabled": tool.enabled
+                            })
+                    
+                    welcome_message = {
+                        "type": "welcome",
+                        "tools": current_tools,
+                        "total_count": len(current_tools),
+                        "timestamp": time.time()
+                    }
+                    
+                    await ws.send_str(json.dumps(welcome_message))
+                    logger.debug(f"已向客户端 {client_ip} 发送当前工具列表")
+                    
+                except Exception as e:
+                    logger.error(f"发送欢迎消息失败: {e}")
+            
+            # 处理客户端消息
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    try:
+                        data = json.loads(msg.data)
+                        await self._handle_websocket_message(ws, data, client_ip)
+                    except json.JSONDecodeError:
+                        logger.warning(f"收到无效JSON消息: {msg.data}")
+                    except Exception as e:
+                        logger.error(f"处理WebSocket消息失败: {e}")
+                        
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    logger.error(f"WebSocket错误: {ws.exception()}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"WebSocket连接处理失败: {e}")
+            
+        finally:
+            # 清理连接
+            if real_time_registry:
+                real_time_registry.websocket_connections.discard(ws)
+            logger.info(f"🔌 WebSocket连接断开: {client_ip}")
+        
+        return ws
+    
+    async def _handle_websocket_message(self, ws, data: dict, client_ip: str):
+        """处理WebSocket客户端消息"""
+        message_type = data.get("type")
+        
+        if message_type == "ping":
+            # 响应ping消息
+            await ws.send_str(json.dumps({
+                "type": "pong", 
+                "timestamp": time.time()
+            }))
+            
+        elif message_type == "subscribe":
+            # 订阅特定事件
+            events = data.get('events', [])
+            logger.debug(f"客户端 {client_ip} 订阅事件: {events}")
+            
+        elif message_type == "get_tools":
+            # 请求当前工具列表
+            try:
+                tools = await self.tool_library.get_all_tools() if self.tool_library else []
+                tools_list = []
+                for tool in tools:
+                    if tool.enabled:
+                        tools_list.append({
+                            "tool_id": tool.tool_id,
+                            "name": tool.name,
+                            "capabilities": [cap.name for cap in tool.capabilities],
+                            "type": tool.tool_type.value
+                        })
+                
+                response = {
+                    "type": "tools_list",
+                    "tools": tools_list,
+                    "total_count": len(tools_list),
+                    "timestamp": time.time()
+                }
+                
+                await ws.send_str(json.dumps(response))
+                
+            except Exception as e:
+                logger.error(f"获取工具列表失败: {e}")
+                await ws.send_str(json.dumps({
+                    "type": "error",
+                    "message": "Failed to get tools list",
+                    "timestamp": time.time()
+                }))
+                
+        else:
+            logger.warning(f"未知的WebSocket消息类型: {message_type}")
+
+    async def analyze_tool_needs(self, request):
+        """分析任务所需的工具类型和能力 - 对应enhanced_runtime中的analyze_tool_needs调用"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            analysis_type = data.get('analysis_type', 'tool_needs')
+            
+            if not task_description:
+                return web.json_response({
+                    "success": False,
+                    "error": "task_description is required"
+                }, status=400)
+            
+            logger.info(f"🔍 分析工具需求: {task_description}")
+            
+            # 获取MCP搜索工具
+            mcp_search_tool = getattr(self.tool_library, 'mcp_search_tool', None)
+            if not mcp_search_tool:
+                return web.json_response({
+                    "success": False,
+                    "error": "MCP search tool not available"
+                }, status=500)
+            
+            start_time = time.time()
+            
+            # 分析任务需求
+            current_tools = await self.tool_library.get_all_tools()
+            # 转换为字典格式供tool_gap_detector使用
+            current_tools_dict = [
+                {
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type.value if hasattr(tool.tool_type, 'value') else str(tool.tool_type),
+                    "capabilities": [cap.name for cap in getattr(tool, 'capabilities', [])]
+                }
+                for tool in current_tools
+            ]
+            
+            analysis_result = await mcp_search_tool.analyze_tool_needs(
+                task_description=task_description,
+                current_available_tools=current_tools_dict  # 传递字典列表而不是字符串列表
+            )
+            
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            logger.info(f"✅ 工具需求分析完成，耗时: {processing_time_ms}ms")
+            
+            return web.json_response({
+                "success": True,
+                "analysis": {
+                    "task_type": getattr(analysis_result, 'task_type', 'unknown'),
+                    "required_capabilities": getattr(analysis_result, 'required_capabilities', []),
+                    "recommended_tools": getattr(analysis_result, 'recommended_tools', []),
+                    "confidence_score": getattr(analysis_result, 'confidence_score', 0.8),
+                    "reasoning": getattr(analysis_result, 'reasoning', ''),
+                    "tools_needed": getattr(analysis_result, 'tools_needed', [])
+                },
+                "current_tools_count": len(current_tools),
+                "processing_time_ms": processing_time_ms
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ 分析工具需求失败: {e}")
+            return web.json_response({
+                "success": False,
+                "error": str(e)
+            }, status=500)
+    
+    async def search_and_install_tools(self, request):
+        """搜索并安装工具 - 对应enhanced_runtime中的search_and_install_tools调用"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            required_capabilities = data.get('required_capabilities', [])
+            reason = data.get('reason', '')
+            
+            if not task_description:
+                return web.json_response({
+                    "success": False,
+                    "error": "task_description is required"
+                }, status=400)
+            
+            logger.info(f"🔍 搜索并安装工具: {task_description}")
+            
+            # 获取MCP搜索工具
+            mcp_search_tool = getattr(self.tool_library, 'mcp_search_tool', None)
+            if not mcp_search_tool:
+                return web.json_response({
+                    "success": False,
+                    "error": "MCP search tool not available"
+                }, status=500)
+            
+            start_time = time.time()
+            
+            # 获取当前可用工具
+            current_tools = await self.tool_library.get_all_tools()
+            # 转换为字典格式供mcp_search_tool使用
+            current_tools_dict = [
+                {
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type.value if hasattr(tool.tool_type, 'value') else str(tool.tool_type),
+                    "capabilities": [cap.name for cap in getattr(tool, 'capabilities', [])]
+                }
+                for tool in current_tools
+            ]
+            
+            # 搜索并安装工具
+            install_result = await mcp_search_tool.search_and_install_tools(
+                task_description=task_description,
+                current_available_tools=current_tools_dict,  # 传递字典列表
+                reason=reason or f"API request for task: {task_description}"
+            )
+            
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            if install_result.success:
+                logger.info(f"✅ 工具安装成功: {install_result.installed_tools}, 耗时: {processing_time_ms}ms")
+                
+                # 获取更新后的工具列表
+                updated_tools = await self.tool_library.get_all_tools()
+                
+                return web.json_response({
+                    "success": True,
+                    "installed_tools": install_result.installed_tools,
+                    "installation_count": len(install_result.installed_tools),
+                    "total_tools_now": len(updated_tools),
+                    "message": install_result.message,
+                    "processing_time_ms": processing_time_ms
+                })
+            else:
+                logger.warning(f"⚠️ 工具安装失败: {install_result.message}")
+                return web.json_response({
+                    "success": False,
+                    "error": install_result.message,
+                    "processing_time_ms": processing_time_ms
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ 搜索安装工具失败: {e}")
+            return web.json_response({
+                "success": False,
+                "error": str(e)
+            }, status=500)
+    
+    async def execute_tool(self, request):
+        """执行工具 - 对应enhanced_runtime中的execute_tool调用"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            data = await request.json()
+            tool_id = data.get('tool_id', '')
+            action = data.get('action', '')
+            parameters = data.get('parameters', {})
+            
+            if not tool_id:
+                return web.json_response({
+                    "success": False,
+                    "error": "tool_id is required"
+                }, status=400)
+            
+            logger.info(f"🚀 执行工具: {tool_id}, 动作: {action}")
+            
+            start_time = time.time()
+            
+            # 🔧 修复：对于MicroSandbox执行器，尝试直接调用避免WebSocket连接问题
+            if tool_id == "microsandbox" and hasattr(self, 'microsandbox_server') and self.microsandbox_server:
+                logger.info(f"🚀 直接调用同进程的MicroSandbox Server")
+                try:
+                    # 直接调用MicroSandbox Server的handle_tool_action方法
+                    action_result = await self.microsandbox_server.handle_tool_action(action, parameters)
+                    processing_time_ms = int((time.time() - start_time) * 1000)
+                    
+                    if action_result.get("success", False):
+                        logger.info(f"✅ 直接调用工具执行成功: {tool_id}, 耗时: {processing_time_ms}ms")
+                        return web.json_response({
+                            "success": True,
+                            "result": action_result.get("data"),
+                            "output": action_result.get("data"),
+                            "processing_time_ms": processing_time_ms
+                        })
+                    else:
+                        logger.warning(f"⚠️ 直接调用工具执行失败: {tool_id} - {action_result.get('error_message')}")
+                        return web.json_response({
+                            "success": False,
+                            "error": action_result.get("error_message") or action_result.get("error"),
+                            "processing_time_ms": processing_time_ms
+                        })
+                except Exception as e:
+                    logger.error(f"❌ 直接调用Python Executor失败: {e}")
+                    # 如果直接调用失败，继续使用原有的工具库执行逻辑
+            
+            # 执行工具
+            result = await self.tool_library.execute_tool(
+                tool_id=tool_id,
+                action=action,
+                parameters=parameters
+            )
+            
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            if result.success:
+                logger.info(f"✅ 工具执行成功: {tool_id}, 耗时: {processing_time_ms}ms")
+                return web.json_response({
+                    "success": True,
+                    "result": result.data,
+                    "output": result.data,
+                    "processing_time_ms": processing_time_ms
+                })
+            else:
+                logger.warning(f"⚠️ 工具执行失败: {tool_id} - {result.error_message}")
+                return web.json_response({
+                    "success": False,
+                    "error": result.error_message,
+                    "processing_time_ms": processing_time_ms
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ 工具执行失败: {e}")
+            return web.json_response({
+                "success": False,
+                "error": str(e)
+            }, status=500)
+
+    # === 新增：MCP Server 手动注册 ===
+    async def register_mcp_server_admin(self, request):
+        """管理员接口：注册已存在的 MCP Server（外部已运行）"""
+        if not self.tool_library:
+            return web.json_response({
+                "success": False,
+                "message": "Tool library not initialized"
+            }, status=500)
+
+        try:
+            data = await request.json()
+            server_spec_data = data.get("server_spec")
+
+            if not server_spec_data:
+                return web.json_response({
+                    "success": False,
+                    "message": "Missing server_spec in request"
+                }, status=400)
+
+            # 构建 MCPServerSpec
+            from .interfaces import MCPServerSpec, ToolCapability, ToolType
+
+            capabilities = []
+            for cap_data in server_spec_data.get("capabilities", []):
+                if isinstance(cap_data, dict):
+                    capabilities.append(ToolCapability(**cap_data))
+
+            server_spec = MCPServerSpec(
+                tool_id=server_spec_data.get("tool_id"),
+                name=server_spec_data.get("name"),
+                description=server_spec_data.get("description"),
+                tool_type=ToolType.MCP_SERVER,
+                capabilities=capabilities,
+                tags=server_spec_data.get("tags", []),
+                endpoint=server_spec_data.get("endpoint"),
+                server_config=server_spec_data.get("server_config", {}),
+                connection_params=server_spec_data.get("connection_params", {}),
+                enabled=server_spec_data.get("enabled", True)
+            )
+
+            # 调用统一工具库注册外部 MCP Server
+            result = await self.tool_library.register_external_mcp_server(server_spec)
+
+            if result.success:
+                # 发布事件
+                await self._publish_tool_registration_event(server_spec_data, "register_mcp")
+
+            return web.json_response({
+                "success": result.success,
+                "tool_id": result.tool_id if result.success else None,
+                "message": result.error if not result.success else "MCP Server 注册成功"
+            })
+
+        except Exception as e:
+            logger.error(f"MCP Server registration failed: {e}")
+            return web.json_response({
+                "success": False,
+                "message": f"注册失败: {str(e)}"
+            }, status=400)
+
+    async def intelligent_recommend(self, request):
+        """智能工具推荐端点 - 支持ToolScoreClient"""
+        try:
+            data = await request.json()
+            task_description = data.get('task_description', '')
+            task_type = data.get('task_type', 'reasoning')
+            constraints = data.get('constraints', {})
+            max_steps = data.get('max_steps', 5)
+            
+            if not task_description:
+                return web.json_response({
+                    "error": "task_description is required"
+                }, status=400)
+            
+            logger.info(f"🎯 智能工具推荐请求: {task_description} (类型: {task_type})")
+            
+            # 基于任务类型和描述进行智能推荐
+            recommended_tools = []
+            confidence = 0.8  # 较高置信度
+            reason = "基于任务类型和描述的智能分析"
+            
+            # 简单的规则-based推荐逻辑
+            if any(keyword in task_description.lower() for keyword in ['python', 'code', 'calculate', 'fibonacci', '计算', '函数', 'gcd', '编程']):
+                recommended_tools.append('python_executor')
+                
+            if any(keyword in task_description.lower() for keyword in ['web', 'browser', '浏览器', '网页', 'html', 'http']):
+                recommended_tools.append('browser_navigator')
+                
+            if any(keyword in task_description.lower() for keyword in ['reasoning', '推理', '分析', '思考']):
+                # 对于推理任务，默认提供Python执行器
+                if 'python_executor' not in recommended_tools:
+                    recommended_tools.append('python_executor')
+            
+            # 如果没有匹配到任何特定工具，提供默认工具
+            if not recommended_tools:
+                recommended_tools = ['python_executor', 'browser_navigator']
+                confidence = 0.5
+                reason = "默认工具推荐"
+            
+            response = {
+                "recommended_tools": recommended_tools,
+                "confidence": confidence, 
+                "reason": reason,
+                "strategy": "intelligent_analysis"
+            }
+            
+            logger.info(f"✅ 推荐工具: {recommended_tools} (置信度: {confidence})")
+            return web.json_response(response)
+            
+        except Exception as e:
+            logger.error(f"智能工具推荐失败: {e}")
+            return web.json_response({
+                "error": f"推荐失败: {str(e)}"
+            }, status=500)
+    
+    async def debug_get_raw_tools(self, request):
+        """调试端点：获取原始工具注册信息"""
+        if not self.tool_library:
+            return web.json_response({
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 获取所有工具的原始信息
+            tools = await self.tool_library.get_all_tools()
+            
+            debug_info = {
+                "total_tools_count": len(tools),
+                "tools_detail": [],
+                "registry_stats": await self.tool_library.get_library_stats(),
+                "debug_timestamp": time.time()
+            }
+            
+            for tool in tools:
+                tool_detail = {
+                    "tool_id": tool.tool_id,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type.value if hasattr(tool.tool_type, 'value') else str(tool.tool_type),
+                    "enabled": tool.enabled,
+                    "capabilities_count": len(getattr(tool, 'capabilities', [])),
+                    "capabilities": [
+                        {
+                            "name": cap.name,
+                            "description": cap.description
+                        } for cap in getattr(tool, 'capabilities', [])
+                    ],
+                    "tags": getattr(tool, 'tags', []),
+                    "endpoint": getattr(tool, 'endpoint', None),
+                    "module_path": getattr(tool, 'module_path', None)
+                }
+                debug_info["tools_detail"].append(tool_detail)
+            
+            logger.info(f"🔧 调试信息: 共有 {len(tools)} 个工具注册")
+            return web.json_response(debug_info)
+            
+        except Exception as e:
+            logger.error(f"获取调试信息失败: {e}")
+            return web.json_response({
+                "error": str(e)
+            }, status=500)
+    
+    async def debug_get_formatted_tools(self, request):
+        """调试端点：获取格式化的工具描述（LLM视角）"""
+        if not self.tool_library:
+            return web.json_response({
+                "error": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            # 模拟RealTimeToolClient的工具描述生成
+            tools = await self.tool_library.get_all_tools()
+            
+            # 生成工具ID列表
+            tool_ids = [tool.tool_id for tool in tools if tool.enabled]
+            
+            # 生成详细描述
+            tool_descriptions = []
+            if tools:
+                tool_descriptions.append("# 已注册的工具")
+                for tool in tools:
+                    if tool.enabled:
+                        desc = f"- {tool.tool_id}: {tool.name}"
+                        if getattr(tool, 'capabilities', []):
+                            cap_names = [cap.name for cap in tool.capabilities]
+                            desc += f" (能力: {', '.join(cap_names)})"
+                        tool_descriptions.append(desc)
+            
+            formatted_description = "\n".join(tool_descriptions) if tool_descriptions else "暂无可用工具"
+            
+            debug_info = {
+                "tool_ids_list": tool_ids,
+                "tool_ids_count": len(tool_ids),
+                "formatted_description": formatted_description,
+                "description_length": len(formatted_description),
+                "contains_no_tools_message": "暂无可用工具" in formatted_description,
+                "debug_timestamp": time.time()
+            }
+            
+            logger.info(f"🔧 格式化工具描述调试: {len(tool_ids)} 个工具, 描述长度: {len(formatted_description)}")
+            return web.json_response(debug_info)
+            
+        except Exception as e:
+            logger.error(f"获取格式化工具描述失败: {e}")
+            return web.json_response({
+                "error": str(e)
+            }, status=500)
+
+    async def debug_get_connectors(self, request):
+        """调试端点：查看注册的连接器"""
+        if not self.tool_library:
+            return web.json_response({
+                "status": "error",
+                "message": "Tool library not initialized"
+            }, status=500)
+        
+        try:
+            registry = self.tool_library.mcp_server_registry
+            connectors_info = {}
+            
+            for tool_id, connector in registry.connectors.items():
+                connectors_info[tool_id] = {
+                    "endpoint": connector.endpoint if hasattr(connector, 'endpoint') else "unknown",
+                    "connector_type": str(type(connector))
+                }
+            
+            return web.json_response({
+                "status": "success",
+                "connectors": connectors_info,
+                "total_count": len(connectors_info)
+            })
+        except Exception as e:
+            logger.error(f"Error getting connectors: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+
+async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8080):
+    """启动监控API服务器的便捷函数"""
+    api = ToolScoreMonitoringAPI(tool_library, port)
+    runner = await api.start()
+    return api, runner 

@@ -1,0 +1,106 @@
+# 路由配置文件 - Agent Data Platform
+# 统一管理任务路由策略
+
+# 队列映射策略
+queue_mapping:
+  # 统一路由模式 - 所有任务都由enhanced-reasoning-runtime处理
+  unified_mode: true
+  
+  # 队列配置
+  queues:
+    reasoning:
+      name: "tasks:reasoning"
+      description: "统一推理队列 - 处理所有任务类型"
+      consumer_group: "reasoning-workers"
+      max_length: 10000
+      retention_policy: "7d"
+  
+  # 任务类型映射
+  task_type_mapping:
+    CODE: "tasks:reasoning"      # 通过microsandbox-server处理
+    WEB: "tasks:reasoning"       # 通过browser-use-server处理  
+    REASONING: "tasks:reasoning" # 直接推理处理
+    RESEARCH: "tasks:reasoning"  # 通过deepsearch-server处理
+
+# 运行时配置
+runtimes:
+  enhanced-reasoning:
+    queue: "tasks:reasoning"
+    capabilities:
+      - "text_analysis"
+      - "logical_reasoning" 
+      - "planning"
+      - "python_executor"
+      - "browser_automation"
+      - "web_scraping"
+      - "form_filling"
+      - "file_operations"
+      - "deep_research"
+      - "comprehensive_analysis"
+    health_check:
+      enabled: true
+      interval: 60  # 秒
+      timeout: 10   # 秒
+    scaling:
+      min_workers: 1
+      max_workers: 5
+      target_queue_length: 50
+
+# 工具推荐配置
+tool_recommendation:
+  fallback_mapping:
+    CODE:
+      - "microsandbox"
+    WEB:
+      - "browser_use"
+      - "web_search"
+    REASONING:
+      - "python_executor"
+      - "browser_use"
+    RESEARCH:
+      - "deepsearch"
+      - "web_search"
+      - "browser_use"
+  
+  # 推荐策略
+  strategy:
+    default_confidence: 0.5
+    use_llm_enhancement: true
+    cache_recommendations: true
+    cache_ttl: 3600  # 秒
+
+# 监控配置
+monitoring:
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+  
+  queue_thresholds:
+    warning: 100
+    critical: 500
+    
+  pending_task_alert:
+    max_lag_seconds: 300
+    check_interval: 60
+
+# 环境特定配置
+environments:
+  development:
+    queue_mapping:
+      unified_mode: true
+    monitoring:
+      enabled: true
+      
+  production:
+    queue_mapping:
+      unified_mode: true
+    runtimes:
+      enhanced-reasoning:
+        scaling:
+          min_workers: 3
+          max_workers: 10
+    monitoring:
+      enabled: true
+      queue_thresholds:
+        warning: 200
+        critical: 1000

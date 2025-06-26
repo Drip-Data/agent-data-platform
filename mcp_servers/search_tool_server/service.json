@@ -1,0 +1,113 @@
+{
+  "service_id": "mcp-search-tool",
+  "name": "Search Tool MCP Server",
+  "description": "文件内容搜索和代码定义搜索服务",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "host": "localhost",
+  "port": 8080,
+  "capabilities": [
+    {
+      "name": "search_file_content",
+      "description": "搜索文件内容",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "文件路径"
+        },
+        "regex_pattern": {
+          "type": "string",
+          "description": "正则表达式模式"
+        }
+      },
+      "required_params": [
+        "file_path",
+        "regex_pattern"
+      ],
+      "optional_params": [],
+      "examples": [
+        {
+          "file_path": "src/main.py",
+          "regex_pattern": "def.*"
+        }
+      ]
+    },
+    {
+      "name": "list_code_definitions",
+      "description": "列出代码定义",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "文件路径"
+        },
+        "directory_path": {
+          "type": "string",
+          "description": "目录路径"
+        }
+      },
+      "required_params": [],
+      "optional_params": [
+        "file_path",
+        "directory_path"
+      ],
+      "examples": [
+        {
+          "directory_path": "src/"
+        }
+      ]
+    },
+    {
+      "name": "analyze_tool_needs",
+      "description": "分析任务的工具需求",
+      "parameters": {
+        "task_description": {
+          "type": "string",
+          "description": "任务描述"
+        }
+      },
+      "required_params": [
+        "task_description"
+      ],
+      "optional_params": [],
+      "examples": [
+        {
+          "task_description": "创建数据可视化图表"
+        }
+      ]
+    },
+    {
+      "name": "search_and_install_tools",
+      "description": "搜索并安装新工具",
+      "parameters": {
+        "task_description": {
+          "type": "string",
+          "description": "任务描述"
+        },
+        "reason": {
+          "type": "string",
+          "description": "安装原因"
+        }
+      },
+      "required_params": [
+        "task_description"
+      ],
+      "optional_params": [
+        "reason"
+      ],
+      "examples": [
+        {
+          "task_description": "需要处理PDF文件",
+          "reason": "当前工具不支持PDF操作"
+        }
+      ]
+    }
+  ],
+  "tags": [
+    "search",
+    "files",
+    "code"
+  ],
+  "author": null,
+  "license": null,
+  "documentation_url": null
+}

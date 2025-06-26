@@ -1,0 +1,22 @@
+{
+  "deepsearch_server": {
+    "module": "mcp_servers.deepsearch_server.main",
+    "class": "DeepSearchMCPServer",
+    "description": "专业级深度搜索和研究工具服务器，基于LangGraph实现的多轮迭代搜索代理",
+    "auto_start": true,
+    "type": "internal",
+    "capabilities": [
+      "research",
+      "quick_research", 
+      "comprehensive_research"
+    ],
+    "dependencies": [
+      "langchain-google-genai",
+      "langgraph",
+      "google-genai"
+    ],
+    "environment_variables": [
+      "GEMINI_API_KEY"
+    ]
+  }
+}

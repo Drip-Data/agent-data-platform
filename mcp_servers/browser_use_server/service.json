@@ -1,0 +1,159 @@
+{
+  "service_id": "browser_use",
+  "name": "Browser Use MCP Server",
+  "description": "AI驱动的浏览器自动化服务",
+  "version": "1.0.0",
+  "entry_point": "main.py",
+  "host": "localhost",
+  "port": 8084,
+  "capabilities": [
+    {
+      "name": "browser_use_execute_task",
+      "description": "执行复杂的AI浏览器任务",
+      "parameters": {
+        "task": {
+          "type": "string",
+          "description": "自然语言任务描述"
+        },
+        "max_steps": {
+          "type": "integer",
+          "description": "最大执行步数"
+        },
+        "use_vision": {
+          "type": "boolean",
+          "description": "启用视觉理解"
+        }
+      },
+      "required_params": [
+        "task"
+      ],
+      "optional_params": [
+        "max_steps",
+        "use_vision"
+      ],
+      "examples": [
+        {
+          "task": "打开Python官网并获取最新版本信息",
+          "max_steps": 10,
+          "use_vision": true
+        }
+      ]
+    },
+    {
+      "name": "browser_navigate",
+      "description": "导航到指定URL",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "目标URL"
+        },
+        "wait_time": {
+          "type": "integer",
+          "description": "等待时间（秒）"
+        }
+      },
+      "required_params": [
+        "url"
+      ],
+      "optional_params": [
+        "wait_time"
+      ],
+      "examples": [
+        {
+          "url": "https://python.org",
+          "wait_time": 3
+        }
+      ]
+    },
+    {
+      "name": "browser_click_element",
+      "description": "点击页面元素",
+      "parameters": {
+        "index": {
+          "type": "integer",
+          "description": "元素索引"
+        }
+      },
+      "required_params": [
+        "index"
+      ],
+      "optional_params": [],
+      "examples": [
+        {
+          "index": 0
+        }
+      ]
+    },
+    {
+      "name": "browser_input_text",
+      "description": "在输入框中输入文本",
+      "parameters": {
+        "index": {
+          "type": "integer",
+          "description": "输入框索引"
+        },
+        "text": {
+          "type": "string",
+          "description": "输入文本"
+        }
+      },
+      "required_params": [
+        "index",
+        "text"
+      ],
+      "optional_params": [],
+      "examples": [
+        {
+          "index": 0,
+          "text": "Python tutorial"
+        }
+      ]
+    },
+    {
+      "name": "browser_extract_content",
+      "description": "提取页面内容",
+      "parameters": {
+        "selector": {
+          "type": "string",
+          "description": "CSS选择器，空则提取全部内容"
+        }
+      },
+      "required_params": [],
+      "optional_params": [
+        "selector"
+      ],
+      "examples": [
+        {
+          "selector": "h1, p"
+        }
+      ]
+    },
+    {
+      "name": "browser_search_google",
+      "description": "在Google中搜索",
+      "parameters": {
+        "query": {
+          "type": "string",
+          "description": "搜索查询"
+        }
+      },
+      "required_params": [
+        "query"
+      ],
+      "optional_params": [],
+      "examples": [
+        {
+          "query": "Python asyncio tutorial"
+        }
+      ]
+    }
+  ],
+  "tags": [
+    "browser",
+    "automation",
+    "ai"
+  ],
+  "author": null,
+  "license": null,
+  "documentation_url": null
+}

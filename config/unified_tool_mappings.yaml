@@ -1,0 +1,359 @@
+# 🔧 P1修复2: 统一工具ID和动作映射配置
+# 这是系统中所有工具映射的单一真实来源(Single Source of Truth)
+
+# 工具ID映射 - 规范化工具标识符
+tool_id_mappings:
+  # 标准化工具ID
+  canonical_tool_ids:
+    - deepsearch
+    - microsandbox  
+    - browser_use
+    - mcp-search-tool
+  
+  # 工具ID别名映射
+  tool_aliases:
+    # DeepSearch工具别名
+    mcp-deepsearch: deepsearch
+    deep-search: deepsearch
+    research-tool: deepsearch
+    search-engine: deepsearch
+    
+    # MicroSandbox工具别名
+    microsandbox-mcp-server: microsandbox
+    sandbox: microsandbox
+    code-runner: microsandbox
+    python-executor: microsandbox
+    
+    # Browser工具别名
+    browser-use-mcp-server: browser_use
+    browser: browser_use
+    web-browser: browser_use
+    browser-automation: browser_use
+    web-automation: browser_use
+    
+    # Search工具别名
+    search-tool: mcp-search-tool
+    file-search: mcp-search-tool
+    code-search: mcp-search-tool
+
+# 动作映射 - 统一所有工具的动作名称
+action_mappings:
+  # DeepSearch工具动作
+  deepsearch:
+    canonical_actions:
+      - research
+      - quick_research
+      - comprehensive_research
+    
+    action_aliases:
+      # 研究相关别名
+      search: research
+      investigate: research
+      analyze: research
+      study: research
+      explore: research
+      lookup: research
+      find: research
+      query: research
+      
+      # 快速研究别名
+      quick_search: quick_research
+      fast_research: quick_research
+      brief_research: quick_research
+      
+      # 全面研究别名
+      deep_research: comprehensive_research
+      detailed_research: comprehensive_research
+      thorough_research: comprehensive_research
+      full_research: comprehensive_research
+
+  # MicroSandbox工具动作
+  microsandbox:
+    canonical_actions:
+      - microsandbox_execute
+      - microsandbox_install_package
+      - microsandbox_list_sessions
+      - microsandbox_close_session
+      - microsandbox_cleanup_expired
+    
+    action_aliases:
+      # 执行相关别名
+      execute: microsandbox_execute
+      run: microsandbox_execute
+      exec: microsandbox_execute
+      python_execute: microsandbox_execute
+      run_code: microsandbox_execute
+      execute_code: microsandbox_execute
+      run_python: microsandbox_execute
+      python_run: microsandbox_execute
+      
+      # 安装包别名
+      install: microsandbox_install_package
+      install_package: microsandbox_install_package
+      pip_install: microsandbox_install_package
+      add_package: microsandbox_install_package
+      
+      # 会话管理别名
+      list_sessions: microsandbox_list_sessions
+      get_sessions: microsandbox_list_sessions
+      show_sessions: microsandbox_list_sessions
+      
+      close_session: microsandbox_close_session
+      end_session: microsandbox_close_session
+      terminate_session: microsandbox_close_session
+      
+      cleanup: microsandbox_cleanup_expired
+      clean: microsandbox_cleanup_expired
+      purge: microsandbox_cleanup_expired
+
+  # Browser工具动作  
+  browser_use:
+    canonical_actions:
+      - browser_navigate
+      - browser_extract_content
+      - browser_click_element
+      - browser_input_text
+      - browser_search_google
+      - browser_use_execute_task
+    
+    action_aliases:
+      # 导航相关别名（已弃用的映射）
+      navigate_to_url: browser_navigate
+      navigate: browser_navigate
+      goto: browser_navigate
+      visit: browser_navigate
+      open: browser_navigate
+      browse: browser_navigate
+      
+      # 内容提取别名
+      get_page_content: browser_extract_content
+      extract_content: browser_extract_content
+      get_content: browser_extract_content
+      read_page: browser_extract_content
+      scrape: browser_extract_content
+      extract: browser_extract_content
+      
+      # 点击相关别名
+      click_element: browser_click_element
+      click: browser_click_element
+      tap: browser_click_element
+      select: browser_click_element
+      
+      # 输入相关别名
+      input_text: browser_input_text
+      type_text: browser_input_text
+      type: browser_input_text
+      input: browser_input_text
+      fill: browser_input_text
+      enter_text: browser_input_text
+      
+      # 搜索相关别名
+      search_google: browser_search_google
+      google_search: browser_search_google
+      search: browser_search_google
+      
+      # 执行任务别名
+      execute_task: browser_use_execute_task
+      run_task: browser_use_execute_task
+      perform_task: browser_use_execute_task
+
+  # Search工具动作
+  mcp-search-tool:
+    canonical_actions:
+      - analyze_tool_needs
+      - search_and_install_tools
+      - search_file_content
+      - list_code_definitions
+    
+    action_aliases:
+      # 工具分析别名
+      analyze_needs: analyze_tool_needs
+      check_needs: analyze_tool_needs
+      assess_requirements: analyze_tool_needs
+      
+      # 工具搜索安装别名
+      search_tools: search_and_install_tools
+      find_tools: search_and_install_tools
+      install_tools: search_and_install_tools
+      
+      # 文件搜索别名
+      search_files: search_file_content
+      find_in_files: search_file_content
+      grep: search_file_content
+      search_code: search_file_content
+      
+      # 代码定义别名
+      list_definitions: list_code_definitions
+      find_definitions: list_code_definitions
+      get_definitions: list_code_definitions
+
+# 参数映射 - 统一参数名称
+parameter_mappings:
+  # 通用参数别名
+  common_aliases:
+    # 查询/问题相关
+    query: question
+    search_query: question  
+    search_term: question
+    task_description: question
+    research_topic: question
+    content: question
+    text: question
+    prompt: question
+    
+    # 文件路径相关
+    file_path: path
+    filename: path
+    file: path
+    filepath: path
+    
+    # 代码相关
+    script: code
+    program: code
+    source_code: code
+    
+    # 选择器相关
+    selector: index
+    element_selector: index
+    css_selector: index
+    xpath: index
+
+  # 工具特定参数映射
+  tool_specific:
+    deepsearch:
+      # 查询参数统一为question
+      query: question
+      search_query: question
+      task_description: question
+      research_topic: question
+      research_query: question
+      search_term: question
+      search_content: question
+      topic: question
+      content: question
+      text: question
+      keywords: question
+      subject: question
+      prompt: question
+      description: question
+      objective: question
+      goal: question
+      task: question
+      requirement: question
+      request: question
+
+    microsandbox:
+      # 代码参数统一
+      script: code
+      program: code
+      source_code: code
+      python_code: code
+      code_text: code
+      source: code
+      
+    browser_use:
+      # 选择器参数统一为index
+      selector: index
+      element_selector: index
+      css_selector: index
+      xpath: index
+      element_index: index
+      target: index
+      position: index
+      number: index
+      
+      # URL参数
+      navigate_to_url: url
+      target_url: url
+      page_url: url
+      website: url
+      link: url
+
+# 错误修正映射 - 常见错误的自动修正
+error_corrections:
+  # 动作名称错误修正
+  action_errors:
+    "不支持动作 navigate_to_url":
+      correct_action: browser_navigate
+      correct_tool: browser_use
+      
+    "不支持动作 get_page_content":
+      correct_action: browser_extract_content
+      correct_tool: browser_use
+      
+    "不支持动作 click_element":
+      correct_action: browser_click_element
+      correct_tool: browser_use
+      
+    "不支持动作 execute":
+      correct_action: microsandbox_execute
+      correct_tool: microsandbox
+      
+    "不支持动作 search":
+      correct_action: research
+      correct_tool: deepsearch
+
+  # 参数错误修正
+  parameter_errors:
+    "缺少参数 question":
+      parameter_mappings:
+        query: question
+        search_query: question
+        task_description: question
+        
+    "缺少参数 code":
+      parameter_mappings:
+        script: code
+        program: code
+        source_code: code
+        
+    "缺少参数 index":
+      parameter_mappings:
+        selector: index
+        element_selector: index
+        css_selector: index
+
+# 验证规则 - 确保映射的一致性
+validation_rules:
+  # 必需的工具动作组合
+  required_combinations:
+    - tool_id: deepsearch
+      action: research
+      required_params: [question]
+      
+    - tool_id: microsandbox
+      action: microsandbox_execute
+      required_params: [code]
+      
+    - tool_id: browser_use
+      action: browser_navigate
+      required_params: [url]
+      
+    - tool_id: browser_use
+      action: browser_click_element
+      required_params: [index]
+
+  # 禁用的动作组合
+  deprecated_combinations:
+    - tool_id: browser_use
+      action: navigate_to_url
+      replacement:
+        action: browser_navigate
+        
+    - tool_id: browser_use
+      action: get_page_content
+      replacement:
+        action: browser_extract_content
+        
+    - tool_id: browser_use
+      action: click_element
+      replacement:
+        action: browser_click_element
+
+# 配置元数据
+metadata:
+  version: "1.0.0"
+  last_updated: "2025-01-24"
+  schema_hash: "unified_v1_20250124"
+  description: "统一的工具ID和动作映射配置 - 系统的单一真实来源"
+  maintainer: "Agent Data Platform"

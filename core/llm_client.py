@@ -5,12 +5,36 @@ LLM客户端统一接口
 """
 
 import os
-import json
 import logging
+import json
 from typing import Dict, Any, Optional, List
 from enum import Enum
-import httpx
-import asyncio
+import time
+import httpx # 重新引入httpx，因为_call_api中的异常处理需要它
+
+from core.llm_providers.interfaces import ILLMProvider
+from core.llm_providers.openai_provider import OpenAIProvider
+from core.llm_providers.gemini_provider import GeminiProvider
+from core.llm_providers.deepseek_provider import DeepSeekProvider
+from core.llm_providers.vllm_provider import VLLMProvider
+
+# 导入提示构建器
+from core.llm.prompt_builders.interfaces import IPromptBuilder
+from core.llm.prompt_builders.code_prompt_builder import CodePromptBuilder
+from core.llm.prompt_builders.web_prompt_builder import WebPromptBuilder
+from core.llm.prompt_builders.reasoning_prompt_builder import ReasoningPromptBuilder
+from core.llm.prompt_builders.summary_prompt_builder import SummaryPromptBuilder
+from core.llm.prompt_builders.completion_check_prompt_builder import CompletionCheckPromptBuilder
+from core.llm.prompt_builders.task_analysis_prompt_builder import TaskAnalysisPromptBuilder
+
+# 导入响应解析器
+from core.llm.response_parsers.interfaces import IResponseParser
+from core.llm.response_parsers.reasoning_response_parser import ReasoningResponseParser
+from core.llm.response_parsers.code_response_parser import CodeResponseParser
+from core.llm.response_parsers.web_actions_response_parser import WebActionsResponseParser
+from core.llm.response_parsers.completion_check_response_parser import CompletionCheckResponseParser
+from core.llm.response_parsers.task_analysis_response_parser import TaskAnalysisResponseParser
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,26 +50,93 @@ class LLMClient:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self.provider_instance: Optional[ILLMProvider] = None # 初始化为None
+        
+        # 确保环境变量传递到配置中
+        self._enrich_config_with_env_vars()
+        
+        # 实例化提示构建器
+        self.code_prompt_builder: IPromptBuilder = CodePromptBuilder()
+        self.web_prompt_builder: IPromptBuilder = WebPromptBuilder()
+        self.reasoning_prompt_builder: IPromptBuilder = ReasoningPromptBuilder()
+        self.summary_prompt_builder: IPromptBuilder = SummaryPromptBuilder()
+        self.completion_check_prompt_builder: IPromptBuilder = CompletionCheckPromptBuilder()
+        self.task_analysis_prompt_builder: IPromptBuilder = TaskAnalysisPromptBuilder()
+
+        # 实例化响应解析器
+        self.reasoning_response_parser: IResponseParser = ReasoningResponseParser()
+        self.code_response_parser: IResponseParser = CodeResponseParser()
+        self.web_actions_response_parser: IResponseParser = WebActionsResponseParser()
+        self.completion_check_response_parser: IResponseParser = CompletionCheckResponseParser()
+        self.task_analysis_response_parser: IResponseParser = TaskAnalysisResponseParser()
+
         # 优先使用配置中指定的提供商，没有则进行自动检测
-        if 'provider' in config:
-            provider_name = config['provider'].lower()
+        provider_name = config.get('provider') or config.get('default_provider')
+        if provider_name:
+            provider_name = provider_name.lower()
             if provider_name == 'vllm':
                 self.provider = LLMProvider.VLLM
+                self.provider_instance = VLLMProvider(config)
             elif provider_name == 'openai':
                 self.provider = LLMProvider.OPENAI
+                self.provider_instance = OpenAIProvider(config)
             elif provider_name == 'gemini':
                 self.provider = LLMProvider.GEMINI
+                # 从嵌套配置中提取 Gemini 特定配置并合并到根级别
+                gemini_config = config.copy()
+                if 'providers' in config and 'gemini' in config['providers']:
+                    gemini_provider_config = config['providers']['gemini']
+                    gemini_config.update(gemini_provider_config)
+                self.provider_instance = GeminiProvider(gemini_config)
             elif provider_name == 'deepseek':
                 self.provider = LLMProvider.DEEPSEEK
+                self.provider_instance = DeepSeekProvider(config)
             else:
                 logger.warning(f"Unknown provider in config: {provider_name}, falling back to auto-detection")
                 self.provider = self._detect_provider()
+                self._initialize_provider_instance()
         else:
             self.provider = self._detect_provider()
+            self._initialize_provider_instance()
             
-        self.client = httpx.AsyncClient(timeout=60.0)
-        
         logger.info(f"Initialized LLM client with provider: {self.provider.value}")
+
+    def _enrich_config_with_env_vars(self):
+        """将环境变量添加到配置中以确保providers能正确访问"""
+        env_vars = {
+            'gemini_api_key': os.getenv('GEMINI_API_KEY'),
+            'gemini_api_url': os.getenv('GEMINI_API_URL'),
+            'openai_api_key': os.getenv('OPENAI_API_KEY'),
+            'openai_base_url': os.getenv('OPENAI_BASE_URL'),
+            'deepseek_api_key': os.getenv('DEEPSEEK_API_KEY'),
+            'deepseek_base_url': os.getenv('DEEPSEEK_BASE_URL'),
+            'vllm_base_url': os.getenv('VLLM_BASE_URL')
+        }
+        
+        # 只添加非空的环境变量
+        for key, value in env_vars.items():
+            if value:
+                self.config[key] = value
+        
+        logger.debug(f"Enriched config with environment variables: {list(self.config.keys())}")
+
+    def _initialize_provider_instance(self):
+        """根据检测到的提供商初始化具体的LLM提供商实例"""
+        if self.provider == LLMProvider.VLLM:
+            self.provider_instance = VLLMProvider(self.config)
+        elif self.provider == LLMProvider.OPENAI:
+            self.provider_instance = OpenAIProvider(self.config)
+        elif self.provider == LLMProvider.GEMINI:
+            # 从嵌套配置中提取 Gemini 特定配置并合并到根级别
+            gemini_config = self.config.copy()
+            if 'providers' in self.config and 'gemini' in self.config['providers']:
+                gemini_provider_config = self.config['providers']['gemini']
+                gemini_config.update(gemini_provider_config)
+            self.provider_instance = GeminiProvider(gemini_config)
+        elif self.provider == LLMProvider.DEEPSEEK:
+            self.provider_instance = DeepSeekProvider(self.config)
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider}")
     
     def _detect_provider(self) -> LLMProvider:
         """自动检测使用的LLM提供商"""
@@ -59,51 +150,45 @@ class LLMClient:
         else:
             return LLMProvider.VLLM
     
-    async def generate_code(self, description: str, language: str = "python") -> Dict[str, str]:
+    async def generate_code(self, description: str, language: str = "python") -> Dict[str, Any]:
         """生成代码，并返回思考过程和代码"""
         disable_cache = os.getenv("DISABLE_CACHE") or self.config.get("disable_cache", False)
         logger.debug(f"LLMClient.generate_code called: disable_cache={disable_cache}, description={description[:50]}")
-        prompt = self._build_code_prompt(description, language)
+        messages = self.code_prompt_builder.build_prompt(description=description, language=language)
         
         try:
-            response = await self._call_api(prompt)
-            code = self._extract_code(response, language)
-            # 保存原始思考过程
-            thinking = response
-            if len(thinking) > 2000:  # 如果思考过程太长，截取前后部分
-                thinking = thinking[:1000] + "\n... (内容过长，已截断) ...\n" + thinking[-1000:]
-            
-            return {
-                "code": code,
-                "thinking": thinking,
-                "success": True
-            }
+            response = await self._call_api(messages)
+            return self.code_response_parser.parse_response(response, language=language)
         except Exception as e:
             logger.error(f"Failed to generate code: {e}")
-            # 不再使用备用模板，而是直接报告错误
             raise RuntimeError(f"无法生成代码: {e}") from e
     
-    async def generate_web_actions(self, description: str, page_content: str = "") -> List[Dict]:
+    async def generate_web_actions(self, description: str, page_content: str = "") -> Dict[str, Any]:
         """生成Web操作步骤"""
-        prompt = self._build_web_prompt(description, page_content)
+        messages = self.web_prompt_builder.build_prompt(description=description, page_content=page_content)
         
         try:
-            response = await self._call_api(prompt)
-            actions = self._extract_web_actions(response)
-            return actions
+            response = await self._call_api(messages)
+            return self.web_actions_response_parser.parse_response(response, description=description)
         except Exception as e:
             logger.error(f"Failed to generate web actions: {e}")
-            return self._fallback_web_actions(description)
+            # 备用逻辑现在由解析器内部处理
+            return self.web_actions_response_parser.parse_response("", description=description) # 传入空字符串触发备用
     
     async def generate_reasoning(self, task_description: str, available_tools: List[str],
-                                previous_steps: List[Dict] = None,
+                                previous_steps: Optional[List[Dict[str, Any]]] = None,
                                 browser_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """生成推理步骤和工具调用"""
-        prompt = self._build_reasoning_prompt(task_description, available_tools, previous_steps, browser_context)
+        messages = self.reasoning_prompt_builder.build_prompt(
+            task_description=task_description,
+            available_tools=available_tools,
+            previous_steps=previous_steps,
+            browser_context=browser_context
+        )
         
         try:
-            response = await self._call_api(prompt)
-            return self._parse_reasoning_response(response)
+            response = await self._call_api(messages)
+            return self.reasoning_response_parser.parse_response(response)
         except Exception as e:
             logger.error(f"Failed to generate reasoning: {e}")
             return {
@@ -114,540 +199,246 @@ class LLMClient:
                 "confidence": 0.0
             }
     
-    async def generate_task_summary(self, task_description: str, steps: List[Dict], 
-                                   final_outputs: List[str]) -> str:
-        """生成任务执行总结"""
-        prompt = self._build_summary_prompt(task_description, steps, final_outputs)
+    async def generate_enhanced_reasoning(self, task_description: str, available_tools: List[str],
+                                         tool_descriptions: str,
+                                         previous_steps: Optional[List[Dict[str, Any]]] = None,
+                                         execution_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """生成增强推理步骤和工具调用 - 使用丰富的工具描述和执行上下文"""
+        messages = self.reasoning_prompt_builder.build_prompt(
+            task_description=task_description,
+            available_tools=available_tools,
+            tool_descriptions=tool_descriptions,
+            previous_steps=previous_steps,
+            execution_context=execution_context
+        )
         
         try:
-            response = await self._call_api(prompt)
-            return response.strip()
+            response = await self._call_api(messages)
+            return self.reasoning_response_parser.parse_response(response)
+        except Exception as e:
+            logger.error(f"Failed to generate enhanced reasoning: {e}")
+            return {
+                "thinking": f"Error occurred while processing: {e}",
+                "action": "error",
+                "tool": None,
+                "parameters": {},
+                "confidence": 0.0
+            }
+    
+    async def generate_task_summary(self, task_description: str, steps: List[Dict],
+                                   final_outputs: List[str]) -> str:
+        """生成任务执行总结"""
+        messages = self.summary_prompt_builder.build_prompt(
+            task_description=task_description,
+            steps=steps,
+            final_outputs=final_outputs
+        )
+        
+        try:
+            response = await self._call_api(messages)
+            return response.strip() # 总结通常是纯文本，直接返回
         except Exception as e:
             logger.error(f"Failed to generate summary: {e}")
             return f"Task completed with {len(steps)} steps. Final outputs: {'; '.join(final_outputs[:3])}"
     
-    async def check_task_completion(self, task_description: str, steps: List[Dict], 
+    async def check_task_completion(self, task_description: str, steps: List[Dict],
                                    current_outputs: List[str]) -> Dict[str, Any]:
         """检查任务是否完成"""
-        prompt = self._build_completion_check_prompt(task_description, steps, current_outputs)
+        messages = self.completion_check_prompt_builder.build_prompt(
+            task_description=task_description,
+            steps=steps,
+            current_outputs=current_outputs
+        )
         
         try:
-            response = await self._call_api(prompt)
-            return self._parse_completion_response(response)
+            response = await self._call_api(messages)
+            return self.completion_check_response_parser.parse_response(response)
         except Exception as e:
             logger.error(f"Failed to check completion: {e}")
             return {"completed": False, "confidence": 0.0, "reason": f"Error: {e}"}
 
-    async def _call_api(self, prompt: str) -> str:
-        """调用相应的API"""
-        if self.provider == LLMProvider.VLLM:
-            return await self._call_vllm(prompt)
-        elif self.provider == LLMProvider.OPENAI:
-            return await self._call_openai(prompt)
-        elif self.provider == LLMProvider.GEMINI:
-            return await self._call_gemini(prompt)
-        elif self.provider == LLMProvider.DEEPSEEK:
-            return await self._call_deepseek(prompt)
+    async def analyze_task_requirements(self, task_description: str) -> Dict[str, Any]:
+        """分析任务描述，总结需要的功能和能力 - 帮助LLM更好地在mcp_tools.json中找到合适工具"""
+        messages = self.task_analysis_prompt_builder.build_prompt(task_description=task_description)
+        
+        try:
+            response = await self._call_api(messages)
+            return self.task_analysis_response_parser.parse_response(response)
+        except Exception as e:
+            logger.error(f"Failed to analyze task requirements: {e}")
+            return {
+                "task_type": "unknown",
+                "required_capabilities": [],
+                "tools_needed": [],
+                "reasoning": f"分析失败: {str(e)}",
+                "confidence": 0.0
+            }
+
+    async def get_next_action(self, task_description: str, available_tools: List[str],
+                                tool_descriptions: str, previous_steps: Optional[List[Dict[str, Any]]] = None, # 修改类型提示
+                                execution_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        获取LLM的下一个行动决策。
+        这是一个统一的接口，用于在增强推理模式下获取LLM的决策。
+        它将直接调用 generate_enhanced_reasoning 方法。
+        """
+        logger.info("Calling get_next_action (unified LLM decision interface)")
+        return await self.generate_enhanced_reasoning(
+            task_description=task_description,
+            available_tools=available_tools,
+            tool_descriptions=tool_descriptions,
+            previous_steps=previous_steps,
+            execution_context=execution_context
+        )
+
+    async def _call_api(self, messages: List[Dict[str, Any]]) -> str: # 修改签名
+        """调用相应的API，并记录完整的交互信息"""
+        # 🔧 新增：预调用数据验证 - 防止数据类型错误传播
+        try:
+            validated_messages = self._validate_input_messages(messages)
+        except Exception as validation_error:
+            logger.error(f"输入消息验证失败: {validation_error}")
+            raise ValueError(f"LLM API调用参数无效: {validation_error}")
+        
+        # 🔍 新增：记录API调用信息
+        logger.info("🚀 LLM API调用开始")
+        logger.info(f"   提供商: {self.provider.value}")
+        logger.info(f"   消息数量: {len(validated_messages)}")
+        
+        # 记录prompt内容（调试模式下记录更多详情）
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"   完整Messages内容:\n{json.dumps(validated_messages, ensure_ascii=False, indent=2)}")
         else:
-            raise ValueError(f"Unsupported provider: {self.provider}")
-    
-    async def _call_vllm(self, prompt: str) -> str:
-        """调用vLLM本地服务"""
-        vllm_url = self.config.get("vllm_url", "http://localhost:8000")
+            # 生产模式下记录消息概览
+            msg_summary = []
+            for i, msg in enumerate(validated_messages):
+                role = msg.get("role", "unknown")
+                content_len = len(str(msg.get("content", "")))
+                msg_summary.append(f"{role}({content_len}字符)")
+            logger.info(f"   消息概览: {' -> '.join(msg_summary)}")
         
-        payload = {
-            "model": "default",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.1
-        }
+        start_time = time.time()
         
-        response = await self.client.post(
-            f"{vllm_url}/v1/chat/completions",
-            json=payload
-        )
-        response.raise_for_status()
+        try:
+            if self.provider_instance is None:
+                raise ValueError("LLM provider instance is not initialized.")
+            
+            # 获取默认模型并传递给 generate_response
+            model_name = self.provider_instance.get_default_model()
+            response = await self.provider_instance.generate_response(messages=validated_messages, model=model_name) # 使用验证后的消息
+            
+            # 🔍 新增：记录API响应信息和数据流追踪
+            duration = time.time() - start_time
+            logger.info("✅ LLM API调用成功")
+            logger.info(f"   响应时间: {duration:.2f}秒")
+            logger.info(f"   响应长度: {len(response)} 字符")
+            logger.info(f"   响应类型: {type(response)}")
+            
+            # 🔍 数据流验证
+            if not isinstance(response, str):
+                logger.warning(f"⚠️ LLM API返回类型异常: {type(response)}, 尝试转换为字符串")
+                response = str(response) if response is not None else ""
+            
+            # 检查响应是否为空或异常
+            if not response or response.strip() == "":
+                logger.warning("⚠️ LLM API返回空响应")
+            elif len(response) > 10000:
+                logger.warning(f"⚠️ LLM API返回响应过长: {len(response)} 字符")
+            
+            # 记录响应内容
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"   完整响应内容:\n{response}")
+            else:
+                # 生产模式下只记录前后片段
+                response_preview = response[:200] + "..." + response[-100:] if len(response) > 300 else response
+                logger.info(f"   响应预览: {response_preview}")
+            
+            return response
+            
+        except httpx.HTTPStatusError as e: # 捕获更具体的HTTP错误
+            # 🔍 新增：记录API错误信息
+            duration = time.time() - start_time
+            logger.error("❌ LLM API调用失败")
+            logger.error(f"   失败时间: {duration:.2f}秒")
+            logger.error(f"   错误类型: {type(e).__name__}")
+            logger.error(f"   错误信息: {str(e)}")
+            logger.error(f"   HTTP状态码: {e.response.status_code}")
+            logger.error(f"   响应内容: {e.response.text}")
+            raise
+        except Exception as e:
+            # 🔍 新增：记录API错误信息
+            duration = time.time() - start_time
+            logger.error("❌ LLM API调用失败")
+            logger.error(f"   失败时间: {duration:.2f}秒")
+            logger.error(f"   错误类型: {type(e).__name__}")
+            logger.error(f"   错误信息: {str(e)}")
+            # 对于非HTTPStatusError，可能没有response属性
+            raise
+
+    def _validate_input_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """验证和清理输入消息，防止数据类型错误传播"""
+        if not isinstance(messages, list):
+            raise ValueError(f"messages必须是列表类型，实际类型: {type(messages)}")
         
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
-    
-    async def _call_openai(self, prompt: str) -> str:
-        """调用OpenAI API"""
-        api_key = os.getenv('OPENAI_API_KEY')
-        api_base = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
-        
-        payload = {
-            "model": "gpt-3.5-turbo",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.1
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        response = await self.client.post(
-            f"{api_base}/chat/completions",
-            json=payload,
-            headers=headers
-        )
-        response.raise_for_status()
-        
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
-    
-    async def _call_gemini(self, prompt: str) -> str:
-        """调用Google Gemini API"""
-        api_key = os.getenv('GEMINI_API_KEY')
-        api_url = os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta')
-        
-        # 验证并使用有效的Gemini模型名称
-        model_name = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash-preview-05-20')  # 更新默认模型
-        valid_models = [
-            'gemini-2.5-flash-preview-05-20',  # 添加新的预览模型
-            'gemini-2.0-flash', 'gemini-2.0-pro', 
-            'gemini-1.0-pro', 'gemini-pro'
-        ]
-        
-        if model_name not in valid_models:
-            logger.warning(f"Invalid Gemini model '{model_name}', using default 'gemini-2.5-flash-preview-05-20'")
-            model_name = 'gemini-2.5-flash-preview-05-20'
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
+        validated_messages = []
+        for i, msg in enumerate(messages):
+            try:
+                # 确保每个消息都是字典
+                if not isinstance(msg, dict):
+                    logger.warning(f"消息 {i} 不是字典类型: {type(msg)}, 尝试转换")
+                    if hasattr(msg, '__dict__'):
+                        msg = msg.__dict__
+                    else:
+                        raise ValueError(f"消息 {i} 无法转换为字典")
+                
+                # 验证必需字段
+                if "role" not in msg:
+                    raise ValueError(f"消息 {i} 缺少'role'字段")
+                if "content" not in msg:
+                    raise ValueError(f"消息 {i} 缺少'content'字段")
+                
+                # 清理和验证字段值
+                validated_msg = {
+                    "role": str(msg["role"]).strip(),
+                    "content": self._validate_and_clean_content(msg["content"], i)
                 }
-            ],
-            "generationConfig": {
-                "temperature": 0.1,
-                "maxOutputTokens": 1024
-            }
-        }
-        
-        try:
-            response = await self.client.post(
-                f"{api_url}/models/{model_name}:generateContent?key={api_key}",
-                json=payload
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            logger.error(f"Gemini API call failed: {e}")
-            # 如果使用了不稳定的模型，尝试回退到稳定版本
-            if model_name != 'gemini-2.0-flash':
-                logger.info("Retrying with stable model 'gemini-2.0-flash'")
-                response = await self.client.post(
-                    f"{api_url}/models/gemini-1.5-flash:generateContent?key={api_key}",
-                    json=payload
-                )
-                response.raise_for_status()
-                result = response.json()
-                return result["candidates"][0]["content"]["parts"][0]["text"]
-            else:
-                raise
-    
-    async def _call_deepseek(self, prompt: str) -> str:
-        """调用DeepSeek API"""
-        api_key = os.getenv('DEEPSEEK_API_KEY')
-        api_url = os.getenv('DEEPSEEK_API_URL', 'https://api.deepseek.com/v1')
-        
-        payload = {
-            "model": "deepseek-coder",
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.1
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        response = await self.client.post(
-            f"{api_url}/chat/completions",
-            json=payload,
-            headers=headers
-        )
-        response.raise_for_status()
-        
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
-    
-    def _build_code_prompt(self, description: str, language: str) -> str:
-        """构建代码生成提示，增强思考过程捕获"""
-        return f"""请根据以下描述生成{language}代码。
-
-首先，详细思考如何解决这个问题，包括可能的算法、数据结构以及实现步骤。
-在你的思考过程中，分析不同的解决方案并选择最佳方案。
-
-描述：{description}
-
-要求：
-1. 先详细描述你的思考过程，包括你考虑的不同方法
-2. 代码应该完整且可执行
-3. 包含必要的注释
-4. 处理可能的异常情况
-5. 输出结果到控制台
-
-==== 思考过程 ====
-(请在这里详细写出你的思考过程，包括算法选择、数据结构、实现思路等)
-
-==== 代码实现 ====
-(在此处生成最终代码)
-"""
-    
-    def _build_web_prompt(self, description: str, page_content: str) -> str:
-        """构建Web操作提示"""
-        return f"""请根据以下描述生成Web操作步骤：
-
-任务描述：{description}
-
-当前页面内容：
-{page_content[:1000] if page_content else '无'}
-
-请返回JSON格式的操作步骤列表，每个步骤包含：
-- action: 操作类型（navigate, click, fill, wait等）
-- selector: CSS选择器（如果需要）
-- value: 输入值（如果需要）
-- description: 操作描述
-
-示例格式：
-[
-  {{"action": "navigate", "url": "https://example.com", "description": "打开网站"}},
-  {{"action": "fill", "selector": "#search", "value": "搜索内容", "description": "填写搜索框"}},
-  {{"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}}
-]
-
-请只返回JSON数组，不要包含其他文字："""
-    
-    def _build_reasoning_prompt(self, task_description: str, available_tools: List[str],
-                                previous_steps: List[Dict] = None,
-                                browser_context: Optional[Dict[str, Any]] = None) -> str:
-        """构建推理提示"""
-        tool_descriptions = []
-        for tool_name in available_tools:
-            # 强制使用严格的工具调用格式和示例，详见 docs/AGENT_IMPROVEMENT_PLAN.md
-            logger.debug("构建推理提示：应用严格的工具使用规则和示例")
-            if tool_name == 'browser':
-                browser_desc = (
-                    f"- browser: 用于与网页交互的工具。支持以下主要 ACTION:\n"
-                    f"    - `browser_navigate`: 导航到指定URL。PARAMETERS: `{{ \"url\": \"<完整的HTTP/HTTPS URL>\" }}`\n"
-                    f"    - `browser_get_text`: 提取页面文本。PARAMETERS: `{{ \"selector\": \"<CSS选择器(可选)>\" }}` (若无selector，则提取body文本)\n"
-                    f"    - `browser_click`: 点击指定元素。PARAMETERS: `{{ \"selector\": \"<CSS选择器>\" }}`\n"
-                    f"    (更多操作如 browser_fill_form, browser_extract_links 等请参考工具文档，并确保 PARAMETERS 格式正确)"
-                )
-                tool_descriptions.append(browser_desc)
-            elif tool_name == 'python_executor':
-                python_desc = (
-                    f"- python_executor: 用于执行Python代码。主要 ACTION:\n"
-                    f"    - `python_execute`: 执行Python代码。PARAMETERS: `{{ \"code\": \"<Python代码字符串>\" }}`"
-                )
-                tool_descriptions.append(python_desc)
-            else:
-                tool_descriptions.append(f"- {tool_name}")
-        tools_desc = "\n".join(tool_descriptions)
-        
-        browser_context_str = ""
-        if browser_context:
-            bc = browser_context # shortcut
-            # Ensuring consistent indentation for the f-string block
-            browser_context_str = (
-                f"\n\n当前浏览器状态:\n"
-                f"- 当前URL: {bc.get('current_url', 'N/A')}\n"
-                f"- 页面标题: {bc.get('current_page_title', 'N/A')}\n"
-                f"- 最近导航历史:\n  {bc.get('recent_navigation_summary', '无导航历史').replace(chr(10), chr(10) + '  ')}\n" # Indent multi-line summary
-                f"- 上次提取文本片段: {bc.get('last_text_snippet', '无')}\n"
-                f"- 当前页面链接摘要: {bc.get('links_on_page_summary', '无')}"
-            )
-
-        previous_steps_str = ""
-        if previous_steps:
-            previous_steps_str = "\n\n之前的执行步骤:\n"
-            for i, step in enumerate(previous_steps[-3:], 1):  # 只显示最近3步
-                action_str = step.get('action', step.get('action_type', 'unknown_action'))
-                observation_str = str(step.get('observation', ''))[:200]
-                previous_steps_str += f"  {i}. Action: {action_str}, Observation: {observation_str}...\n"
-
-        # The f-string for prompt_template starts here.
-        # All lines of the f-string content should be at least at this indentation level or further indented.
-        logger.debug("Applying strict tool usage rules from AGENT_IMPROVEMENT_PLAN.md")
-        prompt_template = f"""你是一个智能推理助手，需要逐步解决用户的任务。
-你的目标是准确、高效地完成任务，并清晰地展示你的决策过程。
-
-任务描述: {task_description}
-
-可用工具:
-{tools_desc}
-{browser_context_str}
-{previous_steps_str}
-请分析当前情况（包括任务描述、可用工具、浏览器状态和之前的步骤），输出你的思考过程和下一步行动。格式如下:
-
-THINKING:
-[在这里详细描述你的思考过程。分析任务需求，回顾之前的步骤和观察结果（如果有），评估当前状态，并解释你为什么选择下一步的行动和工具。如果之前的步骤失败，请分析失败原因并说明你将如何调整策略。]
-
-ACTION: [选择一个行动类型。可用行动包括: browser_navigate, browser_click, browser_get_text, python_execute, python_analyze, python_visualize, complete_task, error]
-
-TOOL: [如果你选择的ACTION需要工具，请指定使用的具体工具名称，例如：browser, python_executor。如果ACTION是 complete_task 或 error，则TOOL应为 None 或留空。]
-
-PARAMETERS:
-[提供一个JSON对象格式的工具参数。严格遵守以下规则：
-1.  **对于 `browser_navigate` ACTION**:
-    -   `PARAMETERS` 必须是 `{{ \"url\": \"<完整的、有效的HTTP或HTTPS URL>\" }}` 的格式。
-    -   示例: `{{ \"url\": \"https://www.google.com\" }}`
-2.  **对于 `browser_click` ACTION**:
-    -   `PARAMETERS` 必须是 `{{ \"selector\": \"<CSS选择器>\" }}` 的格式。
-    -   示例: `{{ \"selector\": \"button#submit\" }}`
-3.  **对于 `browser_get_text` ACTION**:
-    -   `PARAMETERS` 可以是 `{{ \"selector\": \"<CSS选择器>\" }}` (提取特定元素文本) 或 `{{}}` (提取整个body文本)。
-    -   示例: `{{ \"selector\": \"div.article-content\" }}` 或 `{{}}`
-4.  **对于 `python_execute` ACTION**:
-    -   `PARAMETERS` 必须是 `{{ \"code\": \"<Python代码字符串>\" }}`。
-5.  **对于其他 ACTION**: 请根据工具的具体需求提供参数。
-6.  **如果ACTION是 `complete_task` 或 `error`**: `PARAMETERS` 应为 `{{}}`。
-7.  **绝对禁止使用 `{{\"raw\": ...}}` 作为 `PARAMETERS` 的主要结构。所有参数都应该有明确的键名。**
-8.  在生成参数前，请在THINKING中确认所有必需的参数值（尤其是URL）已经从任务描述、之前的步骤或你的分析中获取。如果缺少关键参数，你的ACTION应该是error，并在THINKING中说明原因。
-]
-
-CONFIDENCE: [提供一个0.0到1.0之间的小数，表示你对当前决策能够成功推进任务的信心。]
-
-请确保你的输出严格遵循上述格式的每一部分。
-"""
-        return prompt_template # This return must be at the same indentation level as the start of the method body.
-    
-    def _build_summary_prompt(self, task_description: str, steps: List[Dict], 
-                             final_outputs: List[str]) -> str:
-        """构建总结提示"""
-        steps_summary = "\n".join([
-            f"步骤{i+1}: {step.get('action', 'unknown')} - {step.get('observation', '')[:100]}..."
-            for i, step in enumerate(steps)
-        ])
-        
-        outputs_summary = "\n".join([f"- {output[:200]}..." for output in final_outputs])
-        
-        return f"""请为以下任务执行过程生成一个简洁的总结。
-
-任务描述: {task_description}
-
-执行步骤:
-{steps_summary}
-
-关键输出:
-{outputs_summary}
-
-请生成一个包含以下内容的总结:
-1. 任务完成情况
-2. 主要发现或结果
-3. 使用的方法/工具
-4. 遇到的挑战(如果有)
-
-总结应该简洁明了，不超过200字。"""
-    
-    def _build_completion_check_prompt(self, task_description: str, steps: List[Dict], 
-                                     current_outputs: List[str]) -> str:
-        """构建完成检查提示"""
-        return f"""请判断以下任务是否已经完成。
-
-任务描述: {task_description}
-
-已执行步骤数: {len(steps)}
-
-当前输出:
-{chr(10).join(current_outputs[-3:]) if current_outputs else '无输出'}
-
-请回答:
-COMPLETED: [true/false]
-CONFIDENCE: [0.0-1.0]
-REASON: [判断原因]
-
-格式要求严格按照上述格式。"""
-    
-    def _extract_code(self, response: str, language: str) -> str:
-        """从响应中提取代码，支持分离思考过程和代码"""
-        import re
-        
-        # 首先查找是否有专用的"代码实现"部分
-        code_section_pattern = r'==== 代码实现 ====\s*(.*?)(?:$|==== )'
-        section_match = re.search(code_section_pattern, response, re.DOTALL)
-        if section_match:
-            # 在找到的代码实现部分中寻找代码块
-            section_content = section_match.group(1).strip()
-            
-            # 查找带有语言标记的代码块
-            code_pattern = rf'```{language}\s*(.*?)```'
-            match = re.search(code_pattern, section_content, re.DOTALL | re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
                 
-            # 查找通用代码块
-            code_pattern = r'```\s*(.*?)```'
-            match = re.search(code_pattern, section_content, re.DOTALL)
-            if match:
-                return match.group(1).strip()
+                # 验证role值
+                valid_roles = {"user", "assistant", "system"}
+                if validated_msg["role"] not in valid_roles:
+                    logger.warning(f"消息 {i} 的role无效: {validated_msg['role']}, 设置为'user'")
+                    validated_msg["role"] = "user"
                 
-            # 如果代码部分没有用代码块标记，直接返回该部分内容
-            return section_content
-        
-        # 传统方式：直接在整个响应中寻找代码块
-        # 查找带有语言标记的代码块
-        code_pattern = rf'```{language}\s*(.*?)```'
-        match = re.search(code_pattern, response, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        
-        # 查找通用代码块
-        code_pattern = r'```\s*(.*?)```'
-        match = re.search(code_pattern, response, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        
-        # 如果没有代码块标记，返回整个响应
-        return response.strip()
-    
-    def _extract_web_actions(self, response: str) -> List[Dict]:
-        """从响应中提取Web操作"""
-        try:
-            # 尝试解析JSON
-            import re
-            
-            # 查找JSON数组
-            json_pattern = r'\[(.*?)\]'
-            match = re.search(json_pattern, response, re.DOTALL)
-            if match:
-                json_str = '[' + match.group(1) + ']'
-                return json.loads(json_str)
-            
-            # 尝试直接解析整个响应
-            return json.loads(response)
-        except:
-            logger.warning(f"Failed to parse web actions from response: {response[:200]}...")
-            return self._fallback_web_actions("")
-    
-    def _parse_reasoning_response(self, response: str) -> Dict[str, Any]:
-        """解析推理响应"""
-        result = {
-            "thinking": "",
-            "action": "error",
-            "tool": None,
-            "parameters": {},
-            "confidence": 0.5
-        }
-        
-        try:
-            # 更好的解析策略：处理多行内容和JSON参数
-            current_section = None
-            thinking_lines = []
-            parameters_lines = []
-            
-            lines = response.strip().split('\n')
-            for line in lines:
-                line = line.strip()
+                validated_messages.append(validated_msg)
                 
-                if line.startswith('THINKING:'):
-                    current_section = "thinking"
-                    thinking_content = line[9:].strip()
-                    if thinking_content:
-                        thinking_lines.append(thinking_content)
-                elif line.startswith('ACTION:'):
-                    current_section = "action"
-                    result["action"] = line[7:].strip()
-                elif line.startswith('TOOL:'):
-                    current_section = "tool"
-                    tool_value = line[5:].strip()
-                    result["tool"] = tool_value if tool_value and tool_value.lower() != "none" else None
-                elif line.startswith('PARAMETERS:'):
-                    current_section = "parameters"
-                    param_str = line[11:].strip()
-                    if param_str:
-                        parameters_lines.append(param_str)
-                elif line.startswith('CONFIDENCE:'):
-                    current_section = "confidence"
-                    try:
-                        result["confidence"] = float(line[11:].strip())
-                    except:
-                        result["confidence"] = 0.5
-                elif current_section == "thinking" and line:
-                    # 继续收集thinking的多行内容
-                    thinking_lines.append(line)
-                elif current_section == "parameters" and line:
-                    # 收集多行PARAMETERS内容
-                    parameters_lines.append(line)
-            
-            # 组装thinking内容
-            if thinking_lines:
-                result["thinking"] = "\n".join(thinking_lines)
-            
-            # 解析PARAMETERS (支持多行JSON)
-            if parameters_lines:
-                parameters_text = "\n".join(parameters_lines)
-                try:
-                    result["parameters"] = json.loads(parameters_text)
-                except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse multi-line parameters JSON: {parameters_text}")
-                    # 尝试修复常见的JSON格式问题
-                    try:
-                        # 移除可能的markdown代码块标记
-                        cleaned_params = parameters_text.replace('```json', '').replace('```', '').strip()
-                        result["parameters"] = json.loads(cleaned_params)
-                    except json.JSONDecodeError:
-                        logger.error(f"Could not parse parameters as JSON: {parameters_text}")
-                        result["parameters"] = {"raw": parameters_text}
-            
-        except Exception as e:
-            logger.error(f"Error parsing reasoning response: {e}")
-            result["thinking"] = f"Failed to parse response: {response[:200]}..."
+            except Exception as e:
+                logger.error(f"验证消息 {i} 失败: {e}, 消息内容: {msg}")
+                # 跳过无效消息，但如果所有消息都无效则抛出异常
+                continue
         
-        return result
-    
-    def _parse_completion_response(self, response: str) -> Dict[str, Any]:
-        """解析完成检查响应"""
-        result = {"completed": False, "confidence": 0.5, "reason": "Unknown"}
+        if not validated_messages:
+            raise ValueError("所有输入消息都无效，无法进行API调用")
         
-        try:
-            lines = response.strip().split('\n')
-            for line in lines:
-                line = line.strip()
-                if line.startswith('COMPLETED:'):
-                    completed_str = line[10:].strip().lower()
-                    result["completed"] = completed_str in ['true', 'yes', '1']
-                elif line.startswith('CONFIDENCE:'):
-                    try:
-                        result["confidence"] = float(line[11:].strip())
-                    except:
-                        result["confidence"] = 0.5
-                elif line.startswith('REASON:'):
-                    result["reason"] = line[7:].strip()
-        except Exception as e:
-            logger.error(f"Error parsing completion response: {e}")
-            result["reason"] = f"Parse error: {e}"
+        logger.debug(f"消息验证完成: {len(messages)} -> {len(validated_messages)}")
+        return validated_messages
+    
+    def _validate_and_clean_content(self, content: Any, msg_index: int) -> str:
+        """验证和清理消息内容"""
+        if content is None:
+            return ""
         
-        return result
-
-    # 备注: 我们不再需要备用代码模板，所有的代码生成都应该由LLM完成
-    # 如果LLM调用失败，应当抛出异常，而不是使用备用代码模板
-    
-    def _fallback_web_actions(self, description: str) -> List[Dict]:
-        """Web操作生成失败时的回退操作"""
-        return [
-            {
-                "action": "navigate",
-                "url": "https://www.google.com",
-                "description": f"执行任务: {description}"
-            }
-        ]
-    
-    async def close(self):
-        """关闭客户端"""
-        await self.client.aclose()
+        if isinstance(content, str):
+            return content
+        
+        if isinstance(content, (dict, list)):
+            try:
+                # 将复杂对象转换为JSON字符串
+                json_str = json.dumps(content, ensure_ascii=False, indent=2)
+                logger.debug(f"消息 {msg_index} 的复杂content已转换为JSON字符串")
+                return json_str
+            except Exception as e:
+                logger.warning(f"消息 {msg_index} 的content JSON序列化失败: {e}")
+                return str(content)
+        
+        # 其他类型直接转换为字符串
+        return str(content)

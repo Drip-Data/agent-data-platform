@@ -7,8 +7,6 @@ scrape_configs:
     static_configs:
       - targets: 
           - 'dispatcher:8000'
-          - 'sandbox-runtime:8001'
-          - 'web-runtime:8002'
     scrape_interval: 5s
     metrics_path: /metrics
 
