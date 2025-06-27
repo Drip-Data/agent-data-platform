@@ -50,7 +50,7 @@ class DeepSearchMCPServer:
         
         self.deepsearch_tool = DeepSearchToolUnified(llm_config)
         self.server_name = "deepsearch_server"
-        self.server_id = "mcp-deepsearch"
+        self.server_id = "deepsearch"
         self.config_manager = config_manager
         
         # 从配置中获取端口
@@ -157,11 +157,51 @@ class DeepSearchMCPServer:
                 topic_focus = parameters.get("topic_focus")
                 result = await self.deepsearch_tool.comprehensive_research(question, topic_focus)
                 
+            elif action == "get_cache_stats":
+                # 获取缓存统计信息
+                cache_stats = self.deepsearch_tool.cache.get_cache_stats()
+                return {
+                    "success": True,
+                    "data": cache_stats,
+                    "error_message": "",
+                    "error_type": ""
+                }
+                
+            elif action == "clear_cache":
+                # 清空缓存
+                await self.deepsearch_tool.cache.clear_cache()
+                return {
+                    "success": True,
+                    "data": {"message": "Cache cleared successfully"},
+                    "error_message": "",
+                    "error_type": ""
+                }
+                
+            elif action == "get_health_status":
+                # 获取系统健康状态
+                health_status = self.deepsearch_tool.get_health_status()
+                return {
+                    "success": True,
+                    "data": health_status,
+                    "error_message": "",
+                    "error_type": ""
+                }
+                
+            elif action == "get_optimization_stats":
+                # 获取优化统计信息
+                optimization_stats = self.deepsearch_tool.get_optimization_stats()
+                return {
+                    "success": True,
+                    "data": optimization_stats,
+                    "error_message": "",
+                    "error_type": ""
+                }
+                
             else:
                 return {
                     "success": False,
                     "data": None,
-                    "error_message": f"Unsupported action: {action}",
+                    "error_message": f"Unsupported action: {action}. Available actions: research, quick_research, comprehensive_research, get_cache_stats, clear_cache, get_health_status, get_optimization_stats",
                     "error_type": "UnsupportedAction"
                 }
 
@@ -173,12 +213,44 @@ class DeepSearchMCPServer:
             }
                 
         except Exception as e:
-            logger.error(f"DeepSearch tool execution failed for {action}: {e}", exc_info=True)
+            import traceback
+            
+            # 🔧 优化：提供结构化的错误信息
+            error_details = {
+                "exception_type": type(e).__name__,
+                "exception_message": str(e) if str(e) else "No error message provided",
+                "action": action,
+                "parameters": {k: "***" if "key" in k.lower() or "token" in k.lower() else str(v)[:100] 
+                             for k, v in parameters.items()},  # 隐藏敏感信息但保留参数结构
+                "traceback": traceback.format_exc()[-500:],  # 只保留最后500字符的堆栈信息
+                "structured": True  # 标记为结构化错误响应
+            }
+            
+            # 根据异常类型提供更具体的错误信息
+            if isinstance(e, (ConnectionError, TimeoutError)):
+                error_message = f"网络连接问题: {str(e) or '连接超时或服务不可达'}"
+                error_type = "NetworkError"
+            elif isinstance(e, ValueError):
+                error_message = f"参数值错误: {str(e) or '提供的参数值不符合预期格式'}"
+                error_type = "ParameterError"
+            elif isinstance(e, KeyError):
+                error_message = f"缺少必需的配置或参数: {str(e) or '配置项缺失'}"
+                error_type = "ConfigurationError"
+            elif "api" in str(e).lower() or "key" in str(e).lower():
+                error_message = f"API调用失败: {str(e) or 'API密钥无效或服务不可用'}"
+                error_type = "APIError"
+            else:
+                error_message = f"DeepSearch工具内部错误: {str(e) or 'Unknown internal error'}"
+                error_type = "InternalError"
+            
+            logger.error(f"DeepSearch tool execution failed for {action}: {error_message}", exc_info=True)
+            
             return {
                 "success": False,
                 "data": None,
-                "error_message": str(e),
-                "error_type": "DeepSearchToolError"
+                "error_message": error_message,
+                "error_type": error_type,
+                "error_details": error_details
             }
 
     async def run(self):

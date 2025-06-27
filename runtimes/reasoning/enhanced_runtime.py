@@ -11,7 +11,7 @@ import time
 import uuid
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
-from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ExecutionStep, ErrorType, ActionType
+from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, ExecutionStep, ErrorType, ActionType, StructuredError, ErrorSeverity, ErrorCategory, ActionTypeClassifier
 from core.llm_client import LLMClient
 from core.metrics import EnhancedMetrics
 from core.toolscore.mcp_client import MCPToolClient
@@ -86,8 +86,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             'search_queries': set()  # 记录失败的搜索查询
         }
         
-        # 🛡️ 新增：Guardrails LLM中间件
-        self.guardrails_middleware = GuardrailsLLMMiddleware()
+        # 🛡️ 新增：Guardrails LLM中间件 - 使用本地LLM客户端
+        self.guardrails_middleware = GuardrailsLLMMiddleware(llm_client=llm_client)
         
         # 🎯 新增：ValidationCritic智能错误分析代理
         self.validation_critic = ValidationCritic(llm_client, [])
@@ -816,7 +816,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             'start_time': time.time(),
             'last_progress_time': time.time(),
             'max_consecutive_failures': 3,
-            'max_repeated_actions': 5,
+            'max_repeated_actions': 3,  # 🔥 降低阈值，更快检测重复
             'max_execution_time': 300,  # 5分钟
             'progress_timeout': 60      # 1分钟无进展超时
         }
@@ -1093,16 +1093,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     tool_id = action_result.get('tool_id') or action_result.get('tool')
                     params = action_result.get('parameters', {})
                 
-                # 添加action和tool_id到params中以保持兼容性
-                if action:
-                    params['action'] = action
-                if tool_id:
-                    params['tool_id'] = tool_id
-
+                # 🔧 修复：不要将action和tool_id添加到parameters中
+                # 这些元数据应该与业务参数分开
+                # 移除原有的错误逻辑，保持parameters字段纯净
+                
+                # 🔥 修复：确保execution_code中的parameters也是清理过的
+                clean_execution_params = {k: v for k, v in params.items()
+                                        if k not in ['action', 'tool_id', 'tool']}
+                
                 execution_code = json.dumps({
                     'action': action,
                     'tool_id': tool_id,
-                    'parameters': params
+                    'parameters': clean_execution_params  # 使用清理后的业务参数
                 }, ensure_ascii=False)
             finally:
                 # 恢复原始方法
@@ -1123,10 +1125,15 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     logger.info(f"✅ 智能参数重新生成成功")
                     params.clear()
                     params.update(retry_result["corrected_params"])
+                    # 🔧 修复：保持参数纯净，不添加元数据
+                    # 🔥 修复：重新生成时也要清理参数
+                    clean_retry_params = {k: v for k, v in params.items()
+                                        if k not in ['action', 'tool_id', 'tool']}
+                    
                     execution_code = json.dumps({
                         'action': action,
                         'tool_id': tool_id,
-                        'parameters': params
+                        'parameters': clean_retry_params  # 只包含清理后的业务参数
                     }, ensure_ascii=False)
                     
                     # 记录重新生成步骤
@@ -1159,6 +1166,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         execution_code=execution_code,
                         error_type=ErrorType.TOOL_ERROR,
                         error_message=f"{validation_error}; 重新生成失败: {retry_result['error']}",
+                        # 🔧 优化：使用结构化错误对象
+                        structured_error=StructuredError.create_parameter_error(
+                            message=f"参数校验失败且重新生成失败: {validation_error}",
+                            parameter_name="tool_parameters",
+                            expected_type="valid_parameters",
+                            received_value=str(params)[:100]
+                        ),
                         timestamp=time.time(),
                         duration=0.1,
                         llm_interactions=current_step_llm_interactions
@@ -1658,10 +1672,33 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
             duration = time.time() - tool_start
 
+            # 🔧 优化：使用智能动作类型分类
+            enhanced_action_type = action_type
+            if execution_code:
+                try:
+                    exec_code_dict = json.loads(execution_code)
+                    tool_id = exec_code_dict.get('tool_id', '')
+                    action = exec_code_dict.get('action', '')
+                    if tool_id and action:
+                        enhanced_action_type = ActionTypeClassifier.classify_action(
+                            tool_id, action, exec_code_dict.get('parameters', {})
+                        )
+                        logger.debug(f"🎯 动作类型分类: {tool_id}.{action} -> {enhanced_action_type.value}")
+                except (json.JSONDecodeError, Exception):
+                    pass  # 保持原始action_type
+            
+            # 🔥 修复：使用清理后的参数记录到轨迹中，确保一致性
+            clean_params_for_record = {k: v for k, v in params.items()
+                                     if k not in ['action', 'tool_id', 'tool']}
+            
+            # 🔥 重要：为了分析需要，在action_params中保留tool_id和action引用
+            clean_params_for_record['_tool_id'] = tool_id
+            clean_params_for_record['_action'] = action
+            
             step = ExecutionStep(
                 step_id=step_id,
-                action_type=action_type,
-                action_params=params,
+                action_type=enhanced_action_type,
+                action_params=clean_params_for_record,
                 observation=observation,
                 success=tool_success,
                 error_type=current_attempt_err_type,
@@ -1693,9 +1730,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 loop_detection['consecutive_failures'] = 0
                 loop_detection['last_progress_time'] = time.time()
             
-            # 检查重复动作
-            if loop_detection['repeated_actions'][action_key] > loop_detection['max_repeated_actions']:
-                logger.warning(f"🛑 重复执行相同动作{loop_detection['repeated_actions'][action_key]}次，终止执行: {action_key}")
+            # 🔥 强化：检查重复动作，针对browser_navigate等特殊关注
+            repeat_count = loop_detection['repeated_actions'][action_key]
+            if repeat_count > loop_detection['max_repeated_actions']:
+                logger.error(f"🚨 重复执行相同动作{repeat_count}次，任务陷入循环！")
+                logger.error(f"🚨 循环动作: {action_key}")
+                logger.error(f"🚨 建议: 检查参数构建逻辑或添加状态更新机制")
+                
+                # 记录循环检测到的错误
+                current_attempt_err_type = ErrorType.EXECUTION_FAILED
+                current_attempt_err_msg = f"检测到循环：{action_key}重复{repeat_count}次"
+                tool_success = False
+                observation = f"❌ 任务执行失败：检测到无限循环模式，动作'{action_key}'重复{repeat_count}次。可能原因：参数构建错误或状态更新失败。"
                 break
             
             # 检查工具调用模式循环
@@ -1816,60 +1862,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if last_step_exec_code.get('action') == 'complete_task':
                 final_result = steps[-1].observation
             else:
-                # 智能生成最终结果
-                browser_content = None
-                python_output = None
-                
-                for step in reversed(steps[-3:]):
-                    if not browser_content and 'Successfully retrieved page text' in step.observation:
-                        if 'Preview:' in step.observation:
-                            preview_start = step.observation.find('Preview:') + len('Preview:')
-                            preview_end = step.observation.find('---', preview_start + 10)
-                            if preview_end > preview_start:
-                                browser_content = step.observation[preview_start:preview_end].strip()
-                    
-                    if not python_output and 'Python code executed' in step.observation and 'Output' in step.observation:
-                        python_output = step.observation
-                
-                if browser_content:
-                    final_result = f"任务完成。成功访问了网站并获取了页面内容：\n\n{browser_content[:800]}{'...' if len(browser_content) > 800 else ''}"
-                elif python_output:
-                    final_result = f"任务完成。{python_output}"
-                elif current_outputs:
-                    final_result = f"任务完成。生成结果：\n{chr(10).join(current_outputs[-2:])}"
-                else:
-                    # 🔍 新增：记录任务总结生成的LLM交互
-                    summary_interactions = []
-                    original_call_api = self.client._call_api
-                    async def wrapped_call_api_for_summary(messages) -> str:
-                        interaction_start = time.time()
-                        response = await original_call_api(messages)
-                        
-                        from core.interfaces import LLMInteraction
-                        interaction = LLMInteraction()
-                        interaction.provider = self.client.provider.value if hasattr(self.client.provider, 'value') else str(self.client.provider)
-                        interaction.model = getattr(self.client, 'model', 'unknown')
-                        interaction.context = "final_task_summary"
-                        interaction.prompt = str(messages) if messages else ""
-                        interaction.prompt_length = len(str(messages))
-                        interaction.prompt_type = "task_summary"
-                        interaction.response = response
-                        interaction.response_length = len(response)
-                        interaction.response_time = time.time() - interaction_start
-                        summary_interactions.append(interaction)
-                        return response
-                    
-                    self.client._call_api = wrapped_call_api_for_summary
-                    try:
-                        final_result = await self.client.generate_task_summary(
-                            task.description, [s.__dict__ for s in steps], current_outputs
-                        )
-                    finally:
-                        self.client._call_api = original_call_api
-                    
-                    # 将总结生成的LLM交互添加到最后一步
-                    if summary_interactions and steps:
-                        steps[-1].llm_interactions.extend(summary_interactions)
+                # 🔧 优化：改进最终结果生成逻辑
+                final_result = await self._generate_enhanced_final_result(
+                    task, steps, current_outputs, success
+                )
         else:
             final_result = final_trajectory_error_message or "Task execution failed"
 
@@ -1899,8 +1895,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 🔍 应用轨迹增强 - 添加详细元数据
         enhanced_trajectory = self.trajectory_enhancer.enhance_trajectory(trajectory)
         
+        # 🔧 优化：合并相关步骤，减少轨迹复杂度
+        optimized_trajectory = self.trajectory_enhancer.merge_related_steps(enhanced_trajectory)
+        
+        # 🔧 优化：生成执行摘要和推荐信息
+        execution_summary = self.trajectory_enhancer.generate_execution_summary(optimized_trajectory)
+        optimized_trajectory.metadata["execution_summary"] = execution_summary
+        logger.info(f"📊 执行摘要生成完成 - 效率分数: {execution_summary['performance_metrics']['efficiency_score']:.2f}")
+        
         # 保存轨迹
-        await self._save_trajectory(enhanced_trajectory)
+        await self._save_trajectory(optimized_trajectory)
         
         # === 将运行期间捕获的新工具事件追加到轨迹 ===
         if self._tool_event_buffer:
@@ -1940,7 +1944,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         except Exception as session_err:
             logger.warning(f"保存会话摘要失败: {session_err}")
         
-        return trajectory
+        return optimized_trajectory
     
     def _should_skip_failed_operation(self, operation_key: str, tool_id: str, action: str, params: Dict[str, Any]) -> bool:
         """检查是否应该跳过重复失败的操作"""
@@ -2436,11 +2440,36 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             tool_steps = [s for s in steps if s.action_type == ActionType.TOOL_CALL and s.step_id > 1]
             successful_tool_steps = [s for s in tool_steps if s.success]
             
-            # 统计工具使用情况
+            # 🔥 修复：正确统计工具使用情况
             used_tools = set()
             for step in successful_tool_steps:
-                if hasattr(step, 'tool_id') and step.tool_id:
-                    used_tools.add(step.tool_id)
+                # 🔥 优化：使用新的工具检测逻辑
+                tool_id = None
+                if step.action_params:
+                    # 优先从新增的_tool_id字段获取
+                    tool_id = step.action_params.get('_tool_id')
+                    
+                    # 备选：从原始tool_id字段获取
+                    if not tool_id:
+                        tool_id = step.action_params.get('tool_id')
+                
+                # 备选：从execution_code解析
+                if not tool_id and step.execution_code:
+                    try:
+                        exec_data = json.loads(step.execution_code)
+                        tool_id = exec_data.get('tool_id')
+                    except:
+                        pass
+                
+                # 备选：直接检查属性（向后兼容）
+                if not tool_id and hasattr(step, 'tool_id'):
+                    tool_id = step.tool_id
+                
+                if tool_id:
+                    used_tools.add(tool_id)
+                    logger.debug(f"🔧 检测到工具使用: {tool_id} (步骤{step.step_id})")
+                else:
+                    logger.warning(f"⚠️ 步骤{step.step_id}未能检测到tool_id，action_params: {step.action_params}")
             
             # 计算关键指标
             success_rate = len(successful_steps) / len(steps) if steps else 0
@@ -3070,11 +3099,22 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     def _decide_completion(self, metrics: Dict[str, Any], sub_task_completion: Dict[str, Any]) -> bool:
         """基于指标决定是否完成"""
         
-        # 基本条件检查
+        # 🔥 强化：基本条件检查
         has_minimum_execution = (
             metrics['successful_tool_steps'] >= 1 and
             metrics['success_rate'] >= 0.5
         )
+        
+        # 🔥 新增：检测循环失败模式
+        has_loop_failure = metrics.get('tool_diversity', 0) == 0
+        
+        logger.debug(f"🔍 完成判断指标:")
+        logger.debug(f"  - 成功工具步骤: {metrics['successful_tool_steps']}")
+        logger.debug(f"  - 成功率: {metrics['success_rate']:.2f}")
+        logger.debug(f"  - 工具多样性: {metrics['tool_diversity']}")
+        logger.debug(f"  - 使用的工具: {metrics['used_tools']}")
+        logger.debug(f"  - 最小执行要求: {has_minimum_execution}")
+        logger.debug(f"  - 循环失败: {has_loop_failure}")
         
         # 输出质量检查
         has_quality_output = metrics['output_quality_score'] >= 0.5
@@ -3478,4 +3518,220 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         except Exception as e:
             logger.error(f"❌ 构建错误分析上下文失败: {e}")
             return {"has_errors": False, "error": str(e)}
+    
+    async def _generate_enhanced_final_result(self, task, steps: List[ExecutionStep], 
+                                            current_outputs: List[str], success: bool) -> str:
+        """
+        🔧 优化：生成增强的最终结果
+        
+        智能分析任务执行过程，生成结构化、有价值的最终结果摘要
+        """
+        try:
+            logger.info("🎯 开始生成增强最终结果")
+            
+            if not steps:
+                return "任务执行失败：未记录到任何执行步骤"
+            
+            # 🔍 分析执行模式和关键结果
+            execution_analysis = self._analyze_execution_patterns(steps, success)
+            
+            # 🎯 提取核心成果
+            core_achievements = self._extract_core_achievements(steps, current_outputs)
+            
+            # 📊 生成执行统计
+            execution_stats = self._generate_execution_statistics(steps)
+            
+            # 🎯 构建最终结果
+            if success:
+                final_result = self._build_successful_result(
+                    task, core_achievements, execution_analysis, execution_stats
+                )
+            else:
+                final_result = self._build_failed_result(
+                    task, steps, execution_analysis, execution_stats
+                )
+            
+            logger.info(f"✅ 增强最终结果生成完成 - 长度: {len(final_result)} 字符")
+            return final_result
+            
+        except Exception as e:
+            logger.error(f"❌ 生成增强最终结果失败: {e}")
+            # 降级为简单结果生成
+            return self._generate_simple_final_result(steps, current_outputs, success)
+    
+    def _analyze_execution_patterns(self, steps: List[ExecutionStep], success: bool) -> Dict[str, Any]:
+        """分析执行模式"""
+        patterns = {
+            "dominant_tool_type": None,
+            "execution_flow": "linear",
+            "error_recovery_attempts": 0,
+            "tool_switching_count": 0,
+            "complexity_level": "simple"
+        }
+        
+        if not steps:
+            return patterns
+        
+        # 分析主要工具类型
+        tool_usage = {}
+        for step in steps:
+            if hasattr(step, 'action_params') and step.action_params:
+                tool_id = step.action_params.get('tool_id', 'unknown')
+                tool_usage[tool_id] = tool_usage.get(tool_id, 0) + 1
+        
+        if tool_usage:
+            patterns["dominant_tool_type"] = max(tool_usage, key=tool_usage.get)
+        
+        # 分析错误恢复
+        patterns["error_recovery_attempts"] = sum(1 for step in steps if not step.success)
+        
+        # 分析工具切换
+        prev_tool = None
+        for step in steps:
+            if hasattr(step, 'action_params') and step.action_params:
+                current_tool = step.action_params.get('tool_id')
+                if prev_tool and prev_tool != current_tool:
+                    patterns["tool_switching_count"] += 1
+                prev_tool = current_tool
+        
+        # 判断复杂度
+        if len(steps) > 10 or patterns["tool_switching_count"] > 3:
+            patterns["complexity_level"] = "complex"
+        elif len(steps) > 5 or patterns["tool_switching_count"] > 1:
+            patterns["complexity_level"] = "moderate"
+        
+        return patterns
+    
+    def _extract_core_achievements(self, steps: List[ExecutionStep], current_outputs: List[str]) -> Dict[str, Any]:
+        """提取核心成果"""
+        achievements = {
+            "primary_output": None,
+            "data_retrieved": False,
+            "code_executed": False,
+            "research_completed": False,
+            "file_operations": False,
+            "key_insights": []
+        }
+        
+        # 分析最后的成功输出
+        if current_outputs:
+            achievements["primary_output"] = current_outputs[-1]
+        
+        # 分析执行类型
+        for step in steps:
+            if step.success and step.observation:
+                obs_lower = step.observation.lower()
+                
+                if 'successfully retrieved' in obs_lower or 'search results' in obs_lower:
+                    achievements["data_retrieved"] = True
+                
+                if 'python code executed' in obs_lower or 'code execution' in obs_lower:
+                    achievements["code_executed"] = True
+                
+                if 'research' in obs_lower or 'analysis' in obs_lower:
+                    achievements["research_completed"] = True
+                
+                if 'file' in obs_lower and ('created' in obs_lower or 'saved' in obs_lower):
+                    achievements["file_operations"] = True
+                
+                # 提取关键洞察（长度超过100字符的观察）
+                if len(step.observation) > 100:
+                    achievements["key_insights"].append(step.observation[:200] + "...")
+        
+        return achievements
+    
+    def _generate_execution_statistics(self, steps: List[ExecutionStep]) -> Dict[str, Any]:
+        """生成执行统计"""
+        stats = {
+            "total_steps": len(steps),
+            "successful_steps": sum(1 for step in steps if step.success),
+            "failed_steps": sum(1 for step in steps if not step.success),
+            "total_duration": sum(getattr(step, 'duration', 0) for step in steps),
+            "tools_used": set(),
+            "actions_performed": []
+        }
+        
+        for step in steps:
+            if hasattr(step, 'action_params') and step.action_params:
+                tool_id = step.action_params.get('tool_id')
+                action = step.action_params.get('action')
+                if tool_id:
+                    stats["tools_used"].add(tool_id)
+                if action:
+                    stats["actions_performed"].append(action)
+        
+        stats["tools_used"] = list(stats["tools_used"])
+        stats["success_rate"] = stats["successful_steps"] / max(stats["total_steps"], 1)
+        
+        return stats
+    
+    def _build_successful_result(self, task, achievements: Dict[str, Any], 
+                               analysis: Dict[str, Any], stats: Dict[str, Any]) -> str:
+        """构建成功结果"""
+        result_parts = ["✅ 任务执行成功"]
+        
+        # 添加主要成果
+        if achievements["primary_output"]:
+            result_parts.append(f"\n🎯 核心结果:\n{achievements['primary_output']}")
+        
+        # 添加执行摘要
+        result_parts.append(f"\n📊 执行摘要:")
+        result_parts.append(f"- 总步骤数: {stats['total_steps']}")
+        result_parts.append(f"- 成功率: {stats['success_rate']:.1%}")
+        result_parts.append(f"- 使用工具: {', '.join(stats['tools_used'])}")
+        
+        # 添加关键成就
+        achievements_list = []
+        if achievements["data_retrieved"]:
+            achievements_list.append("数据检索")
+        if achievements["code_executed"]:
+            achievements_list.append("代码执行")
+        if achievements["research_completed"]:
+            achievements_list.append("研究分析")
+        if achievements["file_operations"]:
+            achievements_list.append("文件操作")
+        
+        if achievements_list:
+            result_parts.append(f"- 完成类型: {', '.join(achievements_list)}")
+        
+        return "".join(result_parts)
+    
+    def _build_failed_result(self, task, steps: List[ExecutionStep], 
+                           analysis: Dict[str, Any], stats: Dict[str, Any]) -> str:
+        """构建失败结果"""
+        result_parts = ["❌ 任务执行失败"]
+        
+        # 添加失败原因分析
+        if steps:
+            last_errors = [step.error_message for step in steps[-3:] if not step.success and step.error_message]
+            if last_errors:
+                result_parts.append(f"\n🔍 主要错误:\n- {last_errors[-1]}")
+        
+        # 添加执行统计
+        result_parts.append(f"\n📊 执行统计:")
+        result_parts.append(f"- 尝试步骤: {stats['total_steps']}")
+        result_parts.append(f"- 失败步骤: {stats['failed_steps']}")
+        result_parts.append(f"- 使用工具: {', '.join(stats['tools_used']) if stats['tools_used'] else '无'}")
+        
+        # 添加建议
+        result_parts.append(f"\n💡 建议:")
+        if analysis["error_recovery_attempts"] > 3:
+            result_parts.append("- 考虑简化任务或分解为更小的步骤")
+        if analysis["tool_switching_count"] > 5:
+            result_parts.append("- 可能需要更明确的工具选择策略")
+        
+        return "".join(result_parts)
+    
+    def _generate_simple_final_result(self, steps: List[ExecutionStep], 
+                                    current_outputs: List[str], success: bool) -> str:
+        """生成简单的最终结果（降级方案）"""
+        if success:
+            if current_outputs:
+                return f"任务完成。生成结果：\n{current_outputs[-1]}"
+            elif steps and steps[-1].observation:
+                return f"任务完成。{steps[-1].observation}"
+            else:
+                return "任务已完成。"
+        else:
+            return "任务执行失败。"
 

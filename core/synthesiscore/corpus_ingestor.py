@@ -41,7 +41,14 @@ class TrajectoryCorpusExtractor:
                 corpus_contents.extend(step_corpus_list)
                 
             except Exception as e:
+                # 增强日志记录，包含导致错误的轨迹对象
                 logger.error(f"❌ 提取轨迹语料失败 {trajectory.task_id}: {e}")
+                try:
+                    # 尝试将轨迹对象序列化为JSON进行记录
+                    trajectory_dump = json.dumps(trajectory.to_dict() if hasattr(trajectory, 'to_dict') else trajectory.__dict__, indent=2, ensure_ascii=False)
+                    logger.error(f" problematic_trajectory: {trajectory_dump}")
+                except Exception as dump_error:
+                    logger.error(f"无法序列化轨迹对象: {dump_error}")
                 continue
         
         logger.info(f"✅ 从 {len(trajectories)} 个轨迹中提取了 {len(corpus_contents)} 个语料")
@@ -97,6 +104,12 @@ class TrajectoryCorpusExtractor:
                 
             except Exception as e:
                 logger.warning(f"⚠️ 提取步骤语料失败 {trajectory.task_id}#{step.step_id}: {e}")
+                try:
+                    # 尝试将步骤对象序列化为JSON进行记录
+                    step_dump = json.dumps(step.to_dict() if hasattr(step, 'to_dict') else step.__dict__, indent=2, ensure_ascii=False)
+                    logger.warning(f"  problematic_step: {step_dump}")
+                except Exception as dump_error:
+                    logger.warning(f"  无法序列化步骤对象: {dump_error}")
                 continue
         
         return corpus_contents

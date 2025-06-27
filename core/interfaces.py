@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from enum import Enum
 import time
 import json
@@ -14,10 +14,115 @@ class TaskType(Enum):
     # GENERAL = "general"  # 添加通用任务类型
 
 class ActionType(Enum):
+    # 🔧 优化：扩展的语义化动作类型
     CODE_GENERATION = "code_generation"
     CODE_EXECUTION = "code_execution"
     BROWSER_ACTION = "browser_action"
     TOOL_CALL = "tool_call"
+    
+    # 新增：细分的动作类型
+    RESEARCH_QUERY = "research_query"         # 研究查询
+    DATA_RETRIEVAL = "data_retrieval"         # 数据检索
+    FILE_OPERATION = "file_operation"         # 文件操作
+    NETWORK_REQUEST = "network_request"       # 网络请求
+    VALIDATION_CHECK = "validation_check"     # 验证检查
+    ERROR_RECOVERY = "error_recovery"         # 错误恢复
+    TASK_PLANNING = "task_planning"           # 任务规划
+    RESULT_SYNTHESIS = "result_synthesis"     # 结果综合
+    USER_INTERACTION = "user_interaction"     # 用户交互
+    SYSTEM_CONFIG = "system_config"           # 系统配置
+    RESOURCE_MANAGEMENT = "resource_management" # 资源管理
+    KNOWLEDGE_EXTRACTION = "knowledge_extraction" # 知识提取
+    ANALYSIS_PROCESSING = "analysis_processing"   # 分析处理
+
+class ActionTypeClassifier:
+    """🔧 优化：动作类型分类器
+    
+    根据工具和动作自动确定合适的语义化动作类型
+    """
+    
+    @staticmethod
+    def classify_action(tool_id: str, action: str, parameters: Dict[str, Any] = None) -> ActionType:
+        """根据工具ID和动作自动分类动作类型"""
+        tool_id = tool_id.lower()
+        action = action.lower()
+        
+        # 研究和搜索相关
+        if any(keyword in tool_id for keyword in ['search', 'research', 'deepsearch']):
+            if 'comprehensive' in action or 'detailed' in action:
+                return ActionType.KNOWLEDGE_EXTRACTION
+            else:
+                return ActionType.RESEARCH_QUERY
+        
+        # 代码相关
+        if any(keyword in tool_id for keyword in ['python', 'executor', 'code', 'microsandbox']):
+            if 'execute' in action:
+                return ActionType.CODE_EXECUTION
+            else:
+                return ActionType.CODE_GENERATION
+        
+        # 浏览器相关
+        if any(keyword in tool_id for keyword in ['browser', 'navigator', 'web']):
+            return ActionType.BROWSER_ACTION
+        
+        # 文件相关
+        if any(keyword in tool_id for keyword in ['file', 'document', 'storage']):
+            return ActionType.FILE_OPERATION
+        
+        # 网络相关
+        if any(keyword in tool_id for keyword in ['http', 'api', 'request', 'fetch']):
+            return ActionType.NETWORK_REQUEST
+        
+        # 数据库相关
+        if any(keyword in tool_id for keyword in ['database', 'db', 'sql']):
+            return ActionType.DATA_RETRIEVAL
+        
+        # 验证和检查相关
+        if any(keyword in action for keyword in ['validate', 'check', 'verify']):
+            return ActionType.VALIDATION_CHECK
+        
+        # 错误恢复相关
+        if any(keyword in action for keyword in ['retry', 'recover', 'fix', 'repair']):
+            return ActionType.ERROR_RECOVERY
+        
+        # 规划相关
+        if any(keyword in action for keyword in ['plan', 'strategy', 'organize']):
+            return ActionType.TASK_PLANNING
+        
+        # 分析相关
+        if any(keyword in action for keyword in ['analyze', 'process', 'compute', 'calculate']):
+            return ActionType.ANALYSIS_PROCESSING
+        
+        # 综合相关
+        if any(keyword in action for keyword in ['synthesize', 'merge', 'combine', 'summary']):
+            return ActionType.RESULT_SYNTHESIS
+        
+        # 默认返回工具调用
+        return ActionType.TOOL_CALL
+    
+    @staticmethod
+    def get_action_description(action_type: ActionType) -> str:
+        """获取动作类型的中文描述"""
+        descriptions = {
+            ActionType.CODE_GENERATION: "代码生成",
+            ActionType.CODE_EXECUTION: "代码执行",
+            ActionType.BROWSER_ACTION: "浏览器操作",
+            ActionType.TOOL_CALL: "工具调用",
+            ActionType.RESEARCH_QUERY: "研究查询",
+            ActionType.DATA_RETRIEVAL: "数据检索",
+            ActionType.FILE_OPERATION: "文件操作",
+            ActionType.NETWORK_REQUEST: "网络请求",
+            ActionType.VALIDATION_CHECK: "验证检查",
+            ActionType.ERROR_RECOVERY: "错误恢复",
+            ActionType.TASK_PLANNING: "任务规划",
+            ActionType.RESULT_SYNTHESIS: "结果综合",
+            ActionType.USER_INTERACTION: "用户交互",
+            ActionType.SYSTEM_CONFIG: "系统配置",
+            ActionType.RESOURCE_MANAGEMENT: "资源管理",
+            ActionType.KNOWLEDGE_EXTRACTION: "知识提取",
+            ActionType.ANALYSIS_PROCESSING: "分析处理"
+        }
+        return descriptions.get(action_type, action_type.value)
 
 class ErrorType(Enum):
     TIMEOUT = "timeout"
@@ -30,6 +135,156 @@ class ErrorType(Enum):
     TOOL_ERROR = "tool_error"
     EXECUTION_ERROR = "ExecutionError"
     EXECUTION_FAILED = "execution_failed"  # 添加缺失的枚举值
+    PARAMETER_ERROR = "parameter_error"
+    CONFIGURATION_ERROR = "configuration_error"
+    API_ERROR = "api_error"
+    INTERNAL_ERROR = "internal_error"
+    VALIDATION_ERROR = "validation_error"
+
+class ErrorSeverity(Enum):
+    """错误严重性级别"""
+    LOW = "low"           # 轻微错误，不影响任务继续
+    MEDIUM = "medium"     # 中等错误，需要恢复措施
+    HIGH = "high"         # 严重错误，可能导致任务失败
+    CRITICAL = "critical" # 致命错误，必须终止任务
+
+class ErrorCategory(Enum):
+    """错误分类"""
+    USER_INPUT = "user_input"           # 用户输入相关错误
+    TOOL_OPERATION = "tool_operation"   # 工具操作错误
+    NETWORK_ISSUE = "network_issue"     # 网络问题
+    RESOURCE_LIMIT = "resource_limit"   # 资源限制
+    SYSTEM_FAILURE = "system_failure"   # 系统故障
+    CONFIGURATION = "configuration"     # 配置问题
+    DATA_PROCESSING = "data_processing" # 数据处理错误
+
+@dataclass
+class StructuredError:
+    """🔧 优化：结构化错误对象
+    
+    提供更详细的错误信息，便于轨迹分析和错误恢复
+    """
+    error_type: ErrorType
+    severity: ErrorSeverity
+    category: ErrorCategory
+    message: str
+    details: Dict[str, Any] = field(default_factory=dict)
+    suggested_actions: List[str] = field(default_factory=list)
+    timestamp: float = field(default_factory=time.time)
+    context: Dict[str, Any] = field(default_factory=dict)
+    retry_count: int = 0
+    is_recoverable: bool = True
+    error_code: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "error_type": self.error_type.value,
+            "severity": self.severity.value,
+            "category": self.category.value,
+            "message": self.message,
+            "details": self.details,
+            "suggested_actions": self.suggested_actions,
+            "timestamp": self.timestamp,
+            "context": self.context,
+            "retry_count": self.retry_count,
+            "is_recoverable": self.is_recoverable,
+            "error_code": self.error_code
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StructuredError':
+        """从字典创建结构化错误对象"""
+        return cls(
+            error_type=ErrorType(data["error_type"]),
+            severity=ErrorSeverity(data["severity"]),
+            category=ErrorCategory(data["category"]),
+            message=data["message"],
+            details=data.get("details", {}),
+            suggested_actions=data.get("suggested_actions", []),
+            timestamp=data.get("timestamp", time.time()),
+            context=data.get("context", {}),
+            retry_count=data.get("retry_count", 0),
+            is_recoverable=data.get("is_recoverable", True),
+            error_code=data.get("error_code")
+        )
+    
+    @classmethod
+    def create_parameter_error(cls, message: str, parameter_name: str = None, 
+                             expected_type: str = None, received_value: Any = None) -> 'StructuredError':
+        """创建参数错误"""
+        details = {}
+        if parameter_name:
+            details["parameter_name"] = parameter_name
+        if expected_type:
+            details["expected_type"] = expected_type
+        if received_value is not None:
+            details["received_value"] = str(received_value)[:100]  # 限制长度
+        
+        return cls(
+            error_type=ErrorType.PARAMETER_ERROR,
+            severity=ErrorSeverity.MEDIUM,
+            category=ErrorCategory.USER_INPUT,
+            message=message,
+            details=details,
+            suggested_actions=[
+                "检查参数名称和类型",
+                "参考API文档确认正确的参数格式"
+            ]
+        )
+    
+    @classmethod
+    def create_network_error(cls, message: str, url: str = None, 
+                           status_code: int = None, timeout: float = None) -> 'StructuredError':
+        """创建网络错误"""
+        details = {}
+        if url:
+            details["url"] = url
+        if status_code:
+            details["status_code"] = status_code
+        if timeout:
+            details["timeout"] = timeout
+        
+        return cls(
+            error_type=ErrorType.NETWORK_ERROR,
+            severity=ErrorSeverity.HIGH,
+            category=ErrorCategory.NETWORK_ISSUE,
+            message=message,
+            details=details,
+            suggested_actions=[
+                "检查网络连接",
+                "验证目标服务是否可用",
+                "考虑增加超时时间或重试"
+            ]
+        )
+    
+    @classmethod
+    def create_tool_error(cls, message: str, tool_id: str = None, 
+                        action: str = None, parameters: Dict[str, Any] = None) -> 'StructuredError':
+        """创建工具错误"""
+        details = {}
+        if tool_id:
+            details["tool_id"] = tool_id
+        if action:
+            details["action"] = action
+        if parameters:
+            # 过滤敏感信息
+            safe_params = {k: "***" if "key" in k.lower() or "token" in k.lower() 
+                          else str(v)[:100] for k, v in parameters.items()}
+            details["parameters"] = safe_params
+        
+        return cls(
+            error_type=ErrorType.TOOL_ERROR,
+            severity=ErrorSeverity.MEDIUM,
+            category=ErrorCategory.TOOL_OPERATION,
+            message=message,
+            details=details,
+            suggested_actions=[
+                "验证工具配置和可用性",
+                "检查参数格式和值",
+                "尝试使用替代工具"
+            ]
+        )
 
 @dataclass
 class TaskSpec:
@@ -76,6 +331,10 @@ class ExecutionStep:
     execution_code: Optional[str] = None  # 生成的工具调用代码
     error_type: Optional[ErrorType] = None
     error_message: Optional[str] = None
+    
+    # 🔧 优化：结构化错误对象支持
+    structured_error: Optional[StructuredError] = None
+    
     timestamp: float = field(default_factory=time.time)
     duration: float = 0.0
     
@@ -113,6 +372,8 @@ class ExecutionStep:
             'execution_code': self.execution_code,
             'error_type': error_type_value,
             'error_message': self.error_message,
+            # 🔧 优化：结构化错误对象
+            'structured_error': self.structured_error.to_dict() if self.structured_error else None,
             'timestamp': self.timestamp,
             'duration': self.duration,
             # 🔍 LLM交互记录
@@ -139,6 +400,10 @@ class TrajectoryResult:
     final_result: str
     error_type: Optional[ErrorType] = None
     error_message: Optional[str] = None
+    
+    # 🔧 优化：结构化错误对象支持
+    structured_error: Optional[StructuredError] = None
+    
     total_duration: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
@@ -175,6 +440,8 @@ class TrajectoryResult:
             'final_result': self.final_result,
             'error_type': error_type_value,
             'error_message': self.error_message,
+            # 🔧 优化：结构化错误对象
+            'structured_error': self.structured_error.to_dict() if self.structured_error else None,
             'total_duration': self.total_duration,
             'metadata': self.metadata,
             'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.created_at)),

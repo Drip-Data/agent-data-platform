@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Set
 from core.interfaces import TaskSpec
 
@@ -15,6 +16,13 @@ class TaskLoader:
         self.task_file = task_file
         self.processed_tasks: Set[str] = set()
         self.last_position = 0
+        
+        # 🔧 添加智能等待机制
+        self.consecutive_misses = 0
+        self.max_consecutive_misses = 12  # 1分钟后切换到慢轮询
+        self.fast_polling_interval = 5   # 快速轮询：5秒
+        self.slow_polling_interval = 30  # 慢速轮询：30秒
+        self.last_activity_time = time.time()
 
     async def load_new_tasks(self):
         """
@@ -24,8 +32,25 @@ class TaskLoader:
         while True:
             try:
                 if not os.path.exists(self.task_file):
-                    logger.debug(f"任务文件 {self.task_file} 不存在，等待...")
-                    await asyncio.sleep(5)
+                    # 🔧 智能等待机制
+                    self.consecutive_misses += 1
+                    
+                    # 选择等待间隔
+                    if self.consecutive_misses <= self.max_consecutive_misses:
+                        wait_time = self.fast_polling_interval
+                        level = "debug"
+                    else:
+                        wait_time = self.slow_polling_interval
+                        level = "info" if self.consecutive_misses % 6 == 0 else "debug"  # 每3分钟输出一次info
+                    
+                    # 输出日志
+                    log_msg = f"任务文件 {self.task_file} 不存在，等待... (第{self.consecutive_misses}次, {wait_time}s间隔)"
+                    if level == "info":
+                        logger.info(f"📋 {log_msg} - 建议通过API提交任务")
+                    else:
+                        logger.debug(log_msg)
+                    
+                    await asyncio.sleep(wait_time)
                     continue
 
                 with open(self.task_file, 'r', encoding='utf-8') as f:
@@ -57,6 +82,13 @@ class TaskLoader:
                             
                             self.processed_tasks.add(task.task_id)
                             self.last_position = f.tell() # 记录当前文件位置
+                            
+                            # 🔧 重置连续失败计数器
+                            if self.consecutive_misses > 0:
+                                logger.debug(f"✅ 找到任务，重置等待计数器 (之前{self.consecutive_misses}次未找到)")
+                                self.consecutive_misses = 0
+                                self.last_activity_time = time.time()
+                            
                             yield task # 返回新任务
                             
                         except (json.JSONDecodeError, ValueError) as e:
@@ -70,7 +102,12 @@ class TaskLoader:
                     self.processed_tasks.clear()
                     self.last_position = 0
                 
-                await asyncio.sleep(1) # 短暂等待，避免CPU空转
+                # 🔧 文件存在但无新任务时的智能等待
+                self.consecutive_misses += 1
+                if self.consecutive_misses <= self.max_consecutive_misses:
+                    await asyncio.sleep(self.fast_polling_interval)
+                else:
+                    await asyncio.sleep(self.slow_polling_interval)
                 
             except Exception as e:
                 logger.error(f"任务加载过程中出错: {e}")

@@ -388,24 +388,31 @@ async def _wait_for_server_ready(server_name: str, process: subprocess.Popen, ti
 
 async def _check_server_specific_readiness(server_name: str) -> bool:
     """基于服务器类型的特定就绪检查"""
+    global _config_manager
+    if not _config_manager:
+        return False
+
     try:
+        mcp_servers_config = _config_manager.get_mcp_servers_config()
+        server_config = mcp_servers_config.get(server_name)
+
+        if not server_config or 'port' not in server_config:
+            logger.debug(f"`{server_name}` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.")
+            return False
+
+        port = server_config['port']
+        
         if server_name == 'deepsearch_server':
-            # DeepSearch特定的就绪检查
-            # 可以尝试连接其健康检查端点
-            return await _check_http_endpoint_health(f"http://localhost:8083/health")
-            
+            return await _check_http_endpoint_health(f"http://localhost:{port}/health")
         elif server_name == 'microsandbox_server':
-            # MicroSandbox特定的就绪检查
-            return await _check_http_endpoint_health(f"http://localhost:8082/health")
-            
+            return await _check_http_endpoint_health(f"http://localhost:{port}/health")
         elif server_name == 'browser_use_server':
             # Browser Use特定的就绪检查
-            return await _check_websocket_health(f"ws://localhost:8084")
-            
+            return await _check_websocket_health(f"ws://localhost:{port}")
         elif server_name == 'search_tool_server':
             # Search Tool特定的就绪检查
-            return await _check_websocket_health(f"ws://localhost:8085")
-            
+            return await _check_websocket_health(f"ws://localhost:{port}")
+
     except Exception as e:
         logger.debug(f"⚠️ {server_name} 特定就绪检查失败: {e}")
     

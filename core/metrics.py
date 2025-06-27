@@ -140,3 +140,29 @@ class EnhancedMetrics:
     def record_task_failure(self, task_id: str, runtime: str, error_type: str = 'unknown'):
         """记录任务失败"""
         self.record_task_completed(task_id, runtime, success=False, error_type=error_type)
+    
+    def record_mcp_sync_issues(self, validation_report: dict, fix_results: dict = None):
+        """记录MCP同步问题"""
+        try:
+            # 记录同步验证的结果
+            if validation_report:
+                total_tools = validation_report.get('total_tools', 0)
+                connected_tools = validation_report.get('connected_tools', 0)
+                schema_consistent_tools = validation_report.get('schema_consistent_tools', 0)
+                
+                # 更新工具连接状态指标
+                if hasattr(self, 'runtime_health'):
+                    health_ratio = connected_tools / total_tools if total_tools > 0 else 0
+                    self.runtime_health.labels(runtime='mcp_tools').set(health_ratio)
+            
+            # 记录修复结果
+            if fix_results:
+                successful_fixes = len(fix_results.get('successful_fixes', []))
+                failed_fixes = len(fix_results.get('failed_fixes', []))
+                
+                # 可以添加修复相关的指标记录
+                pass
+                
+        except Exception as e:
+            # 静默处理指标记录错误，避免影响主要功能
+            pass

@@ -1,7 +1,8 @@
+
 {
   "service_id": "browser_use",
   "name": "Browser Use MCP Server",
-  "description": "AI驱动的浏览器自动化服务",
+  "description": "基于browser-use的AI浏览器自动化服务，完整实现browser-use的所有功能",
   "version": "1.0.0",
   "entry_point": "main.py",
   "host": "localhost",
@@ -9,149 +10,475 @@
   "capabilities": [
     {
       "name": "browser_use_execute_task",
-      "description": "执行复杂的AI浏览器任务",
+      "description": "使用AI执行复杂的浏览器任务，支持自然语言描述",
       "parameters": {
         "task": {
           "type": "string",
-          "description": "自然语言任务描述"
+          "description": "要执行的任务描述，使用自然语言",
+          "required": true
         },
         "max_steps": {
           "type": "integer",
-          "description": "最大执行步数"
+          "description": "最大执行步骤数，默认50",
+          "required": false
         },
         "use_vision": {
           "type": "boolean",
-          "description": "启用视觉理解"
+          "description": "是否使用视觉理解，默认true",
+          "required": false
         }
       },
-      "required_params": [
-        "task"
-      ],
-      "optional_params": [
-        "max_steps",
-        "use_vision"
-      ],
       "examples": [
         {
-          "task": "打开Python官网并获取最新版本信息",
-          "max_steps": 10,
+          "task": "搜索Python教程并打开第一个结果"
+        },
+        {
+          "task": "在GitHub上搜索browser-use项目并查看README"
+        },
+        {
+          "task": "登录网站并填写表单",
           "use_vision": true
         }
       ]
     },
     {
       "name": "browser_navigate",
-      "description": "导航到指定URL",
+      "description": "导航到指定网址",
       "parameters": {
         "url": {
           "type": "string",
-          "description": "目标URL"
+          "description": "要访问的URL地址",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "url": "https://www.google.com"
         },
-        "wait_time": {
-          "type": "integer",
-          "description": "等待时间（秒）"
-        }
-      },
-      "required_params": [
-        "url"
-      ],
-      "optional_params": [
-        "wait_time"
-      ],
-      "examples": [
         {
-          "url": "https://python.org",
-          "wait_time": 3
-        }
-      ]
-    },
-    {
-      "name": "browser_click_element",
-      "description": "点击页面元素",
-      "parameters": {
-        "index": {
-          "type": "integer",
-          "description": "元素索引"
-        }
-      },
-      "required_params": [
-        "index"
-      ],
-      "optional_params": [],
-      "examples": [
-        {
-          "index": 0
-        }
-      ]
-    },
-    {
-      "name": "browser_input_text",
-      "description": "在输入框中输入文本",
-      "parameters": {
-        "index": {
-          "type": "integer",
-          "description": "输入框索引"
-        },
-        "text": {
-          "type": "string",
-          "description": "输入文本"
-        }
-      },
-      "required_params": [
-        "index",
-        "text"
-      ],
-      "optional_params": [],
-      "examples": [
-        {
-          "index": 0,
-          "text": "Python tutorial"
-        }
-      ]
-    },
-    {
-      "name": "browser_extract_content",
-      "description": "提取页面内容",
-      "parameters": {
-        "selector": {
-          "type": "string",
-          "description": "CSS选择器，空则提取全部内容"
-        }
-      },
-      "required_params": [],
-      "optional_params": [
-        "selector"
-      ],
-      "examples": [
-        {
-          "selector": "h1, p"
+          "url": "https://github.com"
         }
       ]
     },
     {
       "name": "browser_search_google",
-      "description": "在Google中搜索",
+      "description": "在Google中搜索指定查询",
       "parameters": {
         "query": {
           "type": "string",
-          "description": "搜索查询"
+          "description": "搜索查询词",
+          "required": true
         }
       },
-      "required_params": [
-        "query"
-      ],
-      "optional_params": [],
       "examples": [
         {
-          "query": "Python asyncio tutorial"
+          "query": "Python machine learning tutorial"
+        },
+        {
+          "query": "browser automation tools"
         }
+      ]
+    },
+    {
+      "name": "browser_go_back",
+      "description": "返回上一页",
+      "parameters": {},
+      "examples": [
+        {}
+      ]
+    },
+    {
+      "name": "browser_click_element",
+      "description": "通过索引点击页面元素",
+      "parameters": {
+        "index": {
+          "type": "integer",
+          "description": "要点击的元素索引",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "index": 1
+        },
+        {
+          "index": 5
+        }
+      ]
+    },
+    {
+      "name": "browser_input_text",
+      "description": "在指定元素中输入文本",
+      "parameters": {
+        "index": {
+          "type": "integer",
+          "description": "要输入文本的元素索引",
+          "required": true
+        },
+        "text": {
+          "type": "string",
+          "description": "要输入的文本",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "index": 2,
+          "text": "hello world"
+        },
+        {
+          "index": 0,
+          "text": "test@example.com"
+        }
+      ]
+    },
+    {
+      "name": "browser_send_keys",
+      "description": "发送特殊键或快捷键",
+      "parameters": {
+        "keys": {
+          "type": "string",
+          "description": "要发送的键，如Enter、Escape、Control+c等",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "keys": "Enter"
+        },
+        {
+          "keys": "Control+c"
+        },
+        {
+          "keys": "Escape"
+        }
+      ]
+    },
+    {
+      "name": "browser_scroll_down",
+      "description": "向下滚动页面",
+      "parameters": {
+        "amount": {
+          "type": "integer",
+          "description": "滚动像素数，不指定则滚动一页",
+          "required": false
+        }
+      },
+      "examples": [
+        {},
+        {
+          "amount": 500
+        }
+      ]
+    },
+    {
+      "name": "browser_scroll_up",
+      "description": "向上滚动页面",
+      "parameters": {
+        "amount": {
+          "type": "integer",
+          "description": "滚动像素数，不指定则滚动一页",
+          "required": false
+        }
+      },
+      "examples": [
+        {},
+        {
+          "amount": 300
+        }
+      ]
+    },
+    {
+      "name": "browser_scroll_to_text",
+      "description": "滚动到包含指定文本的元素",
+      "parameters": {
+        "text": {
+          "type": "string",
+          "description": "要滚动到的文本内容",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "text": "Sign up"
+        },
+        {
+          "text": "Contact us"
+        }
+      ]
+    },
+    {
+      "name": "browser_switch_tab",
+      "description": "切换到指定标签",
+      "parameters": {
+        "page_id": {
+          "type": "integer",
+          "description": "要切换到的标签ID",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "page_id": 0
+        },
+        {
+          "page_id": 1
+        }
+      ]
+    },
+    {
+      "name": "browser_open_tab",
+      "description": "在新标签中打开URL",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "要在新标签中打开的URL",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "url": "https://www.example.com"
+        }
+      ]
+    },
+    {
+      "name": "browser_close_tab",
+      "description": "关闭指定标签",
+      "parameters": {
+        "page_id": {
+          "type": "integer",
+          "description": "要关闭的标签ID",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "page_id": 1
+        }
+      ]
+    },
+    {
+      "name": "browser_extract_content",
+      "description": "从页面提取特定内容",
+      "parameters": {
+        "goal": {
+          "type": "string",
+          "description": "提取目标描述",
+          "required": true
+        },
+        "include_links": {
+          "type": "boolean",
+          "description": "是否包含链接，默认false",
+          "required": false
+        }
+      },
+      "examples": [
+        {
+          "goal": "提取所有公司名称"
+        },
+        {
+          "goal": "获取产品价格信息",
+          "include_links": true
+        }
+      ]
+    },
+    {
+      "name": "browser_get_ax_tree",
+      "description": "获取页面的可访问性树结构",
+      "parameters": {
+        "number_of_elements": {
+          "type": "integer",
+          "description": "返回的元素数量",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "number_of_elements": 50
+        }
+      ]
+    },
+    {
+      "name": "browser_get_dropdown_options",
+      "description": "获取下拉菜单的所有选项",
+      "parameters": {
+        "index": {
+          "type": "integer",
+          "description": "下拉菜单元素的索引",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "index": 3
+        }
+      ]
+    },
+    {
+      "name": "browser_select_dropdown_option",
+      "description": "选择下拉菜单中的选项",
+      "parameters": {
+        "index": {
+          "type": "integer",
+          "description": "下拉菜单元素的索引",
+          "required": true
+        },
+        "text": {
+          "type": "string",
+          "description": "要选择的选项文本",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "index": 3,
+          "text": "Option 1"
+        }
+      ]
+    },
+    {
+      "name": "browser_drag_drop",
+      "description": "执行拖拽操作",
+      "parameters": {
+        "element_source": {
+          "type": "string",
+          "description": "源元素选择器",
+          "required": false
+        },
+        "element_target": {
+          "type": "string",
+          "description": "目标元素选择器",
+          "required": false
+        },
+        "coord_source_x": {
+          "type": "integer",
+          "description": "源坐标X",
+          "required": false
+        },
+        "coord_source_y": {
+          "type": "integer",
+          "description": "源坐标Y",
+          "required": false
+        },
+        "coord_target_x": {
+          "type": "integer",
+          "description": "目标坐标X",
+          "required": false
+        },
+        "coord_target_y": {
+          "type": "integer",
+          "description": "目标坐标Y",
+          "required": false
+        },
+        "steps": {
+          "type": "integer",
+          "description": "拖拽步骤数，默认10",
+          "required": false
+        }
+      },
+      "examples": [
+        {
+          "element_source": ".item1",
+          "element_target": ".dropzone"
+        }
+      ]
+    },
+    {
+      "name": "browser_save_pdf",
+      "description": "将当前页面保存为PDF",
+      "parameters": {},
+      "examples": [
+        {}
+      ]
+    },
+    {
+      "name": "browser_screenshot",
+      "description": "截取当前页面截图",
+      "parameters": {
+        "filename": {
+          "type": "string",
+          "description": "截图文件名，可选",
+          "required": false
+        }
+      },
+      "examples": [
+        {
+          "filename": "current_page.png"
+        },
+        {}
+      ]
+    },
+    {
+      "name": "browser_wait",
+      "description": "等待指定秒数",
+      "parameters": {
+        "seconds": {
+          "type": "number",
+          "description": "等待的秒数，默认3",
+          "required": false
+        }
+      },
+      "examples": [
+        {
+          "seconds": 5
+        },
+        {}
+      ]
+    },
+    {
+      "name": "browser_done",
+      "description": "标记任务完成",
+      "parameters": {
+        "text": {
+          "type": "string",
+          "description": "完成描述",
+          "required": true
+        },
+        "success": {
+          "type": "boolean",
+          "description": "是否成功完成",
+          "required": true
+        }
+      },
+      "examples": [
+        {
+          "text": "任务已完成",
+          "success": true
+        }
+      ]
+    },
+    {
+      "name": "browser_get_page_info",
+      "description": "获取当前页面信息",
+      "parameters": {},
+      "examples": [
+        {}
+      ]
+    },
+    {
+      "name": "browser_get_current_url",
+      "description": "获取当前页面URL",
+      "parameters": {},
+      "examples": [
+        {}
+      ]
+    },
+    {
+      "name": "browser_close_session",
+      "description": "关闭浏览器会话",
+      "parameters": {},
+      "examples": [
+        {}
       ]
     }
   ],
   "tags": [
     "browser",
     "automation",
-    "ai"
+    "ai",
+    "web-scraping",
+    "browser-use"
   ],
   "author": null,
   "license": null,

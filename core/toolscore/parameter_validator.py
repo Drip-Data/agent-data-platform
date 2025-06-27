@@ -348,6 +348,13 @@ class ParameterValidator:
         """
         logger.debug(f"🔍 校验工具调用: {tool_id}.{action} with {parameters}")
         
+        # 🔧 修复：清理参数中的元数据字段
+        cleaned_parameters = {k: v for k, v in parameters.items() 
+                            if k not in ['action', 'tool_id', 'tool']}
+        if cleaned_parameters != parameters:
+            logger.warning(f"⚠️ 检测到参数中混入的元数据字段，已自动清理: {set(parameters.keys()) - set(cleaned_parameters.keys())}")
+            parameters = cleaned_parameters
+        
         # 🔧 P1修复2: 使用统一映射管理器进行预处理
         try:
             # 自动修正请求

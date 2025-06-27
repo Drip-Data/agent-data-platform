@@ -113,37 +113,31 @@ class ConfigManager:
             }
         )
     
-    def load_ports_config(self) -> Dict[str, Any]:
-        """加载端口配置"""
+    def get_mcp_servers_config(self) -> Dict[str, Any]:
+        """加载MCP服务器配置"""
         try:
-            config_path = self.config_dir / "ports_config.yaml"
+            config_path = self.config_dir / "mcp_servers.json"
             if not config_path.exists():
-                return self._get_default_ports_config()
+                return self._get_default_mcp_servers_config()
                 
             with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
+                return json.load(f)
                 
         except Exception as e:
-            logger.error(f"加载端口配置失败: {e}")
-            return self._get_default_ports_config()
-    
-    def _get_default_ports_config(self) -> Dict[str, Any]:
-        """获取默认端口配置"""
+            logger.error(f"加载MCP服务器配置失败: {e}")
+            return self._get_default_mcp_servers_config()
+
+    def _get_default_mcp_servers_config(self) -> Dict[str, Any]:
+        """获取默认MCP服务器配置"""
         return {
-            "core_services": {
-                "task_api": {"port": 8000},
-                "redis": {"port": 6379}
-            },
-            "mcp_servers": {
-                "toolscore_mcp": {"port": 8081},
-                "toolscore_http": {"port": 8082},
-                "python_executor": {"port": 8083},
-                "browser_navigator": {"port": 8084},
-                "browser_use_server": {"port": 8084},
-                "microsandbox_server": {"port": 8090},
-                "search_tool_server": {"port": 8080},
-                "deepsearch_server": {"port": 8086}
-            }
+            "toolscore_mcp": {"port": 8081},
+            "toolscore_http": {"port": 8082},
+            "python_executor": {"port": 8083},
+            "browser_navigator": {"port": 8084},
+            "browser_use_server": {"port": 8084},
+            "microsandbox_server": {"port": 8090},
+            "search_tool_server": {"port": 8080},
+            "deepsearch_server": {"port": 8086}
         }
     
     def get_queue_mapping(self) -> Dict[str, str]:
@@ -153,13 +147,14 @@ class ConfigManager:
     
     def get_tool_service_url(self) -> str:
         """获取工具服务URL"""
-        ports_config = self.load_ports_config()
-        port = ports_config.get("mcp_servers", {}).get("toolscore_http", {}).get("port", 8082)
+        mcp_servers_config = self.get_mcp_servers_config()
+        port = mcp_servers_config.get("toolscore_http", {}).get("port", 8082)
         return f"http://localhost:{port}"
     
     def get_ports_config(self) -> Dict[str, Any]:
-        """获取端口配置"""
-        return self.load_ports_config()
+        """获取端口配置 - 兼容旧版，实际从mcp_servers.json读取"""
+        mcp_servers_config = self.get_mcp_servers_config()
+        return {"mcp_servers": mcp_servers_config}
     
     def get_fallback_tools_mapping(self) -> Dict[str, list]:
         """获取备选工具映射"""
@@ -220,9 +215,28 @@ class ConfigManager:
             "warnings": warnings
         }
     
+    def load_ports_config(self) -> Dict[str, Any]:
+        """加载端口配置"""
+        try:
+            # 尝试加载独立的端口配置文件
+            ports_config_path = self.config_dir / "ports_config.yaml"
+            if ports_config_path.exists():
+                with open(ports_config_path, 'r', encoding='utf-8') as f:
+                    return yaml.safe_load(f)
+            
+            # 如果没有独立配置文件，使用MCP服务器配置作为备选
+            mcp_servers_config = self.get_mcp_servers_config()
+            return {"mcp_servers": mcp_servers_config}
+            
+        except Exception as e:
+            logger.error(f"加载端口配置失败: {e}")
+            # 返回默认端口配置
+            return self.get_ports_config()
+    
     def export_current_config(self, output_path: str = "config_export.json"):
         """导出当前配置"""
         try:
+            ports_config = self.load_ports_config()
             config_export = {
                 "routing_config": self.load_routing_config().__dict__,
                 "ports_config": self.load_ports_config(),
@@ -241,7 +255,7 @@ class ConfigManager:
     
     def get_redis_url(self) -> str:
         """获取Redis连接URL"""
-        ports_config = self.load_ports_config()
+        ports_config = self.get_ports_config()
         redis_port = ports_config.get("core_services", {}).get("redis", {}).get("port", 6379)
         return os.getenv("REDIS_URL", f"redis://localhost:{redis_port}")
     

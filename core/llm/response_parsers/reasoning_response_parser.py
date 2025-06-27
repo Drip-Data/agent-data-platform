@@ -49,12 +49,19 @@ class ReasoningResponseParser(IResponseParser):
             # 首先尝试直接解析JSON
             response_clean = response.strip()
             
-            # 🔍 增强的JSON提取 - 处理各种格式
+            # 🔍 强化的JSON提取 - 修复markdown包装问题
             json_patterns = [
-                r'```json\s*(\{.*?\})\s*```',  # markdown代码块
-                r'```\s*(\{.*?\})\s*```',      # 普通代码块  
-                r'(\{[^{}]*"thinking"[^{}]*\})', # 包含thinking的JSON
-                r'(\{.*?\})',                  # 任何JSON对象
+                # 优先匹配：标准markdown JSON代码块 
+                r'```json\s*(\{.*?\})\s*```',
+                r'```(?:JSON)?\s*(\{.*?\})\s*```',
+                # 处理不完整的代码块标记
+                r'```json\s*(\{.*)',
+                r'```\s*(\{.*)',
+                # 匹配单独的JSON对象（包含thinking字段）
+                r'(\{[^{}]*"thinking"[^{}]*"[^}]*\})',
+                # 最后匹配任何JSON对象
+                r'(\{[^{}]*\})',
+                r'(\{.*?\})',
             ]
             
             json_text = None
@@ -65,14 +72,11 @@ class ReasoningResponseParser(IResponseParser):
                     logger.debug(f"使用模式提取到JSON: {pattern}")
                     break
             
-            # 如果没有找到JSON块，尝试直接解析
+            # 如果没有找到JSON块，尝试智能清理和提取
             if not json_text:
-                # 移除可能的markdown代码块包装
-                if response_clean.startswith('```json'):
-                    response_clean = response_clean[7:]
-                if response_clean.endswith('```'):
-                    response_clean = response_clean[:-3]
-                json_text = response_clean.strip()
+                json_text = self._smart_extract_json_from_response(response_clean)
+                if json_text:
+                    logger.debug("🔧 智能JSON提取成功")
             
             # 🔍 修复常见的JSON格式问题
             if json_text:
@@ -162,6 +166,49 @@ class ReasoningResponseParser(IResponseParser):
         logger.warning("🔄 使用备用解析方法")
         return self._fallback_parse_response(response)
     
+    def _smart_extract_json_from_response(self, response: str) -> Optional[str]:
+        """智能JSON提取 - 处理各种格式问题"""
+        try:
+            # 移除markdown代码块包装
+            cleaned = response.strip()
+            
+            # 处理各种markdown包装格式
+            if cleaned.startswith('```json'):
+                cleaned = cleaned[7:]
+            elif cleaned.startswith('```JSON'):
+                cleaned = cleaned[7:]
+            elif cleaned.startswith('```'):
+                cleaned = cleaned[3:]
+            
+            if cleaned.endswith('```'):
+                cleaned = cleaned[:-3]
+            
+            cleaned = cleaned.strip()
+            
+            # 查找第一个 { 和最后一个 }
+            first_brace = cleaned.find('{')
+            last_brace = cleaned.rfind('}')
+            
+            if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+                potential_json = cleaned[first_brace:last_brace + 1]
+                
+                # 基本验证：检查括号匹配
+                open_braces = potential_json.count('{')
+                close_braces = potential_json.count('}')
+                
+                # 如果缺少闭合括号，尝试添加
+                if open_braces > close_braces:
+                    potential_json += '}' * (open_braces - close_braces)
+                    logger.debug(f"🔧 添加了{open_braces - close_braces}个闭合括号")
+                
+                return potential_json
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"智能JSON提取失败: {e}")
+            return None
+    
     def _validate_and_complete_parsed_response(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """验证并补全解析后的响应"""
         result = {}
@@ -179,18 +226,18 @@ class ReasoningResponseParser(IResponseParser):
         if not tool_id:
             # 使用智能映射 - 优先基于action推断
             action_to_tool_mapping = {
-                'research': 'mcp-deepsearch',
-                'quick_research': 'mcp-deepsearch', 
-                'comprehensive_research': 'mcp-deepsearch',
-                'microsandbox_execute': 'microsandbox-mcp-server',
-                'microsandbox_install_package': 'microsandbox-mcp-server',
+                'research': 'deepsearch',
+                'quick_research': 'deepsearch', 
+                'comprehensive_research': 'deepsearch',
+                'microsandbox_execute': 'microsandbox',
+                'microsandbox_install_package': 'microsandbox',
                 # 🔧 P0紧急修复1: 修正browser动作映射为实际存在的动作
-                'browser_navigate': 'browser-use-mcp-server',
-                'browser_use_execute_task': 'browser-use-mcp-server',
-                'browser_click_element': 'browser-use-mcp-server',
-                'browser_input_text': 'browser-use-mcp-server',
-                'browser_extract_content': 'browser-use-mcp-server',
-                'browser_search_google': 'browser-use-mcp-server',
+                'browser_navigate': 'browser_use',
+                'browser_use_execute_task': 'browser_use',
+                'browser_click_element': 'browser_use',
+                'browser_input_text': 'browser_use',
+                'browser_extract_content': 'browser_use',
+                'browser_search_google': 'browser_use',
                 'search_and_install_tools': 'mcp-search-tool',
                 'analyze_tool_needs': 'mcp-search-tool',
                 'search_file_content': 'mcp-search-tool',
@@ -201,13 +248,13 @@ class ReasoningResponseParser(IResponseParser):
                 tool_id = action_to_tool_mapping[action]
                 logger.debug(f"自动推断工具ID: {tool_id} (基于action: {action})")
             elif any(keyword in result['thinking'].lower() for keyword in ['deepsearch', '研究', 'research']):
-                tool_id = 'mcp-deepsearch'
+                tool_id = 'deepsearch'
                 logger.debug(f"基于thinking内容推断工具ID: {tool_id} (研究类任务)")
             elif any(keyword in result['thinking'].lower() for keyword in ['microsandbox', '代码', 'code', 'python']):
-                tool_id = 'microsandbox-mcp-server' 
+                tool_id = 'microsandbox' 
                 logger.debug(f"基于thinking内容推断工具ID: {tool_id} (代码执行)")
             elif any(keyword in result['thinking'].lower() for keyword in ['browser', '浏览', '网页']):
-                tool_id = 'browser-use-mcp-server'
+                tool_id = 'browser_use'
                 logger.debug(f"基于thinking内容推断工具ID: {tool_id} (网页浏览)")
             elif 'search' in result['thinking'].lower() and 'install' in result['thinking'].lower():
                 tool_id = 'mcp-search-tool'
@@ -570,27 +617,38 @@ class ReasoningResponseParser(IResponseParser):
             for char in unicode_control_chars:
                 json_text = json_text.replace(char, '')
             
-            # 修复特定的控制字符错误模式（基于日志中的错误）
-            # "Invalid control character at: line X column Y"
+            # 🔧 强化控制字符修复 - 解决 "Invalid control character" 错误
             
-            # 1. 修复行尾的控制字符
-            json_text = re.sub(r'[\x00-\x1F]+$', '', json_text, flags=re.MULTILINE)
+            # 1. 全面清除ASCII控制字符（除了合法的空白字符）
+            # 保留: \t (09), \n (0A), \r (0D), 空格 (20)
+            json_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', json_text)
             
-            # 2. 修复字符串值中的控制字符
-            def fix_string_control_chars(match):
-                content = match.group(1)
-                # 转义或移除字符串中的控制字符
-                content = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', content)
-                # 确保换行符正确转义
-                content = content.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
-                return f'": "{content}"'
+            # 2. 修复字符串值中的换行和转义问题
+            def fix_string_content(match):
+                key = match.group(1)
+                content = match.group(2)
+                
+                # 清理内容中的控制字符
+                content = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', content)
+                
+                # 正确转义特殊字符
+                content = (content.replace('\\', '\\\\')
+                          .replace('"', '\\"')
+                          .replace('\n', '\\n')
+                          .replace('\r', '\\r')
+                          .replace('\t', '\\t'))
+                
+                return f'"{key}": "{content}"'
             
-            # 修复字符串值中的控制字符
-            json_text = re.sub(r'": "([^"]*)"', fix_string_control_chars, json_text)
+            # 应用字符串内容修复
+            json_text = re.sub(r'"([^"]+)":\s*"([^"]*)"', fix_string_content, json_text)
             
-            # 3. 修复JSON结构中的控制字符（在键名和标点符号附近）
+            # 3. 修复JSON结构中的控制字符
             json_text = re.sub(r'([\{\[,:])\s*[\x00-\x1F]+\s*', r'\1 ', json_text)
             json_text = re.sub(r'\s*[\x00-\x1F]+\s*([\}\],:])', r' \1', json_text)
+            
+            # 4. 额外的清理：移除零宽字符和其他Unicode控制字符
+            json_text = re.sub(r'[\u200B-\u200D\uFEFF]', '', json_text)
             
             logger.debug("已修复JSON控制字符")
             return json_text
@@ -1180,13 +1238,13 @@ class ReasoningResponseParser(IResponseParser):
                 response_lower = response.lower()
                 if any(keyword in response_lower for keyword in ['deepsearch', '研究', 'research']):
                     default_action = 'research'
-                    default_tool_id = 'mcp-deepsearch'
+                    default_tool_id = 'deepsearch'
                 elif any(keyword in response_lower for keyword in ['microsandbox', '代码', 'code', 'python', '执行']):
                     default_action = 'microsandbox_execute'
-                    default_tool_id = 'microsandbox-mcp-server'
+                    default_tool_id = 'microsandbox'
                 elif any(keyword in response_lower for keyword in ['browser', '浏览', '网页', 'navigate']):
                     default_action = 'browser_navigate'
-                    default_tool_id = 'browser-use-mcp-server'
+                    default_tool_id = 'browser_use'
                 elif 'search' in response_lower and 'install' in response_lower:
                     default_action = 'search_and_install_tools'
                     default_tool_id = 'mcp-search-tool'
@@ -1265,14 +1323,14 @@ class ReasoningResponseParser(IResponseParser):
             if not result.get('tool_id'):
                 # 基于action推断tool_id（使用智能映射）
                 action_to_tool_mapping = {
-                    'research': 'mcp-deepsearch',
-                    'quick_research': 'mcp-deepsearch', 
-                    'comprehensive_research': 'mcp-deepsearch',
-                    'microsandbox_execute': 'microsandbox-mcp-server',
-                    'microsandbox_install_package': 'microsandbox-mcp-server',
-                    'browser_navigate': 'browser-use-mcp-server',
-                    'browser_extract_content': 'browser-use-mcp-server',
-                    'browser_click_element': 'browser-use-mcp-server',
+                    'research': 'deepsearch',
+                    'quick_research': 'deepsearch', 
+                    'comprehensive_research': 'deepsearch',
+                    'microsandbox_execute': 'microsandbox',
+                    'microsandbox_install_package': 'microsandbox',
+                    'browser_navigate': 'browser_use',
+                    'browser_extract_content': 'browser_use',
+                    'browser_click_element': 'browser_use',
                     'search_and_install_tools': 'mcp-search-tool',
                     'analyze_tool_needs': 'mcp-search-tool'
                 }
@@ -1283,13 +1341,13 @@ class ReasoningResponseParser(IResponseParser):
                     # 基于内容进一步推断
                     response_lower = response.lower()
                     if any(keyword in response_lower for keyword in ['deepsearch', '研究', 'research']):
-                        result['tool_id'] = 'mcp-deepsearch'
+                        result['tool_id'] = 'deepsearch'
                     elif any(keyword in response_lower for keyword in ['microsandbox', '代码', 'code', 'python']):
-                        result['tool_id'] = 'microsandbox-mcp-server'
+                        result['tool_id'] = 'microsandbox'
                     elif any(keyword in response_lower for keyword in ['browser', '浏览', '网页']):
-                        result['tool_id'] = 'browser-use-mcp-server'
+                        result['tool_id'] = 'browser_use'
                     else:
-                        result['tool_id'] = 'mcp-deepsearch'  # 默认使用研究工具
+                        result['tool_id'] = 'deepsearch'  # 默认使用研究工具
             
             # 4. 提取confidence
             conf_patterns = [
@@ -1458,14 +1516,14 @@ class ReasoningResponseParser(IResponseParser):
             if not tool_found:
                 # 基于action推断tool_id（使用智能映射）
                 action_to_tool_mapping = {
-                    'research': 'mcp-deepsearch',
-                    'quick_research': 'mcp-deepsearch', 
-                    'comprehensive_research': 'mcp-deepsearch',
-                    'microsandbox_execute': 'microsandbox-mcp-server',
-                    'microsandbox_install_package': 'microsandbox-mcp-server',
-                    'browser_navigate': 'browser-use-mcp-server',
-                    'browser_extract_content': 'browser-use-mcp-server',
-                    'browser_click_element': 'browser-use-mcp-server',
+                    'research': 'deepsearch',
+                    'quick_research': 'deepsearch', 
+                    'comprehensive_research': 'deepsearch',
+                    'microsandbox_execute': 'microsandbox',
+                    'microsandbox_install_package': 'microsandbox',
+                    'browser_navigate': 'browser_use',
+                    'browser_extract_content': 'browser_use',
+                    'browser_click_element': 'browser_use',
                     'search_and_install_tools': 'mcp-search-tool',
                     'analyze_tool_needs': 'mcp-search-tool'
                 }
@@ -1476,13 +1534,13 @@ class ReasoningResponseParser(IResponseParser):
                     # 基于内容进一步推断
                     response_lower = response.lower()
                     if any(keyword in response_lower for keyword in ['deepsearch', '研究', 'research']):
-                        result['tool_id'] = 'mcp-deepsearch'
+                        result['tool_id'] = 'deepsearch'
                     elif any(keyword in response_lower for keyword in ['microsandbox', '代码', 'code', 'python']):
-                        result['tool_id'] = 'microsandbox-mcp-server'
+                        result['tool_id'] = 'microsandbox'
                     elif any(keyword in response_lower for keyword in ['browser', '浏览', '网页']):
-                        result['tool_id'] = 'browser-use-mcp-server'
+                        result['tool_id'] = 'browser_use'
                     else:
-                        result['tool_id'] = 'mcp-deepsearch'  # 默认使用研究工具
+                        result['tool_id'] = 'deepsearch'  # 默认使用研究工具
                 
                 # 基于action推断tool_id
             

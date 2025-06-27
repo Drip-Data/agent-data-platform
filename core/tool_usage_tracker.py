@@ -48,7 +48,7 @@ class ToolUsageTracker:
         
         # 查找对应的服务器名称
         tool_server_name = self._get_server_name(tool_server_id)
-        
+
         record = ToolUsageRecord(
             tool_server_id=tool_server_id,
             tool_server_name=tool_server_name,
@@ -68,6 +68,40 @@ class ToolUsageTracker:
         
         log_type = "📊 记录元数据" if is_meta else "🔧 记录工具使用"
         logger.info(f"{log_type}: {tool_server_id}.{action}")
+        
+    def get_usage_stats(self) -> Dict[str, Any]:
+        """获取工具使用统计信息"""
+        stats = {
+            "total_usage_count": len(self.used_tools_records),
+            "successful_count": sum(1 for r in self.used_tools_records if r.success),
+            "failed_count": sum(1 for r in self.used_tools_records if not r.success),
+            "unique_tools_used": len(self.used_tool_servers),
+            "usage_by_tool": {},
+        }
+
+        for record in self.used_tools_records:
+            if record.tool_server_id not in stats["usage_by_tool"]:
+                stats["usage_by_tool"][record.tool_server_id] = {
+                    "count": 0,
+                    "actions": {},
+                    "total_duration": 0.0,
+                }
+            
+            tool_stats = stats["usage_by_tool"][record.tool_server_id]
+            tool_stats["count"] += 1
+            tool_stats["total_duration"] += record.duration
+            
+            if record.action not in tool_stats["actions"]:
+                tool_stats["actions"][record.action] = {
+                    "count": 0,
+                    "total_duration": 0.0,
+                }
+            
+            action_stats = tool_stats["actions"][record.action]
+            action_stats["count"] += 1
+            action_stats["total_duration"] += record.duration
+
+        return stats
         
     def get_available_tools_summary(self) -> List[Dict[str, Any]]:
         """获取可用工具摘要"""
@@ -146,12 +180,23 @@ class ToolUsageTracker:
                         }
                         available_tools.append(current_tool)
                 
-                # 检测操作行: "    • action_name: description"
+                # 检测操作行: "    • action_name: description" 或 "  📋 可用操作:"
                 elif line.startswith('    •') and current_tool is not None:
                     action_part = line[5:].strip()  # 移除 "    •" 前缀
                     if ':' in action_part:
                         action_name = action_part.split(':', 1)[0].strip()
                         current_tool["available_actions"].append(action_name)
+                # 新格式支持: "  📋 可用操作:" 后面的操作行
+                elif line.startswith('  📋 可用操作:') and current_tool is not None:
+                    # 这是操作列表的开始标记，继续读取下面的操作
+                    continue
+                elif (line.startswith('    • ') or line.startswith('      • ')) and current_tool is not None:
+                    # 处理操作行: "    • action_name: description" 或 "      • action_name: description"
+                    action_part = line.lstrip(' •').strip()
+                    if ':' in action_part:
+                        action_name = action_part.split(':', 1)[0].strip()
+                        if action_name and action_name not in current_tool["available_actions"]:
+                            current_tool["available_actions"].append(action_name)
                 
                 # 兼容旧格式: "- server-id: 可用工具 (操作: action1, action2, action3)"
                 elif line.startswith('- ') and ':' in line and '**' not in line:

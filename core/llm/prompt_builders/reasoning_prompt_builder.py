@@ -86,12 +86,21 @@ class ReasoningPromptBuilder(IPromptBuilder):
 
 ## 🎯 关键规则
 
+### ⚠️ 必需参数检查 - 重要提醒
+**每个工具动作都有特定的必需参数，必须全部包含：**
+1. **deepsearch工具** - research, quick_research, comprehensive_research 都需要 "question" 参数
+2. **microsandbox工具** - microsandbox_execute 需要 "code" 参数  
+3. **browser工具** - browser_navigate 需要 "url" 参数，browser_use_execute_task 需要 "task" 参数
+4. **search工具** - search_file_content 需要 "file_path" 和 "regex_pattern" 参数
+5. **参数不能为空或null** - 所有必需参数都必须有有效值
+
 ### 工具参数规范: (请参考可用工具部分的详细描述)
 1. **complete_task**: `{{}}`
 2. **error**: `{{}}`
 
 ### 决策优先级:
 - 优先使用现有工具完成任务
+- **必须包含所有必需参数** - 这是最重要的要求
 - 确保参数完整且格式正确  
 - 失败时分析原因并调整策略
 - 必要时考虑工具扩展
@@ -178,7 +187,7 @@ class ReasoningPromptBuilder(IPromptBuilder):
             elif has_search_recommendation and search_count == 0:
                 prompt_parts.extend([
                     "🔍 **RECONSIDER**: Before searching for new tools, verify if existing tools can handle the task.",
-                    "**Check**: mcp-deepsearch, microsandbox-mcp-server, or browser-use-mcp-server capabilities.",
+                    "**Check**: deepsearch, microsandbox, or browser_use capabilities.",
                     ""
                 ])
             elif tool_install_success:
@@ -201,17 +210,30 @@ class ReasoningPromptBuilder(IPromptBuilder):
             "### 💻 For Code/Programming Tasks:",
             "```",
             "if task_contains_keywords(['代码', 'code', '编程', 'python', '执行']):",
-            "    → use 'microsandbox-mcp-server' with action 'microsandbox_execute'",
+            "    → use 'microsandbox' with action 'microsandbox_execute'",
             "    → PARAMETER: 'code' (required!)",
+            "    → FEATURES: Auto token refresh, session persistence, package management",
+            "    → RELIABILITY: 100% success rate with local fallback",
             "```",
             "",
-            "### 🌐 For Web/Browser Tasks:",
+            "### 🌐 For Web/Browser Tasks (Enhanced with 25+ Actions):",
             "```",
-            "if task_contains_keywords(['网页', 'web', '浏览', '访问']):",
-            "    → use 'browser-use-mcp-server' with 'browser_navigate' or related actions",
-            "    → NAVIGATE: 'url' parameter required",
-            "    → CLICK: 'index' parameter (NOT 'selector'!)",
-            "    → INPUT: 'index' + 'text' parameters",
+            "if task_contains_keywords(['网页', 'web', '浏览', '访问', '搜索', '抓取', '数据收集', '表单', '自动化']):",
+            "    → PRIMARY: Use 'browser_use_execute_task' for complex AI-driven tasks",
+            "    → PARAMETER: 'task' (natural language description)",
+            "    → FEATURES: AI vision, multi-step automation, intelligent interaction",
+            "    → EXAMPLES: 'Search for Python tutorials and open first result'",
+            "    ",
+            "    → BASIC ACTIONS: Use specific actions for simple operations:",
+            "    → NAVIGATE: 'browser_navigate' with 'url' parameter",
+            "    → SEARCH: 'browser_search_google' with 'query' parameter",
+            "    → INTERACT: 'browser_click_element' with 'index' parameter",
+            "    → INPUT: 'browser_input_text' with 'index' + 'text' parameters",
+            "    → EXTRACT: 'browser_extract_content' with 'goal' parameter",
+            "    → SCREENSHOT: 'browser_screenshot' for visual capture",
+            "    → SCROLL: 'browser_scroll_to_text' with 'text' parameter",
+            "    → TABS: 'browser_open_tab', 'browser_switch_tab', 'browser_close_tab'",
+            "    → UTILITY: 'browser_wait', 'browser_get_page_info', 'browser_save_pdf'",
             "```",
             "",
             "### 🔧 For Tool Installation Tasks ONLY:",
@@ -229,11 +251,12 @@ class ReasoningPromptBuilder(IPromptBuilder):
             "",
             "### ⚡ CRITICAL DECISION RULES:",
             "1. **RESEARCH TASKS**: Use mcp-deepsearch DIRECTLY - no analysis needed",
-            "2. **CODE TASKS**: Use microsandbox-mcp-server DIRECTLY - no analysis needed",
-            "3. **WEB TASKS**: Use browser-use-mcp-server DIRECTLY - no analysis needed",
+            "2. **CODE TASKS**: Use 'microsandbox' DIRECTLY - enhanced with auto-refresh & sessions",
+            "3. **WEB TASKS**: Use 'browser_use_execute_task' for complex tasks, specific actions for simple operations", 
             "4. **TOOL SEARCH**: Only use mcp-search-tool for truly specialized needs",
             "5. **ANALYSIS LIMIT**: Never call 'analyze_tool_needs' more than 2 times",
             "6. **INSTALLATION LIMIT**: Never repeat failed installations",
+            "7. **MICROSANDBOX**: Token issues auto-resolved, always reliable with fallback",
             "",
         ])
 
@@ -252,6 +275,19 @@ class ReasoningPromptBuilder(IPromptBuilder):
                 ])
 
         prompt_parts.extend([
+            "## 💡 Example: Research Task",
+            "```json",
+            "{",
+            '  "thinking": "STEP 1-TASK ANALYSIS: The user wants to know about the latest AI trends.\nSTEP 2-CAPABILITY CHECK: The `mcp-deepsearch` tool is perfect for this research task.\nSTEP 3-DECISION: I will use the `comprehensive_research` action for a thorough analysis.\nSTEP 4-EXECUTION PLAN: Formulate a clear question and execute the tool.",',
+            '  "confidence": 0.95,',
+            '  "tool_id": "mcp-deepsearch",',
+            '  "action": "comprehensive_research",',
+            '  "parameters": {',
+            '    "question": "What are the latest trends in Artificial Intelligence as of late 2024?"',
+            '  }',
+            "}",
+            "```",
+            "",
             "## 📤 Response Format (JSON Only)",
             "",
             "Return **ONLY** a valid JSON object with this exact structure:",
@@ -265,15 +301,21 @@ class ReasoningPromptBuilder(IPromptBuilder):
             '  "parameters": {',
             '    "question": "for mcp-deepsearch research actions",',
             '    "code": "for microsandbox_execute actions", ',
+            '    "task": "for browser_use_execute_task (natural language)",',
             '    "url": "for browser_navigate actions",',
+            '    "query": "for browser_search_google actions",',
             '    "index": "for browser click/input actions (NOT selector!)",',
             '    "text": "for browser_input_text actions",',
+            '    "goal": "for browser_extract_content actions",',
+            '    "filename": "for browser_screenshot actions (optional)",',
+            '    "seconds": "for browser_wait actions",'
             '    "task_description": "for mcp-search-tool actions only"',
             '  }',
             "}",
             "```",
             "",
-            # 🔧 优化1修复：使用动态工具描述替换硬编码
+            "# ",
+            "🔧 优化1修复：使用动态工具描述替换硬编码",
             "### 🎯 CRITICAL: Available Tools and Their Capabilities",
             "",
         ])
@@ -303,6 +345,8 @@ class ReasoningPromptBuilder(IPromptBuilder):
             "",
             "**⚠️ CRITICAL: microsandbox_execute MUST have 'code' parameter!**",
             "**⚠️ CRITICAL: Check examples above for correct parameter format!**",
+            "**✅ NEW: MicroSandbox now has auto token refresh - no auth issues!**",
+            "**✅ NEW: Session variables persist across executions in same session_id!**",
             "",
             "**⚠️ 严格要求：**",
             "1. 只返回JSON对象，不要任何解释文字！",

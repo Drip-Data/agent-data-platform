@@ -52,14 +52,42 @@ class ToolSchema:
         
         if self.actions:
             lines.append("  📋 可用操作:")
-            for action_name, action_info in list(self.actions.items())[:5]:  # 限制显示数量
-                desc = action_info.get('desc', action_name)
-                lines.append(f"    • {action_name}: {desc}")
+            
+            # 按优先级排序动作
+            sorted_actions = sorted(
+                self.actions.items(),
+                key=lambda x: {'high': 0, 'medium': 1, 'low': 2}.get(
+                    x[1].get('priority', 'medium'), 1
+                )
+            )
+            
+            for action_name, action_info in sorted_actions:
+                desc = action_info.get('description', action_info.get('desc', action_name))
+                priority = action_info.get('priority', 'medium')
+                
+                # 显示优先级标记
+                priority_mark = {"high": "🔥", "medium": "📋", "low": "⚡"}.get(priority, "📋")
+                lines.append(f"    {priority_mark} {action_name}: {desc}")
+                
+                # 显示推荐使用场景
+                recommended_for = action_info.get('recommended_for', [])
+                if recommended_for:
+                    lines.append(f"      💡 推荐用于: {', '.join(recommended_for)}")
+                
+                # 显示用例
+                use_cases = action_info.get('use_cases', [])
+                if use_cases:
+                    lines.append(f"      📝 示例: {', '.join(use_cases[:2])}")  # 只显示前两个用例
+                
+                # 显示警告
+                warning = action_info.get('warning')
+                if warning:
+                    lines.append(f"      ⚠️  注意: {warning}")
                 
                 # 添加参数信息
-                params = action_info.get('params', {})
+                params = action_info.get('parameters', action_info.get('params', {}))
                 if params:
-                    required_params = [k for k, v in params.items() if '必需' in str(v) or 'required' in str(v).lower()]
+                    required_params = [k for k, v in params.items() if v.get('required', False)]
                     if required_params:
                         lines.append(f"      必需参数: {', '.join(required_params)}")
         

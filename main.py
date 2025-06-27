@@ -553,7 +553,7 @@ async def main_async():
 
 def main():
     # 设置统一日志捕获
-    unified_log_path = os.path.join('logs', 'unified.log')
+    unified_log_path = os.path.join('logs', 'System.log')
     
     # 在开始时写入分隔符
     os.makedirs('logs', exist_ok=True)

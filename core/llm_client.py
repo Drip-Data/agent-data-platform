@@ -122,21 +122,42 @@ class LLMClient:
 
     def _initialize_provider_instance(self):
         """根据检测到的提供商初始化具体的LLM提供商实例"""
-        if self.provider == LLMProvider.VLLM:
-            self.provider_instance = VLLMProvider(self.config)
-        elif self.provider == LLMProvider.OPENAI:
-            self.provider_instance = OpenAIProvider(self.config)
-        elif self.provider == LLMProvider.GEMINI:
-            # 从嵌套配置中提取 Gemini 特定配置并合并到根级别
-            gemini_config = self.config.copy()
-            if 'providers' in self.config and 'gemini' in self.config['providers']:
-                gemini_provider_config = self.config['providers']['gemini']
-                gemini_config.update(gemini_provider_config)
-            self.provider_instance = GeminiProvider(gemini_config)
-        elif self.provider == LLMProvider.DEEPSEEK:
-            self.provider_instance = DeepSeekProvider(self.config)
-        else:
-            raise ValueError(f"Unsupported provider: {self.provider}")
+        try:
+            if self.provider == LLMProvider.VLLM:
+                self.provider_instance = VLLMProvider(self.config)
+            elif self.provider == LLMProvider.OPENAI:
+                self.provider_instance = OpenAIProvider(self.config)
+            elif self.provider == LLMProvider.GEMINI:
+                # 从嵌套配置中提取 Gemini 特定配置并合并到根级别
+                gemini_config = self.config.copy()
+                if 'providers' in self.config and 'gemini' in self.config['providers']:
+                    gemini_provider_config = self.config['providers']['gemini']
+                    gemini_config.update(gemini_provider_config)
+                self.provider_instance = GeminiProvider(gemini_config)
+            elif self.provider == LLMProvider.DEEPSEEK:
+                self.provider_instance = DeepSeekProvider(self.config)
+            else:
+                raise ValueError(f"Unsupported provider: {self.provider}")
+            
+            # 🔍 验证provider_instance不是Mock对象
+            if self.provider_instance and "Mock" in type(self.provider_instance).__name__:
+                logger.error(f"❌ Provider初始化后发现Mock对象: {type(self.provider_instance)}")
+                raise ValueError(f"Provider初始化失败：返回了Mock对象 {type(self.provider_instance)}")
+            
+            logger.debug(f"✅ Provider实例初始化成功: {type(self.provider_instance).__name__}")
+            
+        except Exception as e:
+            logger.error(f"❌ Provider初始化失败: {e}")
+            self.provider_instance = None
+            raise
+    
+    def get_llm_config(self) -> Dict[str, Any]:
+        """获取当前LLM配置"""
+        return {
+            "provider": self.provider.value,
+            "config": self.config,
+            "provider_instance": str(type(self.provider_instance).__name__) if self.provider_instance else None
+        }
     
     def _detect_provider(self) -> LLMProvider:
         """自动检测使用的LLM提供商"""
@@ -323,9 +344,23 @@ class LLMClient:
             if self.provider_instance is None:
                 raise ValueError("LLM provider instance is not initialized.")
             
+            # 🔍 新增：检查provider_instance类型，防止AsyncMock泄露
+            provider_type = type(self.provider_instance).__name__
+            if "Mock" in provider_type:
+                logger.error(f"❌ 检测到Mock对象被用作LLM provider: {provider_type}")
+                logger.error(f"   重新初始化provider...")
+                self._initialize_provider_instance()
+                if "Mock" in type(self.provider_instance).__name__:
+                    raise ValueError(f"LLM provider被意外设置为Mock对象: {type(self.provider_instance)}")
+            
             # 获取默认模型并传递给 generate_response
             model_name = self.provider_instance.get_default_model()
             response = await self.provider_instance.generate_response(messages=validated_messages, model=model_name) # 使用验证后的消息
+            
+            # 🔍 新增：检查响应类型，防止AsyncMock泄露到响应中
+            if hasattr(response, '_mock_name') or "Mock" in type(response).__name__:
+                logger.error(f"❌ LLM provider返回了Mock对象: {type(response)}")
+                raise ValueError(f"LLM provider返回了Mock对象而不是字符串: {type(response)}")
             
             # 🔍 新增：记录API响应信息和数据流追踪
             duration = time.time() - start_time

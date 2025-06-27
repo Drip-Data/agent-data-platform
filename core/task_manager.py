@@ -307,8 +307,17 @@ async def start_runtime_service(runtime, redis_manager=None):
             pass
         # 消费循环
         while True:
-            msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=1000)
-            if not msgs:
+            try:
+                msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=1000)
+                if not msgs:
+                    continue
+            except asyncio.CancelledError:
+                # 正常取消，退出循环
+                logger.info(f"Runtime {runtime.runtime_id} consumer cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error reading from queue {queue_name}: {e}")
+                await asyncio.sleep(1)
                 continue
             for _, entries in msgs:
                 for msg_id, fields in entries:

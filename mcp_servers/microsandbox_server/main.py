@@ -2,6 +2,7 @@
 """
 MicroSandbox MCP Server
 基于MicroSandbox的安全代码执行服务，通过MCP协议与toolscore通信
+支持生产模式配置、API版本兼容性和持久化存储
 """
 
 import asyncio
@@ -14,12 +15,66 @@ import time
 import psutil
 import threading
 from collections import defaultdict, deque
+from pathlib import Path
+import subprocess
+from dotenv import load_dotenv
 
 from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
 from core.toolscore.mcp_server import MCPServer
 from core.config_manager import ConfigManager
 from microsandbox import PythonSandbox
 from fastapi import FastAPI
+
+# Import enhanced session manager and token manager
+try:
+    from .enhanced_session_manager import EnhancedSessionManager
+    from .token_manager import AutoRefreshTokenManager
+except ImportError:
+    # Fallback for direct execution
+    import sys
+    sys.path.append(str(Path(__file__).parent))
+    from enhanced_session_manager import EnhancedSessionManager
+    from token_manager import AutoRefreshTokenManager
+
+# Load environment configuration
+env_path = Path(__file__).parent / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+
+# Production configuration constants
+class MicroSandboxConfig:
+    """MicroSandbox生产配置管理"""
+    
+    # MicroSandbox server configuration
+    MSB_API_KEY = os.getenv('MSB_API_KEY')
+    MSB_HOST = os.getenv('MSB_HOST', '127.0.0.1')
+    MSB_PORT = int(os.getenv('MSB_PORT', '5555'))
+    MSB_STORAGE_PATH = os.getenv('MSB_STORAGE_PATH', os.path.expanduser('~/.microsandbox'))
+    MSB_LOG_LEVEL = os.getenv('MSB_LOG_LEVEL', 'info')
+    
+    # MCP server configuration
+    MCP_SERVER_PORT = int(os.getenv('MICROSANDBOX_MCP_SERVER_PORT', '8090'))
+    MCP_HOST = os.getenv('MICROSANDBOX_HOST', 'localhost')
+    MCP_LISTEN_HOST = os.getenv('MICROSANDBOX_LISTEN_HOST', '0.0.0.0')
+    
+    # API version compatibility
+    SUPPORTED_API_VERSION = '0.2.6'
+    
+    @classmethod
+    def validate_config(cls):
+        """验证生产配置"""
+        errors = []
+        
+        if not cls.MSB_API_KEY:
+            errors.append("MSB_API_KEY is required for production mode")
+        
+        if not Path(cls.MSB_STORAGE_PATH).exists():
+            try:
+                Path(cls.MSB_STORAGE_PATH).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                errors.append(f"Cannot create storage path {cls.MSB_STORAGE_PATH}: {e}")
+        
+        return errors
 
 logger = logging.getLogger(__name__)
 
@@ -107,13 +162,144 @@ class PerformanceMonitor:
         """停止监控"""
         self._monitoring = False
 
+class MicroSandboxServerManager:
+    """MicroSandbox服务器管理器 - 负责启动和管理生产模式服务器"""
+    
+    def __init__(self):
+        self.server_process = None
+        self.config = MicroSandboxConfig
+        
+    async def ensure_server_running(self) -> bool:
+        """
+        确保MicroSandbox服务器在生产模式下运行
+        返回True如果服务器正在运行或成功启动
+        """
+        # 检查服务器是否已经在运行
+        if await self._check_server_health():
+            logger.info("MicroSandbox server is already running")
+            return True
+            
+        # 停止任何开发模式的服务器
+        await self._stop_dev_server()
+        
+        # 启动生产模式服务器
+        return await self._start_production_server()
+    
+    async def _check_server_health(self) -> bool:
+        """
+        检查MicroSandbox服务器是否正在运行
+        """
+        try:
+            from microsandbox import PythonSandbox
+            
+            # 尝试创建一个简单的沙箱来测试连接
+            server_url = f"http://{self.config.MSB_HOST}:{self.config.MSB_PORT}"
+            sandbox_kwargs = {'server_url': server_url}
+            
+            if self.config.MSB_API_KEY:
+                sandbox_kwargs['api_key'] = self.config.MSB_API_KEY
+                
+            # 快速连接测试
+            sandbox = PythonSandbox(**sandbox_kwargs)
+            try:
+                await sandbox.start(timeout=3)
+                await sandbox.stop()
+                return True
+            except Exception:
+                return False
+        except Exception:
+            return False
+    
+    async def _stop_dev_server(self):
+        """
+        停止开发模式服务器
+        """
+        try:
+            subprocess.run(['pkill', '-f', 'msbserver --dev'], check=False)
+            await asyncio.sleep(2)  # 等待进程停止
+        except Exception as e:
+            logger.warning(f"Error stopping dev server: {e}")
+    
+    async def _start_production_server(self) -> bool:
+        """
+        启动生产模式的MicroSandbox服务器
+        """
+        try:
+            # 验证配置
+            config_errors = self.config.validate_config()
+            if config_errors:
+                logger.error(f"Configuration errors: {config_errors}")
+                return False
+            
+            # 检查是否已经有服务器在运行
+            import subprocess
+            result = subprocess.run(['pgrep', '-f', f'msbserver.*{self.config.MSB_PORT}'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info("Production MicroSandbox server is already running")
+                return True
+            
+            # 构建启动命令
+            cmd = [
+                'msb', 'server', 'start',
+                '--host', self.config.MSB_HOST,
+                '--port', str(self.config.MSB_PORT),
+                '--key', self.config.MSB_API_KEY,
+                '--detach'
+            ]
+            
+            logger.info(f"Starting production MicroSandbox server: {' '.join(cmd[:-2])} --key [REDACTED] --detach")
+            
+            # 启动服务器进程
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                logger.error(f"Failed to start server: {result.stderr}")
+                return False
+            
+            # 等待服务器启动
+            await asyncio.sleep(3)
+            
+            # 验证服务器是否成功启动
+            for i in range(5):  # 重试检查
+                if await self._check_server_health():
+                    logger.info("✅ Production MicroSandbox server started successfully")
+                    return True
+                await asyncio.sleep(1)
+            
+            logger.warning("⚠️ Server started but health check failed, continuing anyway")
+            return True  # 继续，让具体操作去处理错误
+                
+        except Exception as e:
+            logger.error(f"Error starting production server: {e}")
+            return False
+    
+    async def stop_server(self):
+        """
+        停止MicroSandbox服务器
+        """
+        if self.server_process:
+            self.server_process.terminate()
+            await self.server_process.wait()
+            self.server_process = None
+
 class MicroSandboxMCPServer:
-    """MicroSandbox代码执行MCP服务器（增强版）"""
+    """MicroSandbox代码执行MCP服务器（增强版生产模式）"""
     
     def __init__(self, config_manager: ConfigManager):
         self.server_name = "microsandbox_server"
-        self.server_id = "microsandbox-mcp-server"
+        self.server_id = "microsandbox"
         self.config_manager = config_manager
+        self.config = MicroSandboxConfig
+        
+        # MicroSandbox服务器管理器
+        self.server_manager = MicroSandboxServerManager()
+        
+        # 增强的会话管理器
+        self.enhanced_session_manager = EnhancedSessionManager(self.config)
+        
+        # Token管理器 - 自动处理API token刷新
+        self.token_manager = AutoRefreshTokenManager(env_path)
         
         # 活跃的沙箱会话 {session_id: sandbox_context}
         self.active_sessions: Dict[str, Any] = {}
@@ -126,23 +312,19 @@ class MicroSandboxMCPServer:
         self.default_execution_timeout = 30  # 默认30秒
         self.max_execution_timeout = 300     # 最大5分钟
         
+        # API版本兼容性
+        self.api_version = self.config.SUPPORTED_API_VERSION
+        
         # 从配置中获取端口
         ports_config = self.config_manager.get_ports_config()
         
-        # 检查动态分配的端口
-        dynamic_port = os.getenv('MICROSANDBOX_MCP_SERVER_PORT')
-        if dynamic_port:
-            microsandbox_port = int(dynamic_port)
-            logger.info(f"使用动态分配端口: {microsandbox_port}")
-        else:
-            microsandbox_port = ports_config['mcp_servers']['microsandbox_server']['port']
-            logger.info(f"使用配置文件端口: {microsandbox_port}")
-        
+        # 使用生产配置端口
+        microsandbox_port = self.config.MCP_SERVER_PORT
         toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
         
         # 配置监听地址
-        listen_host = os.getenv("MICROSANDBOX_LISTEN_HOST", "0.0.0.0")
-        public_host = os.getenv("MICROSANDBOX_HOST", "localhost")
+        listen_host = self.config.MCP_LISTEN_HOST
+        public_host = self.config.MCP_HOST
         
         self.endpoint = f"ws://{public_host}:{microsandbox_port}"
         self._listen_host = listen_host
@@ -150,9 +332,12 @@ class MicroSandboxMCPServer:
         
         self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
         
-        logger.info(f"MicroSandboxMCPServer initialized:")
+        logger.info(f"MicroSandboxMCPServer initialized (Production Mode):")
         logger.info(f"  Server Name: {self.server_name}")
         logger.info(f"  Server ID: {self.server_id}")
+        logger.info(f"  API Version: {self.api_version}")
+        logger.info(f"  Storage Path: {self.config.MSB_STORAGE_PATH}")
+        logger.info(f"  MicroSandbox Server: {self.config.MSB_HOST}:{self.config.MSB_PORT}")
         logger.info(f"  Listen Host: {self._listen_host}")
         logger.info(f"  Listen Port: {self._listen_port}")
         logger.info(f"  Public Endpoint: {self.endpoint}")
@@ -289,6 +474,12 @@ class MicroSandboxMCPServer:
             elif action == "microsandbox_get_health_status":
                 return await self._get_health_status()
                 
+            elif action == "microsandbox_get_token_status":
+                return await self._get_token_status()
+                
+            elif action == "microsandbox_refresh_token":
+                return await self._refresh_token()
+                
             else:
                 return {
                     "success": False,
@@ -402,21 +593,54 @@ class MicroSandboxMCPServer:
             }
     
     async def _execute_once(self, code: str, timeout: int) -> Dict[str, Any]:
-        """一次性执行代码（无会话）- 支持MicroSandbox和本地执行器降级"""
+        """一次性执行代码（无会话）- 支持生产模式MicroSandbox和本地执行器降级"""
         try:
             logger.info(f"开始执行Python代码: {code[:100]}...")
             
-            # 首先尝试使用MicroSandbox - 快速失败策略
+            # 确保生产模式服务器运行
+            server_running = await self.server_manager.ensure_server_running()
+            if not server_running:
+                logger.warning("无法启动生产模式MicroSandbox服务器，使用本地执行器")
+                return await self._execute_with_local_fallback(code, timeout)
+            
+            # 首先尝试使用生产模式MicroSandbox
             try:
-                logger.info("尝试连接MicroSandbox服务器 http://127.0.0.1:5555")
-                async with PythonSandbox.create(server_url="http://127.0.0.1:5555") as sandbox:  # 移除不支持的timeout参数
+                server_url = f"http://{self.config.MSB_HOST}:{self.config.MSB_PORT}"
+                logger.info(f"连接到生产模式MicroSandbox服务器: {server_url}")
+                
+                # 使用生产配置创建Sandbox实例
+                sandbox_kwargs = {
+                    'server_url': server_url
+                }
+                
+                # 获取有效的API密钥（自动刷新）
+                api_key = await self.token_manager.get_valid_token()
+                if api_key:
+                    sandbox_kwargs['api_key'] = api_key
+                    
+                async with PythonSandbox.create(**sandbox_kwargs) as sandbox:
                     execution = await sandbox.run(code)
                     
                     # 检查执行结果的正确属性
                     if hasattr(execution, 'status'):
                         success = execution.status == 'success'
-                        stdout = execution.output() if hasattr(execution, 'output') and callable(execution.output) else str(execution.output if hasattr(execution, 'output') else "")
-                        stderr = execution.error() if hasattr(execution, 'error') and callable(execution.error) and execution.has_error() else ""
+                        # 处理异步方法
+                        if hasattr(execution, 'output') and callable(execution.output):
+                            try:
+                                stdout = await execution.output()
+                            except:
+                                stdout = str(execution.output if hasattr(execution, 'output') else "")
+                        else:
+                            stdout = str(execution.output if hasattr(execution, 'output') else "")
+                        
+                        # 处理错误信息
+                        if hasattr(execution, 'error') and callable(execution.error):
+                            try:
+                                stderr = await execution.error() if execution.has_error() else ""
+                            except:
+                                stderr = ""
+                        else:
+                            stderr = ""
                         exit_code = 0 if success else 1
                     else:
                         # 降级到属性访问
@@ -425,7 +649,7 @@ class MicroSandboxMCPServer:
                         stderr = execution.stderr if hasattr(execution, 'stderr') else ""
                         exit_code = execution.exit_code if hasattr(execution, 'exit_code') else (0 if success else 1)
                     
-                    logger.info(f"MicroSandbox执行成功: success={success}, stdout长度={len(stdout)}")
+                    logger.info(f"生产模式MicroSandbox执行成功: success={success}, stdout长度={len(str(stdout))}")
                     return {
                         "success": success,
                         "stdout": stdout,
@@ -434,7 +658,59 @@ class MicroSandboxMCPServer:
                     }
             except Exception as msb_error:
                 import traceback
-                error_details = f"MicroSandbox执行失败，降级到本地执行器: {msb_error}"
+                error_str = str(msb_error)
+                
+                # 检查是否为token相关错误
+                if self.token_manager.is_token_error(error_str):
+                    logger.warning(f"检测到token错误: {error_str}")
+                    # 尝试刷新token并重试一次
+                    refresh_success = await self.token_manager.refresh_token_if_needed()
+                    if refresh_success:
+                        logger.info("Token刷新成功，尝试重新执行...")
+                        try:
+                            # 重新获取API密钥并重试
+                            api_key = await self.token_manager.get_valid_token()
+                            if api_key:
+                                sandbox_kwargs['api_key'] = api_key
+                                async with PythonSandbox.create(**sandbox_kwargs) as sandbox:
+                                    execution = await sandbox.run(code)
+                                    
+                                    # 使用相同的结果处理逻辑
+                                    if hasattr(execution, 'status'):
+                                        success = execution.status == 'success'
+                                        if hasattr(execution, 'output') and callable(execution.output):
+                                            try:
+                                                stdout = await execution.output()
+                                            except:
+                                                stdout = str(execution.output if hasattr(execution, 'output') else "")
+                                        else:
+                                            stdout = str(execution.output if hasattr(execution, 'output') else "")
+                                        
+                                        if hasattr(execution, 'error') and callable(execution.error):
+                                            try:
+                                                stderr = await execution.error() if execution.has_error() else ""
+                                            except:
+                                                stderr = ""
+                                        else:
+                                            stderr = ""
+                                        exit_code = 0 if success else 1
+                                    else:
+                                        success = execution.exit_code == 0 if hasattr(execution, 'exit_code') else True
+                                        stdout = execution.stdout if hasattr(execution, 'stdout') else ""
+                                        stderr = execution.stderr if hasattr(execution, 'stderr') else ""
+                                        exit_code = execution.exit_code if hasattr(execution, 'exit_code') else (0 if success else 1)
+                                    
+                                    logger.info(f"Token刷新后执行成功: success={success}")
+                                    return {
+                                        "success": success,
+                                        "stdout": stdout,
+                                        "stderr": stderr,
+                                        "return_code": exit_code
+                                    }
+                        except Exception as retry_error:
+                            logger.warning(f"Token刷新后重试仍失败: {retry_error}")
+                
+                error_details = f"生产模式MicroSandbox执行失败，降级到本地执行器: {msb_error}"
                 traceback_str = traceback.format_exc()
                 logger.warning(f"{error_details}\n详细错误信息: {traceback_str}")
                 logger.info("立即启用本地Python执行器作为备用方案")
@@ -505,27 +781,16 @@ class MicroSandboxMCPServer:
             }
     
     async def _execute_with_session(self, code: str, session_id: str, timeout: int) -> Dict[str, Any]:
-        """在指定会话中执行代码"""
+        """在指定会话中执行代码（使用增强的会话管理器）"""
         try:
-            # 获取或创建会话
-            sandbox = await self._get_or_create_session(session_id, timeout)
-            
-            # 执行代码
-            execution = await sandbox.run(code)
-            
-            # 获取结果
-            success = execution.exit_code == 0
-            stdout = execution.stdout or ""
-            stderr = execution.stderr or ""
-            
-            # 更新会话访问时间
-            self.active_sessions[session_id]["last_accessed"] = time.time()
+            # 使用增强的会话管理器
+            result = await self.enhanced_session_manager.execute_with_session(session_id, code, timeout)
             
             return {
-                "success": success,
-                "stdout": stdout,
-                "stderr": stderr,
-                "return_code": execution.exit_code
+                "success": result["success"],
+                "stdout": result["stdout"],
+                "stderr": result["stderr"],
+                "return_code": result["return_code"]
             }
             
         except Exception as e:
@@ -563,17 +828,18 @@ class MicroSandboxMCPServer:
             }
         
         # 构造增强的安装命令，包含详细的错误检测
+        version_str = version if version else 'None'
         install_code = f"""
 import subprocess
 import json
 import sys
 
 package_name = '{package_name}'
-version = '{version}' if '{version}' else None
+version = {repr(version)}
 
 # 构建pip命令
 pip_cmd = [sys.executable, '-m', 'pip', 'install']
-if version:
+if version and version != 'None':
     pip_cmd.append(f'{{package_name}}=={{version}}')
 else:
     pip_cmd.append(package_name)
@@ -678,31 +944,25 @@ except Exception as e:
         return result
     
     async def _list_sessions(self) -> Dict[str, Any]:
-        """列出活跃会话"""
-        sessions = []
-        current_time = time.time()
-        
-        for session_id, session_info in self.active_sessions.items():
-            sessions.append({
-                "session_id": session_id,
-                "created_at": session_info["created_at"],
-                "last_accessed": session_info["last_accessed"],
-                "uptime": current_time - session_info["created_at"],
-                "idle_time": current_time - session_info["last_accessed"]
-            })
-        
-        return {
-            "success": True,
-            "data": {
-                "sessions": sessions,
-                "total_count": len(sessions)
-            },
-            "error_message": "",
-            "error_type": ""
-        }
+        """列出活跃会话（使用增强的会话管理器）"""
+        try:
+            result = self.enhanced_session_manager.list_sessions()
+            return {
+                "success": True,
+                "data": result,
+                "error_message": "",
+                "error_type": ""
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error_message": str(e),
+                "error_type": "SessionListError"
+            }
     
     async def _close_session(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """关闭会话"""
+        """关闭会话（使用增强的会话管理器）"""
         session_id = parameters.get("session_id", "")
         
         if not session_id:
@@ -713,86 +973,140 @@ except Exception as e:
                 "error_type": "InvalidInput"
             }
         
-        if session_id not in self.active_sessions:
-            return {
-                "success": False,
-                "data": None,
-                "error_message": f"会话不存在: {session_id}",
-                "error_type": "SessionNotFound"
-            }
-        
         try:
-            # 关闭沙箱
-            session_info = self.active_sessions[session_id]
-            if session_info["sandbox"]:
-                await session_info["sandbox"].stop()
-                if hasattr(session_info["sandbox"], '_session') and session_info["sandbox"]._session:
-                    await session_info["sandbox"]._session.close()
-            
-            # 移除会话记录
-            del self.active_sessions[session_id]
-            
+            result = self.enhanced_session_manager.close_session(session_id)
             return {
-                "success": True,
-                "data": {"session_id": session_id, "message": "会话已关闭"},
-                "error_message": "",
-                "error_type": ""
+                "success": result.get("success", False),
+                "data": result if result.get("success") else None,
+                "error_message": result.get("error_message", ""),
+                "error_type": result.get("error_type", "")
             }
-            
         except Exception as e:
             return {
                 "success": False,
                 "data": None,
-                "error_message": f"关闭会话失败: {str(e)}",
+                "error_message": str(e),
                 "error_type": "SessionCloseError"
             }
     
     async def _cleanup_expired_sessions(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """清理过期会话"""
-        max_age = parameters.get("max_age", self.session_timeout)
-        current_time = time.time()
-        expired_sessions = []
+        """清理过期会话（使用增强的会话管理器）"""
+        max_age = parameters.get("max_age", None)
         
-        for session_id, session_info in list(self.active_sessions.items()):
-            if current_time - session_info["last_accessed"] > max_age:
-                try:
-                    if session_info["sandbox"]:
-                        await session_info["sandbox"].stop()
-                        if hasattr(session_info["sandbox"], '_session') and session_info["sandbox"]._session:
-                            await session_info["sandbox"]._session.close()
-                    del self.active_sessions[session_id]
-                    expired_sessions.append(session_id)
-                except Exception as e:
-                    logger.warning(f"清理会话 {session_id} 失败: {e}")
-        
-        return {
-            "success": True,
-            "data": {
-                "cleaned_sessions": expired_sessions,
-                "count": len(expired_sessions)
-            },
-            "error_message": "",
-            "error_type": ""
-        }
+        try:
+            result = self.enhanced_session_manager.cleanup_expired_sessions(max_age)
+            return {
+                "success": True,
+                "data": result,
+                "error_message": "",
+                "error_type": ""
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error_message": str(e),
+                "error_type": "SessionCleanupError"
+            }
+    
+    async def _get_token_status(self) -> Dict[str, Any]:
+        """获取API Token状态信息"""
+        try:
+            token_info = self.token_manager.get_token_info()
+            return {
+                "success": True,
+                "data": {
+                    "token_status": token_info,
+                    "auto_refresh_enabled": True,
+                    "refresh_interval": "2分钟检查一次"
+                },
+                "error_message": "",
+                "error_type": ""
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error_message": str(e),
+                "error_type": "TokenStatusError"
+            }
+    
+    async def _refresh_token(self) -> Dict[str, Any]:
+        """手动刷新API Token"""
+        try:
+            refresh_success = await self.token_manager.refresh_token_if_needed()
+            if refresh_success:
+                token_info = self.token_manager.get_token_info()
+                return {
+                    "success": True,
+                    "data": {
+                        "message": "Token刷新成功",
+                        "token_status": token_info
+                    },
+                    "error_message": "",
+                    "error_type": ""
+                }
+            else:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error_message": "Token刷新失败，可能在冷却期内或其他错误",
+                    "error_type": "TokenRefreshFailed"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error_message": str(e),
+                "error_type": "TokenRefreshError"
+            }
     
     async def _get_or_create_session(self, session_id: str, timeout: int = 180):
-        """获取或创建会话"""
+        """获取或创建会话（生产模式）"""
         if session_id not in self.active_sessions:
-            # 创建新会话，手动管理生命周期
-            import aiohttp
-            sandbox = PythonSandbox(server_url="http://127.0.0.1:5555")
-            sandbox._session = aiohttp.ClientSession()
-            await sandbox.start(timeout=timeout)
+            # 确保生产模式服务器运行
+            server_running = await self.server_manager.ensure_server_running()
+            if not server_running:
+                raise Exception("无法启动生产模式MicroSandbox服务器")
             
-            self.active_sessions[session_id] = {
-                "sandbox": sandbox,
-                "sandbox_instance": sandbox,
-                "created_at": time.time(),
-                "last_accessed": time.time()
+            # 创建新会话，使用生产配置
+            import aiohttp
+            
+            server_url = f"http://{self.config.MSB_HOST}:{self.config.MSB_PORT}"
+            
+            # 构建沙箱参数
+            sandbox_kwargs = {
+                'server_url': server_url
             }
             
-            logger.info(f"创建新的MicroSandbox会话: {session_id}")
-            return sandbox
+            # 添加认证信息
+            if self.config.MSB_API_KEY:
+                sandbox_kwargs['api_key'] = self.config.MSB_API_KEY
+            
+            sandbox = PythonSandbox(**sandbox_kwargs)
+            sandbox._session = aiohttp.ClientSession()
+            
+            try:
+                await sandbox.start(timeout=timeout)
+                
+                self.active_sessions[session_id] = {
+                    "sandbox": sandbox,
+                    "sandbox_instance": sandbox,
+                    "created_at": time.time(),
+                    "last_accessed": time.time(),
+                    "server_url": server_url,
+                    "with_auth": bool(self.config.MSB_API_KEY)
+                }
+                
+                logger.info(f"创建新的生产模式MicroSandbox会话: {session_id}, 服务器: {server_url}")
+                return sandbox
+                
+            except Exception as e:
+                logger.error(f"创建会话失败: {e}")
+                if hasattr(sandbox, '_session') and sandbox._session:
+                    await sandbox._session.close()
+                raise
+                
         else:
             # 更新访问时间并返回现有沙箱
             self.active_sessions[session_id]["last_accessed"] = time.time()
@@ -1120,6 +1434,8 @@ except Exception as e:
     async def run(self):
         """启动MCP服务器（旧版兼容方法）"""
         logger.warning("使用旧版run()方法，建议使用start_with_auto_restart()获得更好的可靠性")
+        # 启动token自动刷新服务
+        await self.token_manager.start_auto_refresh(check_interval=120)  # 每2分钟检查一次
         await self._start_server_non_blocking()
     
     async def cleanup(self):
@@ -1136,6 +1452,11 @@ except Exception as e:
                 logger.info(f"已清理会话: {session_id}")
             except Exception as e:
                 logger.warning(f"清理会话 {session_id} 失败: {e}")
+        
+        # 停止token自动刷新服务
+        if hasattr(self, 'token_manager'):
+            await self.token_manager.stop_auto_refresh()
+            logger.info("Token自动刷新服务已停止")
         
         # 停止性能监控
         if hasattr(self, 'performance_monitor'):

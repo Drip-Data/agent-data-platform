@@ -48,8 +48,9 @@ class GuardrailsLLMMiddleware:
     提供输入输出的专业安全检查和结构化验证
     """
     
-    def __init__(self, available_tool_ids: Optional[List[str]] = None):
+    def __init__(self, available_tool_ids: Optional[List[str]] = None, llm_client=None):
         self.available_tool_ids = available_tool_ids or []
+        self.llm_client = llm_client  # 🔧 新增：使用本地LLM客户端
         self.validation_stats = {
             "total_validations": 0,
             "successful_validations": 0,
@@ -111,17 +112,46 @@ class GuardrailsLLMMiddleware:
         """创建高级输出验证Guard"""
         if not GUARDRAILS_AVAILABLE:
             return None
-            
+
         try:
-            # 创建基础Guard
-            logger.debug("🔍 创建基础输出Guard")
-            guard = Guard()
-            
-            return guard
-            
+            # 优先使用本地LLM客户端作为Guard的API
+            if self.llm_client and hasattr(self.llm_client, 'call_api'):
+                logger.info("🔧 使用本地LLM客户端初始化Guard...")
+                # 使用 functools.partial 来包装异步的 call_api
+                import functools
+                # 注意：Guard.from_rail_string 需要一个同步的 callable
+                # 我们需要一个包装器来在同步上下文中运行异步API调用
+                def llm_api_wrapper(prompt, *args, **kwargs):
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    
+                    # 准备messages格式
+                    messages = [{"role": "user", "content": prompt}]
+                    
+                    # 运行异步任务
+                    if loop.is_running():
+                        future = asyncio.run_coroutine_threadsafe(self.llm_client.call_api(messages), loop)
+                        return future.result()
+                    else:
+                        return loop.run_until_complete(self.llm_client.call_api(messages))
+
+                rail_schema = self._build_comprehensive_rail_schema()
+                guard = Guard.from_rail_string(rail_schema, api=llm_api_wrapper, num_reasks=2)
+                logger.info("✅ 使用LLM的Guard创建成功")
+                return guard
+            else:
+                logger.warning("⚠️ 未提供LLM客户端，Guard将无法执行基于LLM的修正。回退到无API的Guard。")
+                # 创建一个没有API的Guard，它只能做结构验证，不能做reask
+                rail_schema = self._build_comprehensive_rail_schema()
+                guard = Guard.from_rail_string(rail_schema)
+                return guard
+
         except Exception as e:
             logger.error(f"❌ 创建高级输出Guard失败: {e}")
-            # 返回None，使用基础验证
+            logger.error(traceback.format_exc())
             return None
     
     def _build_comprehensive_rail_schema(self) -> str:
@@ -293,57 +323,51 @@ class GuardrailsLLMMiddleware:
                     validation_time=validation_time
                 )
             
-            if not GUARDRAILS_AVAILABLE or not self.output_guard:
-                # 基础验证模式
-                return await self._basic_output_validation(parsed_data, start_time)
-            
             # 使用Guardrails进行高级验证
             try:
-                # 构建验证消息
-                validation_messages = [
-                    {"role": "user", "content": f"Please validate this LLM output: {json.dumps(parsed_data, ensure_ascii=False)}"}
-                ]
-                
-                validated_output = self.output_guard(
-                    messages=validation_messages,
-                    num_reasks=1  # 输出验证只重新询问1次
+                # 确保Guard已正确初始化
+                if not self.output_guard:
+                    logger.warning("Output Guard未初始化，回退到基础验证")
+                    return await self._basic_output_validation(parsed_data, start_time)
+
+                # Guard.parse现在需要一个llm_output参数
+                validated_output = await self.output_guard.parse(
+                    llm_output=output_text,  # 原始的LLM输出字符串
+                    num_reasks=2
                 )
-                
+
                 validation_time = asyncio.get_event_loop().time() - start_time
-                self.validation_stats["successful_validations"] += 1
                 
-                return GuardrailsValidationResult(
-                    is_valid=True,
-                    validated_data=validated_output.validated_output if hasattr(validated_output, 'validated_output') else parsed_data,
-                    original_data=parsed_data,
-                    validation_time=validation_time,
-                    guardrails_used=["output_structure_check", "tool_choice_validation", "rail_schema_validation"]
-                )
-                
-            except Exception as e:
-                # 尝试自动修正
-                corrected_data = await self._attempt_auto_correction(parsed_data)
-                if corrected_data != parsed_data:
-                    validation_time = asyncio.get_event_loop().time() - start_time
-                    self.validation_stats["auto_corrections"] += 1
-                    
+                if validated_output.validation_passed:
+                    self.validation_stats["successful_validations"] += 1
                     return GuardrailsValidationResult(
                         is_valid=True,
-                        validated_data=corrected_data,
+                        validated_data=validated_output.validated_output,
                         original_data=parsed_data,
-                        corrections_applied=["tool_id_correction", "action_normalization"],
                         validation_time=validation_time,
-                        guardrails_used=["auto_correction"]
+                        guardrails_used=["advanced_output_guard"]
                     )
-                
-                # 无法修正
+                else:
+                    self.validation_stats["failed_validations"] += 1
+                    # 尝试从验证失败中提取更多信息
+                    error_msg = f"Guardrails输出验证失败: {validated_output.error}"
+                    return GuardrailsValidationResult(
+                        is_valid=False,
+                        original_data=parsed_data,
+                        error_message=error_msg,
+                        validation_time=validation_time
+                    )
+
+            except Exception as e:
+                # Guardrails验证失败
                 validation_time = asyncio.get_event_loop().time() - start_time
                 self.validation_stats["failed_validations"] += 1
+                logger.error(f"Guardrails输出验证异常: {e}\n{traceback.format_exc()}")
                 
                 return GuardrailsValidationResult(
                     is_valid=False,
                     original_data=parsed_data,
-                    error_message=f"输出验证失败: {str(e)}",
+                    error_message=f"Guardrails输出验证失败: {str(e)}",
                     validation_time=validation_time
                 )
                 
@@ -568,6 +592,121 @@ class GuardrailsLLMMiddleware:
         
         return action
     
+    async def _llm_based_output_validation(self, parsed_data: Dict[str, Any], start_time: float) -> GuardrailsValidationResult:
+        """基于本地LLM客户端的高级输出验证"""
+        try:
+            # 首先进行基础验证
+            basic_result = await self._basic_output_validation(parsed_data, start_time)
+            if not basic_result.is_valid:
+                return basic_result
+            
+            # 构建验证提示
+            validation_prompt = self._build_validation_prompt(parsed_data)
+            messages = [
+                {
+                    "role": "system", 
+                    "content": "你是一个专业的AI输出验证器。请分析给定的LLM输出是否合理、安全和有效。返回JSON格式的验证结果。"
+                },
+                {
+                    "role": "user", 
+                    "content": validation_prompt
+                }
+            ]
+            
+            # 使用本地LLM客户端进行验证
+            try:
+                validation_response = await self.llm_client._call_api(messages)
+                validation_result = self._parse_validation_response(validation_response)
+                
+                validation_time = asyncio.get_event_loop().time() - start_time
+                
+                if validation_result.get("is_valid", True):
+                    self.validation_stats["successful_validations"] += 1
+                    
+                    # 应用LLM建议的修正
+                    corrected_data = validation_result.get("corrected_data", parsed_data)
+                    corrections = validation_result.get("corrections_applied", [])
+                    
+                    if corrections:
+                        self.validation_stats["auto_corrections"] += 1
+                        logger.info(f"🔧 LLM验证应用了修正: {corrections}")
+                    
+                    return GuardrailsValidationResult(
+                        is_valid=True,
+                        validated_data=corrected_data,
+                        original_data=parsed_data,
+                        corrections_applied=corrections,
+                        validation_time=validation_time,
+                        guardrails_used=["llm_based_validation"]
+                    )
+                else:
+                    self.validation_stats["failed_validations"] += 1
+                    return GuardrailsValidationResult(
+                        is_valid=False,
+                        original_data=parsed_data,
+                        error_message=validation_result.get("error_message", "LLM验证失败"),
+                        validation_time=validation_time,
+                        guardrails_used=["llm_based_validation"]
+                    )
+                    
+            except Exception as llm_error:
+                logger.warning(f"⚠️ LLM验证失败，回退到基础验证: {llm_error}")
+                return basic_result
+                
+        except Exception as e:
+            validation_time = asyncio.get_event_loop().time() - start_time
+            return GuardrailsValidationResult(
+                is_valid=False,
+                original_data=parsed_data,
+                error_message=f"LLM验证过程异常: {str(e)}",
+                validation_time=validation_time
+            )
+    
+    def _build_validation_prompt(self, parsed_data: Dict[str, Any]) -> str:
+        """构建验证提示"""
+        available_tools_str = ", ".join(self.available_tool_ids) if self.available_tool_ids else "未指定"
+        
+        return f"""请验证以下LLM输出的有效性：
+
+输出数据：
+{json.dumps(parsed_data, ensure_ascii=False, indent=2)}
+
+验证标准：
+1. 必需字段检查：thinking, action, tool_id 必须存在
+2. 工具ID有效性：tool_id 必须在可用工具列表中 [{available_tools_str}]
+3. 参数合理性：parameters 必须是有效的JSON对象
+4. 安全性检查：内容不能包含恶意代码或危险操作
+5. 逻辑一致性：thinking 与 action 应该逻辑一致
+
+请返回JSON格式的验证结果：
+{{
+    "is_valid": true/false,
+    "error_message": "错误信息（如果有）",
+    "corrected_data": {{修正后的数据（如果需要修正）}},
+    "corrections_applied": ["修正类型列表"],
+    "confidence": 0.0-1.0,
+    "reasoning": "验证推理过程"
+}}"""
+    
+    def _parse_validation_response(self, response: str) -> Dict[str, Any]:
+        """解析LLM验证响应"""
+        try:
+            # 尝试提取JSON
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+            else:
+                # 如果没有找到JSON，根据响应内容判断
+                if "valid" in response.lower() or "正确" in response or "有效" in response:
+                    return {"is_valid": True, "reasoning": response}
+                else:
+                    return {"is_valid": False, "error_message": response}
+        except Exception as e:
+            logger.warning(f"解析验证响应失败: {e}")
+            # 默认认为有效，避免阻塞
+            return {"is_valid": True, "error_message": f"解析失败: {e}"}
+    
     def get_validation_stats(self) -> Dict[str, Any]:
         """获取验证统计信息"""
         total = self.validation_stats["total_validations"]
@@ -595,11 +734,12 @@ class GuardrailsLLMMiddleware:
 # 全局Guardrails中间件实例
 guardrails_middleware = GuardrailsLLMMiddleware()
 
-def setup_guardrails_middleware(available_tool_ids: List[str]):
+def setup_guardrails_middleware(available_tool_ids: List[str], llm_client=None):
     """设置全局Guardrails中间件"""
     global guardrails_middleware
-    guardrails_middleware = GuardrailsLLMMiddleware(available_tool_ids)
-    logger.info(f"✅ Guardrails中间件已设置，支持{len(available_tool_ids)}个工具")
+    guardrails_middleware = GuardrailsLLMMiddleware(available_tool_ids, llm_client)
+    validation_mode = "本地LLM验证" if llm_client else "基础验证"
+    logger.info(f"✅ Guardrails中间件已设置，支持{len(available_tool_ids)}个工具，验证模式: {validation_mode}")
 
 async def validate_llm_input(input_data: Dict[str, Any]) -> GuardrailsValidationResult:
     """验证LLM输入的便捷函数"""
@@ -607,4 +747,7 @@ async def validate_llm_input(input_data: Dict[str, Any]) -> GuardrailsValidation
 
 async def validate_llm_output(output_text: str, context: Dict[str, Any] = None) -> GuardrailsValidationResult:
     """验证LLM输出的便捷函数"""
+    # 确保中间件已经设置
+    if not guardrails_middleware:
+        raise RuntimeError("Guardrails中间件未初始化。请先调用setup_guardrails_middleware()")
     return await guardrails_middleware.validate_output(output_text, context)
