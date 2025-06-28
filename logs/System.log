@@ -18042,3 +18042,25 @@ task: <Task cancelling name='runtime-enhanced-reasoning-1' coro=<start_runtime_s
 2025-06-28 12:14:44,942 - websockets.client - DEBUG - % received keepalive pong
 2025-06-28 12:14:45,388 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:14:45 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
 2025-06-28 12:14:50,391 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:14:50 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:14:54,380 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第41次, 30s间隔)
+2025-06-28 12:14:54,452 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:14:54,452 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:14:54,453 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:14:54,454 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:14:54,462 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:14:54,891 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:14:54,892 - websockets.server - DEBUG - > PING 75 7a a4 66 [binary, 4 bytes]
+2025-06-28 12:14:54,893 - websockets.client - DEBUG - < PING 75 7a a4 66 [binary, 4 bytes]
+2025-06-28 12:14:54,893 - websockets.client - DEBUG - > PONG 75 7a a4 66 [binary, 4 bytes]
+2025-06-28 12:14:54,893 - websockets.server - DEBUG - < PONG 75 7a a4 66 [binary, 4 bytes]
+2025-06-28 12:14:54,894 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:14:55,395 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:14:55 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:15:00,397 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:15:00 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:15:04,943 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:15:04,943 - websockets.client - DEBUG - > PING b8 f2 d1 72 [binary, 4 bytes]
+2025-06-28 12:15:04,943 - websockets.server - DEBUG - < PING b8 f2 d1 72 [binary, 4 bytes]
+2025-06-28 12:15:04,943 - websockets.server - DEBUG - > PONG b8 f2 d1 72 [binary, 4 bytes]
+2025-06-28 12:15:04,944 - websockets.client - DEBUG - < PONG b8 f2 d1 72 [binary, 4 bytes]
+2025-06-28 12:15:04,944 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:15:05,401 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:15:05 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:15:10,404 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:15:10 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
