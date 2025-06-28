@@ -91,7 +91,16 @@ def start():
         
         # 等待所有任务消费协程
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except (asyncio.CancelledError, GeneratorExit):
+                logger.info("运行时服务正常停止，取消所有任务")
+                # 取消所有剩余任务
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                # 等待任务真正取消
+                await asyncio.gather(*tasks, return_exceptions=True)
     
     # 在新的事件循环中启动所有运行时
     asyncio.create_task(start_all_runtimes())

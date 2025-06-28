@@ -1,0 +1,1366 @@
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/guardrails/hub/install.py:6: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+🚀 Agent Data Platform 启动中... (所有日志将统一记录到 logs/System.log)
+2025-06-28 11:59:50,589 - asyncio - DEBUG - Using selector: KqueueSelector
+🧹 开始增强端口清理...
+🔍 搜索并清理相关Python进程...
+✅ 进程清理完成
+✅ 端口 8088 空闲
+✅ 端口 8089 空闲
+✅ 端口 8090 空闲
+✅ 端口 8091 空闲
+✅ 端口 8092 空闲
+✅ 端口 5555 空闲
+🔥 强制清理端口 8081 的进程 75982
+✅ 端口 8082 空闲
+✅ 端口 8080 空闲
+🔥 强制清理端口 8084 的进程 76028
+✅ 端口 8085 空闲
+✅ 端口 8086 空闲
+✅ 端口 8087 空闲
+✅ 端口 8000 空闲
+✅ 增强端口清理完成
+2025-06-28 11:59:54,077 - __main__ - INFO - === Agent Data Platform 启动中 ===
+2025-06-28 11:59:54,078 - __main__ - DEBUG - 🔧 开始系统初始化流程...
+2025-06-28 11:59:54,078 - __main__ - DEBUG - 📝 命令行参数: {'config_dir': 'config', 'debug': False, 'start_services': False}
+2025-06-28 11:59:54,078 - __main__ - DEBUG - 🔧 步骤1: 初始化ConfigManager...
+2025-06-28 11:59:54,078 - __main__ - DEBUG - ✅ ConfigManager初始化完成，配置目录: config
+2025-06-28 11:59:54,078 - __main__ - DEBUG - 🔧 步骤2: 加载系统配置...
+2025-06-28 11:59:54,079 - __main__ - DEBUG - 📡 Redis URL: redis://localhost:6379
+2025-06-28 11:59:54,079 - __main__ - DEBUG - 📋 任务文件路径: tasks.jsonl
+2025-06-28 11:59:54,081 - core.config_manager - INFO - 路由配置加载成功
+2025-06-28 11:59:54,081 - __main__ - DEBUG - 🚦 路由配置加载完成，任务类型映射: {'CODE': 'tasks:reasoning', 'WEB': 'tasks:reasoning', 'REASONING': 'tasks:reasoning', 'RESEARCH': 'tasks:reasoning'}
+2025-06-28 11:59:54,081 - __main__ - DEBUG - 📋 队列映射: {<TaskType.CODE: 'code'>: 'tasks:reasoning', <TaskType.WEB: 'web'>: 'tasks:reasoning', <TaskType.REASONING: 'reasoning'>: 'tasks:reasoning', <TaskType.RESEARCH: 'research'>: 'tasks:reasoning'}
+2025-06-28 11:59:54,081 - __main__ - DEBUG - 🔧 步骤3: 初始化核心组件...
+2025-06-28 11:59:54,081 - __main__ - DEBUG - ✅ EnhancedMetrics初始化完成
+2025-06-28 11:59:54,082 - __main__ - DEBUG - ✅ RedisManager初始化完成
+2025-06-28 11:59:54,082 - core.toolscore.toolscore_client - INFO - ✅ 增强的ToolScoreClient初始化完成
+2025-06-28 11:59:54,082 - core.llm_client - DEBUG - Enriched config with environment variables: ['default_provider', 'providers', 'gemini_api_key', 'gemini_api_url']
+2025-06-28 11:59:54,196 - core.llm_client - INFO - Initialized LLM client with provider: gemini
+2025-06-28 11:59:54,198 - core.config_manager - INFO - 路由配置加载成功
+2025-06-28 11:59:54,198 - core.monitoring.queue_monitor - INFO - ✅ QueueMonitor 配置加载完成
+2025-06-28 11:59:54,198 - core.system_monitor - INFO - ✅ SystemMonitor 配置加载完成
+2025-06-28 11:59:54,198 - __main__ - DEBUG - 🔧 开始初始化所有服务...
+2025-06-28 11:59:54,198 - services.service_manager - INFO - 正在初始化所有服务...
+2025-06-28 11:59:54,198 - services.service_manager - INFO - 初始化服务: redis
+2025-06-28 11:59:54,199 - services.redis_service - INFO - Redis服务初始化完成，使用注入的RedisManager实例
+2025-06-28 11:59:54,199 - services.service_manager - INFO - 初始化服务: toolscore
+2025-06-28 11:59:54,199 - services.toolscore_service - INFO - 正在初始化ToolScore服务...
+2025-06-28 11:59:54,199 - core.toolscore.core_manager - INFO - ✅ CoreManager 使用增强的ProcessRunner
+2025-06-28 11:59:54,199 - core.toolscore.core_manager - INFO - 🚀 使用v2.0服务容器架构
+2025-06-28 11:59:54,199 - core.toolscore.service_container.mcp_service_container - INFO - 🏗️ MCP服务容器初始化完成
+2025-06-28 11:59:54,199 - core.toolscore.enhanced_core_manager_v2 - INFO - 🏗️ 增强核心管理器 v2.0 初始化完成
+2025-06-28 11:59:54,199 - core.toolscore.core_manager - INFO - ✅ 增强的核心管理器初始化完成
+2025-06-28 11:59:54,199 - core.toolscore.mcp_connector - INFO - MCPServerRegistry initialized
+2025-06-28 11:59:54,199 - core.toolscore.unified_tool_library - INFO - Unified Tool Library initialized - 使用核心管理器整合模式
+2025-06-28 11:59:54,199 - services.toolscore_service - INFO - ToolScore服务初始化完成（异步初始化将在start()中进行）
+2025-06-28 11:59:54,199 - services.service_manager - INFO - 初始化服务: task_processing_coordinator
+2025-06-28 11:59:54,199 - services.service_manager - INFO - 初始化服务: mcp_servers
+2025-06-28 11:59:54,199 - services.mcp_server_launcher - INFO - 正在初始化MCP服务器启动器...
+2025-06-28 11:59:54,199 - services.mcp_server_launcher - INFO - MCP服务器启动器初始化完成，配置了 4 个服务器: ['microsandbox_server', 'search_tool_server', 'browser_use_server', 'deepsearch_server']
+2025-06-28 11:59:54,199 - services.service_manager - INFO - 初始化服务: task_api
+2025-06-28 11:59:54,199 - services.task_api_service - INFO - 正在初始化任务API服务...
+2025-06-28 11:59:54,199 - services.task_api_service - INFO - 任务API服务初始化完成
+2025-06-28 11:59:54,199 - services.service_manager - INFO - 初始化服务: runtime
+2025-06-28 11:59:54,199 - services.runtime_service - INFO - 正在初始化推理运行时服务...
+2025-06-28 11:59:54,199 - services.runtime_service - INFO - 创建运行时实例: enhanced-runtime-1
+2025-06-28 11:59:54,199 - core.memory_manager - INFO - MemoryManager initialized: use_redis=True, max_entries=1000
+2025-06-28 11:59:54,199 - core.step_planner - INFO - StepPlanner initialized with max_steps=10
+2025-06-28 11:59:54,199 - runtimes.reasoning.enhanced_runtime - INFO - DEBUG: Loaded toolscore_http_port: 8082, toolscore_mcp_port: 8081
+2025-06-28 11:59:54,199 - runtimes.reasoning.enhanced_runtime - INFO - DEBUG: Configured toolscore_websocket_endpoint (using mcp_port): ws://localhost:8081/websocket
+2025-06-28 11:59:54,199 - core.toolscore.mcp_client - INFO - Enhanced MCPToolClient initialized for toolscore at ws://localhost:8081/websocket
+2025-06-28 11:59:54,209 - core.config.unified_mapping_manager - INFO - ✅ 统一映射配置已加载: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/config/unified_tool_mappings.yaml
+2025-06-28 11:59:54,209 - core.config.unified_mapping_manager - INFO - 🔒 配置哈希: 19cc9dfe
+2025-06-28 11:59:54,209 - core.llm.guardrails_middleware - INFO - 🔧 初始化输入验证Guard...
+2025-06-28 11:59:54,210 - root - DEBUG - Creating HubTelemetry instance...
+2025-06-28 11:59:54,210 - root - DEBUG - Initializing HubTelemetry instance...
+2025-06-28 11:59:54,212 - root - DEBUG - Returning existing HubTelemetry instance...
+2025-06-28 11:59:54,212 - core.llm.guardrails_middleware - INFO - 🔧 初始化输出验证Guard...
+2025-06-28 11:59:54,212 - core.llm.guardrails_middleware - INFO - 🔧 使用本地LLM客户端初始化Guard...
+2025-06-28 11:59:54,213 - root - DEBUG - Returning existing HubTelemetry instance...
+2025-06-28 11:59:54,213 - root - DEBUG - Returning existing HubTelemetry instance...
+2025-06-28 11:59:54,213 - core.llm.guardrails_middleware - INFO - ✅ 使用LLM的Guard创建成功
+2025-06-28 11:59:54,213 - core.llm.guardrails_middleware - INFO - ✅ Guardrails Guards初始化成功
+2025-06-28 11:59:54,213 - core.llm.guardrails_middleware - INFO -    - 输入Guard: ✅
+2025-06-28 11:59:54,213 - core.llm.guardrails_middleware - INFO -    - 输出Guard: ✅
+2025-06-28 11:59:54,213 - core.agents.validation_critic - INFO - 🎯 ValidationCritic Agent初始化完成
+2025-06-28 11:59:54,213 - core.toolscore.async_tool_state_manager - INFO - AsyncToolStateManager initialized with 4 essential tools
+2025-06-28 11:59:54,213 - services.runtime_service - INFO - 推理运行时服务初始化完成，创建了 1 个实例
+2025-06-28 11:59:54,213 - services.service_manager - INFO - 初始化服务: synthesis
+2025-06-28 11:59:54,213 - services.synthesis_service - INFO - 正在初始化合成服务...
+2025-06-28 11:59:54,213 - core.llm_client - DEBUG - Enriched config with environment variables: ['redis_url', 'TRAJECTORIES_DIR', 'default_provider', 'providers', 'gemini_api_key', 'gemini_api_url']
+2025-06-28 11:59:54,247 - core.llm_client - INFO - Initialized LLM client with provider: gemini
+2025-06-28 11:59:54,247 - core.toolscore.core_manager - INFO - ✅ CoreManager 使用增强的ProcessRunner
+2025-06-28 11:59:54,247 - core.toolscore.core_manager - INFO - 🚀 使用v2.0服务容器架构
+2025-06-28 11:59:54,247 - core.toolscore.service_container.mcp_service_container - INFO - 🏗️ MCP服务容器初始化完成
+2025-06-28 11:59:54,247 - core.toolscore.enhanced_core_manager_v2 - INFO - 🏗️ 增强核心管理器 v2.0 初始化完成
+2025-06-28 11:59:54,247 - core.toolscore.core_manager - INFO - ✅ 增强的核心管理器初始化完成
+2025-06-28 11:59:54,247 - core.toolscore.mcp_connector - INFO - MCPServerRegistry initialized
+2025-06-28 11:59:54,247 - core.toolscore.unified_tool_library - INFO - Unified Tool Library initialized - 使用核心管理器整合模式
+2025-06-28 11:59:54,247 - core.synthesiscore.synthesis - INFO - ✅ 初始化任务本质文件: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/task_essences.json
+2025-06-28 11:59:54,247 - core.synthesiscore.synthesis - INFO - ✅ 初始化种子任务文件: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/seed_tasks.jsonl
+2025-06-28 11:59:54,248 - core.synthesiscore.synthesis - INFO - ✅ 初始化已处理轨迹记录文件: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/output/processed_trajectories.json
+2025-06-28 11:59:54,248 - core.synthesiscore.synthesis - INFO - ✅ JSON文件存储初始化完成
+2025-06-28 11:59:54,248 - core.synthesiscore.synthesis - INFO - 📋 未发现已处理轨迹记录，从空白状态开始
+2025-06-28 11:59:54,248 - core.llm_client - DEBUG - Enriched config with environment variables: ['redis_url', 'TRAJECTORIES_DIR', 'default_provider', 'providers', 'gemini_api_key', 'gemini_api_url']
+2025-06-28 11:59:54,281 - core.llm_client - INFO - Initialized LLM client with provider: gemini
+2025-06-28 11:59:54,281 - core.toolscore.mcp_client - INFO - Enhanced MCPToolClient initialized for toolscore at ws://localhost:8089/websocket
+2025-06-28 11:59:54,284 - core.synthesiscore.config_loader - INFO - ✅ SynthesisCore配置加载成功: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/config/synthesiscore_config.yaml
+2025-06-28 11:59:54,284 - core.synthesiscore.trajectory_monitor - INFO - 🔧 TrajectoryMonitor初始化完成
+2025-06-28 11:59:54,284 - core.synthesiscore.trajectory_monitor - INFO - 📂 监控目录: output/trajectories
+2025-06-28 11:59:54,284 - core.synthesiscore.trajectory_monitor - INFO - 📝 种子文件: output/trajectories/../seed_tasks.jsonl
+2025-06-28 11:59:54,284 - services.synthesis_service - INFO - ✅ TrajectoryMonitor v2.0 初始化完成
+2025-06-28 11:59:54,284 - services.synthesis_service - INFO - 合成服务初始化完成，轨迹目录: output/trajectories
+2025-06-28 11:59:54,284 - __main__ - DEBUG - ✅ 所有服务初始化完成
+2025-06-28 11:59:54,284 - __main__ - DEBUG - 🚀 开始启动所有服务...
+2025-06-28 11:59:54,284 - services.service_manager - INFO - 正在启动所有服务...
+2025-06-28 11:59:54,284 - services.service_manager - INFO - 启动服务: redis
+2025-06-28 11:59:54,284 - services.redis_service - INFO - Redis客户端已就绪
+2025-06-28 11:59:54,284 - services.service_manager - INFO - 启动服务: toolscore
+2025-06-28 11:59:54,284 - services.toolscore_service - INFO - 正在启动ToolScore服务...
+2025-06-28 11:59:54,284 - services.toolscore_service - INFO - 正在初始化工具库...
+2025-06-28 11:59:54,284 - services.toolscore_service - INFO - 工具库初始化将在ToolScore MCP服务器线程中进行。
+2025-06-28 11:59:54,284 - services.toolscore_service - INFO - 正在启动ToolScore HTTP API...
+2025-06-28 11:59:54,293 - services.toolscore_service - INFO - ToolScore HTTP API已启动于端口: 8082
+2025-06-28 11:59:54,293 - asyncio - DEBUG - Using selector: KqueueSelector
+2025-06-28 11:59:54,294 - services.toolscore_service - INFO - ToolScore MCP 服务器不进行端口自动检测，使用配置端口: 8081
+2025-06-28 11:59:54,294 - services.toolscore_service - INFO - ToolScore MCP server configured to use host: 0.0.0.0, port: 8081, path: /websocket
+2025-06-28 11:59:54,294 - core.toolscore.core_manager - INFO - ✅ CoreManager 使用增强的ProcessRunner
+2025-06-28 11:59:54,294 - core.toolscore.core_manager - INFO - 🚀 使用v2.0服务容器架构
+2025-06-28 11:59:54,294 - core.toolscore.service_container.mcp_service_container - INFO - 🏗️ MCP服务容器初始化完成
+2025-06-28 11:59:54,294 - core.toolscore.enhanced_core_manager_v2 - INFO - 🏗️ 增强核心管理器 v2.0 初始化完成
+2025-06-28 11:59:54,294 - core.toolscore.core_manager - INFO - ✅ 增强的核心管理器初始化完成
+2025-06-28 11:59:54,294 - core.toolscore.mcp_connector - INFO - MCPServerRegistry initialized
+2025-06-28 11:59:54,294 - core.toolscore.unified_tool_library - INFO - Unified Tool Library initialized - 使用核心管理器整合模式
+2025-06-28 11:59:54,294 - services.toolscore_service - INFO - Starting ToolScore MCP server thread...
+2025-06-28 11:59:54,294 - asyncio - DEBUG - Using selector: KqueueSelector
+2025-06-28 11:59:54,294 - services.toolscore_service - INFO - ToolScore MCP server thread started, is_alive: True
+2025-06-28 11:59:54,294 - services.toolscore_service - INFO - ToolScore MCP服务器启动线程已启动，等待就绪信号...
+2025-06-28 11:59:54,294 - core.toolscore.monitoring_api - INFO - ToolScore monitoring API started on port 8082
+2025-06-28 11:59:54,294 - services.service_manager - INFO - 启动服务: task_processing_coordinator
+2025-06-28 11:59:54,294 - core.toolscore.mcp_server - INFO - Attempting to start toolscore MCP Server on 0.0.0.0:8081
+2025-06-28 11:59:54,294 - core.dispatcher_enhanced - INFO - ✅ TaskProcessingCoordinator 配置加载完成 - 队列映射: {<TaskType.CODE: 'code'>: 'tasks:reasoning', <TaskType.WEB: 'web'>: 'tasks:reasoning', <TaskType.REASONING: 'reasoning'>: 'tasks:reasoning', <TaskType.RESEARCH: 'research'>: 'tasks:reasoning'}
+2025-06-28 11:59:54,294 - services.service_manager - INFO - 启动服务: mcp_servers
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - INFO - 正在启动MCP服务器...
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - INFO - 正在并行启动 4 个MCP服务器...
+2025-06-28 11:59:54,295 - core.dispatcher_enhanced - INFO - 启动任务处理协调器...
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - INFO - 正在启动MCP服务器: microsandbox_server
+2025-06-28 11:59:54,295 - websockets.server - INFO - server listening on 0.0.0.0:8081
+2025-06-28 11:59:54,295 - core.toolscore.mcp_server - INFO - [toolscore] Initializing UnifiedToolLibrary...
+2025-06-28 11:59:54,295 - core.toolscore.core_manager - INFO - 🚀 正在初始化增强的CoreManager...
+2025-06-28 11:59:54,295 - core.toolscore.core_manager - INFO - 🔄 使用v2.0服务容器架构初始化...
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] 当前工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,295 - core.toolscore.enhanced_core_manager_v2 - INFO - 🚀 初始化增强核心管理器 v2.0...
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_name: microsandbox_server
+2025-06-28 11:59:54,295 - core.toolscore.service_container.mcp_service_container - INFO - 🚀 开始初始化MCP服务容器...
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_dir (绝对用于操作): /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/microsandbox_server
+2025-06-28 11:59:54,295 - core.toolscore.service_container.mcp_service_container - INFO - 🔍 发现内置MCP服务...
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.exists(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/microsandbox_server) = True
+2025-06-28 11:59:54,295 - core.toolscore.service_container.builtin_discovery - INFO - 🔍 开始发现内置MCP服务: mcp_servers
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.isdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/microsandbox_server) = True
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.listdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/microsandbox_server) contents: ['production_mode_validator.py', 'token_manager.py', 'service.json', '__init__.py', '__pycache__']
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - INFO - [MCP启动器] 找到启动脚本: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/microsandbox_server/main.py
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - INFO - [MCP启动器] 为microsandbox_server设置AGENT_RUNTIME_DIR: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/agent_runtime
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] Setting PYTHONPATH for subprocess to: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - INFO - [MCP启动器] microsandbox_server 未配置 auto_start 或 auto_start 为 false，跳过端口分配。
+2025-06-28 11:59:54,295 - core.toolscore.service_container.builtin_discovery - INFO - ✅ 发现内置服务: Search Tool MCP Server
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用模块格式启动: python -m mcp_servers.microsandbox_server.main
+2025-06-28 11:59:54,295 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,298 - core.toolscore.service_container.builtin_discovery - INFO - ✅ 发现内置服务: MicroSandbox MCP Server
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - INFO - MCP服务器已启动: microsandbox_server (PID: 77039)
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - 🔍 开始检测 microsandbox_server 就绪状态...
+2025-06-28 11:59:54,299 - core.toolscore.service_container.builtin_discovery - DEBUG - ⏭️ 跳过 __pycache__: 缺少main.py文件
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - INFO - 正在启动MCP服务器: search_tool_server
+2025-06-28 11:59:54,299 - core.toolscore.service_container.builtin_discovery - INFO - ✅ 发现内置服务: Browser Use MCP Server
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - [MCP启动器] 当前工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_name: search_tool_server
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_dir (绝对用于操作): /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/search_tool_server
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.exists(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/search_tool_server) = True
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.isdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/search_tool_server) = True
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.listdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/search_tool_server) contents: ['search_tool.py', 'service.json', '__init__.py', '__pycache__', 'main.py']
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - INFO - [MCP启动器] 找到启动脚本: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/search_tool_server/main.py
+2025-06-28 11:59:54,299 - services.mcp_server_launcher - DEBUG - [MCP启动器] Setting PYTHONPATH for subprocess to: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,299 - core.toolscore.service_container.builtin_discovery - INFO - ✅ 发现内置服务: DeepSearch MCP Server
+2025-06-28 11:59:54,299 - core.toolscore.service_container.builtin_discovery - INFO - 🎯 内置服务发现完成，共发现 4 个服务
+2025-06-28 11:59:54,300 - core.toolscore.service_container.builtin_discovery - INFO - 📝 创建服务配置文件...
+2025-06-28 11:59:54,300 - services.mcp_server_launcher - INFO - [MCP启动器] 为 search_tool_server 使用配置文件指定端口: 8080
+2025-06-28 11:59:54,300 - core.toolscore.service_container.builtin_discovery - DEBUG - ⏭️ 配置文件已存在: mcp_servers/search_tool_server/service.json
+2025-06-28 11:59:54,300 - core.toolscore.service_container.builtin_discovery - DEBUG - ⏭️ 配置文件已存在: mcp_servers/microsandbox_server/service.json
+2025-06-28 11:59:54,300 - core.toolscore.service_container.builtin_discovery - DEBUG - ⏭️ 配置文件已存在: mcp_servers/browser_use_server/service.json
+2025-06-28 11:59:54,300 - core.toolscore.service_container.builtin_discovery - DEBUG - ⏭️ 配置文件已存在: mcp_servers/deepsearch_server/service.json
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - ✅ 发现 4 个内置服务
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - 📂 加载已安装的外部服务...
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - ✅ 加载 0 个外部服务
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - 📋 构建统一服务目录...
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - ✅ 服务目录构建完成，共 4 个服务
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - 📋 标记内置服务为启动中状态...
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - 📋 已标记 4 个内置服务为启动中状态
+2025-06-28 11:59:54,300 - core.toolscore.service_container.service_monitor - INFO - 🔍 启动服务监控...
+2025-06-28 11:59:54,300 - core.toolscore.service_container.mcp_service_container - INFO - ✅ MCP服务容器初始化完成
+2025-06-28 11:59:54,300 - core.toolscore.enhanced_core_manager_v2 - INFO - ✅ 增强核心管理器 v2.0 初始化完成
+2025-06-28 11:59:54,300 - services.mcp_server_launcher - INFO - [MCP启动器] 为 search_tool_server 使用配置文件指定端口: 8080
+2025-06-28 11:59:54,300 - core.toolscore.core_manager - INFO - ✅ v2.0架构初始化完成
+2025-06-28 11:59:54,300 - services.mcp_server_launcher - DEBUG - [MCP启动器] 设置环境变量 SEARCH_TOOL_SERVER_PORT=8080 给 search_tool_server
+2025-06-28 11:59:54,300 - core.toolscore.tool_registry - INFO - Tool registry initialized
+2025-06-28 11:59:54,300 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用模块格式启动: python -m mcp_servers.search_tool_server.main
+2025-06-28 11:59:54,300 - core.llm_client - DEBUG - Enriched config with environment variables: ['provider', 'gemini_api_key', 'gemini_api_url']
+2025-06-28 11:59:54,300 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,303 - services.mcp_server_launcher - INFO - MCP服务器已启动: search_tool_server (PID: 77040)
+2025-06-28 11:59:54,303 - services.mcp_server_launcher - DEBUG - 🔍 开始检测 search_tool_server 就绪状态...
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - INFO - 正在启动MCP服务器: browser_use_server
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - DEBUG - [MCP启动器] 当前工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_name: browser_use_server
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_dir (绝对用于操作): /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/browser_use_server
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.exists(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/browser_use_server) = True
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.isdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/browser_use_server) = True
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.listdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/browser_use_server) contents: ['service.json', '__init__.py', '__pycache__', 'main.py']
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - INFO - [MCP启动器] 找到启动脚本: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/browser_use_server/main.py
+2025-06-28 11:59:54,317 - services.mcp_server_launcher - DEBUG - [MCP启动器] Setting PYTHONPATH for subprocess to: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,318 - services.mcp_server_launcher - INFO - [MCP启动器] 为 browser_use_server 使用配置文件指定端口: 8084
+2025-06-28 11:59:54,318 - services.mcp_server_launcher - INFO - [MCP启动器] 为 browser_use_server 使用配置文件指定端口: 8084
+2025-06-28 11:59:54,318 - services.mcp_server_launcher - DEBUG - [MCP启动器] 设置环境变量 BROWSER_USE_SERVER_PORT=8084 给 browser_use_server
+2025-06-28 11:59:54,318 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用模块格式启动: python -m mcp_servers.browser_use_server.main
+2025-06-28 11:59:54,318 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,322 - services.mcp_server_launcher - INFO - MCP服务器已启动: browser_use_server (PID: 77042)
+2025-06-28 11:59:54,322 - services.mcp_server_launcher - DEBUG - 🔍 开始检测 browser_use_server 就绪状态...
+2025-06-28 11:59:54,323 - services.mcp_server_launcher - INFO - 正在启动MCP服务器: deepsearch_server
+2025-06-28 11:59:54,323 - services.mcp_server_launcher - DEBUG - [MCP启动器] 当前工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,323 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_name: deepsearch_server
+2025-06-28 11:59:54,323 - services.mcp_server_launcher - DEBUG - [MCP启动器] server_dir (绝对用于操作): /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/deepsearch_server
+2025-06-28 11:59:54,323 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.exists(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/deepsearch_server) = True
+2025-06-28 11:59:54,323 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.path.isdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/deepsearch_server) = True
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - DEBUG - [MCP启动器] os.listdir(/Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/deepsearch_server) contents: ['config.py', 'deepsearch_tool.py', 'intelligent_cache.py', 'service.json', '__init__.py']
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - INFO - [MCP启动器] 找到启动脚本: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/mcp_servers/deepsearch_server/main.py
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - DEBUG - [MCP启动器] Setting PYTHONPATH for subprocess to: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - INFO - [MCP启动器] 为 deepsearch_server 使用配置文件指定端口: 8086
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - INFO - [MCP启动器] 为 deepsearch_server 使用配置文件指定端口: 8086
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - DEBUG - [MCP启动器] 设置环境变量 DEEPSEARCH_SERVER_PORT=8086 给 deepsearch_server
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用模块格式启动: python -m mcp_servers.deepsearch_server.main
+2025-06-28 11:59:54,324 - services.mcp_server_launcher - DEBUG - [MCP启动器] 使用工作目录: /Users/zhaoxiang/Documents/Datapresso/agent-data-platform
+2025-06-28 11:59:54,328 - services.mcp_server_launcher - INFO - MCP服务器已启动: deepsearch_server (PID: 77044)
+2025-06-28 11:59:54,329 - services.mcp_server_launcher - DEBUG - 🔍 开始检测 deepsearch_server 就绪状态...
+2025-06-28 11:59:54,329 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第1次, 5s间隔)
+2025-06-28 11:59:54,329 - core.monitoring.queue_monitor - INFO - 启动队列监控器...
+2025-06-28 11:59:54,332 - websockets.client - DEBUG - = connection is CONNECTING
+2025-06-28 11:59:54,332 - websockets.client - DEBUG - > GET / HTTP/1.1
+2025-06-28 11:59:54,332 - websockets.client - DEBUG - > Host: localhost:8080
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Upgrade: websocket
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Connection: Upgrade
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Sec-WebSocket-Key: pYIion8xZaOQSbOTsimIRg==
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Sec-WebSocket-Version: 13
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - = connection is CONNECTING
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > GET / HTTP/1.1
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Host: localhost:8084
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Upgrade: websocket
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Connection: Upgrade
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Sec-WebSocket-Key: tq4u3AgnzxFe8SeedZOapQ==
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Sec-WebSocket-Version: 13
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > EOF
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - < EOF
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - = connection is CLOSED
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - > EOF
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - < EOF
+2025-06-28 11:59:54,333 - websockets.client - DEBUG - = connection is CLOSED
+2025-06-28 11:59:54,335 - services.mcp_server_launcher - DEBUG - 📋 browser_use_server 端口 8084 尚未就绪
+2025-06-28 11:59:54,336 - services.mcp_server_launcher - DEBUG - 📋 search_tool_server 端口 8080 尚未就绪
+2025-06-28 11:59:54,337 - services.mcp_server_launcher - DEBUG - 📋 deepsearch_server 端口 8086 尚未就绪
+2025-06-28 11:59:54,350 - core.llm_client - INFO - Initialized LLM client with provider: gemini
+2025-06-28 11:59:54,350 - core.toolscore.tool_gap_detector - INFO - 智能工具缺口检测器初始化 - 统一版本
+2025-06-28 11:59:54,350 - core.toolscore.dynamic_mcp_manager - INFO - Dynamic MCP Manager initialized (ProcessRunner mode)
+2025-06-28 11:59:54,350 - core.toolscore.dynamic_mcp_manager - INFO - 启动动态MCP管理器...
+2025-06-28 11:59:54,351 - core.toolscore.dynamic_mcp_manager - INFO - 持久化配置为空，无需恢复外部MCP服务器
+2025-06-28 11:59:54,351 - core.toolscore.dynamic_mcp_manager - INFO - 动态MCP管理器启动完成
+2025-06-28 11:59:54,351 - core.toolscore.mcp_search_tool - INFO - ✅ MCP Search Tool initialized - 优化版本，包含失败工具跟踪
+2025-06-28 11:59:54,351 - core.toolscore.unified_tool_library - INFO - Tool library initialization completed - 核心管理器模式
+2025-06-28 11:59:54,351 - core.toolscore.mcp_server - INFO - [toolscore] UnifiedToolLibrary initialized.
+2025-06-28 11:59:54,351 - core.toolscore.mcp_server - INFO - [toolscore] Auto-registering MCP servers...
+2025-06-28 11:59:54,351 - core.toolscore.mcp_auto_registration - INFO - 🔍 开始自动发现和注册MCP服务器...
+2025-06-28 11:59:54,351 - core.toolscore.mcp_auto_registration - DEBUG - ⚠️ 服务器目录 __pycache__ 缺少 service.json
+2025-06-28 11:59:54,351 - core.toolscore.mcp_auto_registration - INFO - 🎯 发现 4 个MCP服务器
+2025-06-28 11:59:54,368 - core.unified_tool_manager - DEBUG - ✅ 配置验证通过
+2025-06-28 11:59:54,368 - core.unified_tool_manager - INFO - 🔄 成功加载工具配置: 4 个标准工具
+2025-06-28 11:59:54,368 - core.unified_tool_manager - DEBUG -    - 标准工具ID: ['browser_use', 'deepsearch', 'mcp-search-tool', 'microsandbox']
+2025-06-28 11:59:54,368 - core.unified_tool_manager - DEBUG -    - 兼容映射: 13 个变体
+2025-06-28 11:59:54,368 - core.unified_tool_manager - INFO - ✅ 统一工具管理器初始化完成，管理 4 个工具
+2025-06-28 11:59:54,368 - core.unified_tool_manager - DEBUG - 🎯 工具ID已是标准格式: mcp-search-tool
+2025-06-28 11:59:54,368 - core.toolscore.unified_tool_library - INFO - Registering external MCP server: Search Tool MCP Server (ID: mcp-search-tool)
+2025-06-28 11:59:54,368 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: Search Tool MCP Server (ID: mcp-search-tool)
+2025-06-28 11:59:54,368 - core.toolscore.unified_tool_library - INFO - Successfully registered external MCP server: Search Tool MCP Server
+2025-06-28 11:59:54,368 - core.toolscore.mcp_connector - INFO - MCPServerConnector initialized for ws://localhost:8080/websocket
+2025-06-28 11:59:54,368 - core.toolscore.mcp_connector - INFO - Registered MCP server mcp-search-tool at ws://localhost:8080/websocket
+2025-06-28 11:59:54,368 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: mcp-search-tool -> ws://localhost:8080/websocket
+2025-06-28 11:59:54,368 - core.toolscore.core_manager - INFO - 工具立即可用: mcp-search-tool
+2025-06-28 11:59:54,368 - core.toolscore.mcp_auto_registration - INFO - ✅ 成功注册MCP服务器: mcp-search-tool
+2025-06-28 11:59:54,368 - core.unified_tool_manager - DEBUG - 🎯 工具ID已是标准格式: microsandbox
+2025-06-28 11:59:54,368 - core.toolscore.unified_tool_library - INFO - Registering external MCP server: MicroSandbox MCP Server (ID: microsandbox)
+2025-06-28 11:59:54,368 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: MicroSandbox MCP Server (ID: microsandbox)
+2025-06-28 11:59:54,368 - core.toolscore.unified_tool_library - INFO - Successfully registered external MCP server: MicroSandbox MCP Server
+2025-06-28 11:59:54,368 - core.toolscore.mcp_connector - INFO - MCPServerConnector initialized for ws://localhost:8090/websocket
+2025-06-28 11:59:54,368 - core.toolscore.mcp_connector - INFO - Registered MCP server microsandbox at ws://localhost:8090/websocket
+2025-06-28 11:59:54,368 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: microsandbox -> ws://localhost:8090/websocket
+2025-06-28 11:59:54,368 - core.toolscore.core_manager - INFO - 工具立即可用: microsandbox
+2025-06-28 11:59:54,368 - core.toolscore.mcp_auto_registration - INFO - ✅ 成功注册MCP服务器: microsandbox
+2025-06-28 11:59:54,368 - core.unified_tool_manager - DEBUG - 🎯 工具ID已是标准格式: browser_use
+2025-06-28 11:59:54,368 - core.toolscore.unified_tool_library - INFO - Registering external MCP server: Browser Use MCP Server (ID: browser_use)
+2025-06-28 11:59:54,369 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: Browser Use MCP Server (ID: browser_use)
+2025-06-28 11:59:54,369 - core.toolscore.unified_tool_library - INFO - Successfully registered external MCP server: Browser Use MCP Server
+2025-06-28 11:59:54,369 - core.toolscore.mcp_connector - INFO - MCPServerConnector initialized for ws://localhost:8084/websocket
+2025-06-28 11:59:54,369 - core.toolscore.mcp_connector - INFO - Registered MCP server browser_use at ws://localhost:8084/websocket
+2025-06-28 11:59:54,369 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: browser_use -> ws://localhost:8084/websocket
+2025-06-28 11:59:54,369 - core.toolscore.core_manager - INFO - 工具立即可用: browser_use
+2025-06-28 11:59:54,369 - core.toolscore.mcp_auto_registration - INFO - ✅ 成功注册MCP服务器: browser_use
+2025-06-28 11:59:54,369 - core.unified_tool_manager - DEBUG - 🎯 工具ID已是标准格式: deepsearch
+2025-06-28 11:59:54,369 - core.toolscore.unified_tool_library - INFO - Registering external MCP server: DeepSearch MCP Server (ID: deepsearch)
+2025-06-28 11:59:54,369 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: DeepSearch MCP Server (ID: deepsearch)
+2025-06-28 11:59:54,369 - core.toolscore.unified_tool_library - INFO - Successfully registered external MCP server: DeepSearch MCP Server
+2025-06-28 11:59:54,369 - core.toolscore.mcp_connector - INFO - MCPServerConnector initialized for ws://localhost:8086/websocket
+2025-06-28 11:59:54,369 - core.toolscore.mcp_connector - INFO - Registered MCP server deepsearch at ws://localhost:8086/websocket
+2025-06-28 11:59:54,369 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: deepsearch -> ws://localhost:8086/websocket
+2025-06-28 11:59:54,369 - core.toolscore.core_manager - INFO - 工具立即可用: deepsearch
+2025-06-28 11:59:54,369 - core.toolscore.mcp_auto_registration - INFO - ✅ 成功注册MCP服务器: deepsearch
+2025-06-28 11:59:54,369 - core.toolscore.mcp_auto_registration - INFO - 📊 MCP服务器注册完成: 4/4 成功
+2025-06-28 11:59:54,369 - core.toolscore.mcp_server - INFO - [toolscore] All MCP servers registered successfully.
+2025-06-28 11:59:54,369 - core.toolscore.mcp_server - INFO - toolscore MCP Server started successfully on 0.0.0.0:8081 (Original endpoint: ws://0.0.0.0:8081/websocket) with ping_interval=30, ping_timeout=60
+2025-06-28 11:59:54,369 - core.toolscore.mcp_server - INFO - toolscore MCP Server started event set.
+2025-06-28 11:59:54,369 - core.toolscore.service_container.service_monitor - INFO - 🔄 开始服务监控循环，检查间隔: 30秒
+2025-06-28 11:59:54,387 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [browser_use] BrowserUse logging setup complete with level info
+2025-06-28 11:59:54,835 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [root] Anonymized telemetry enabled. See https://docs.browser-use.com/development/telemetry for more information.
+2025-06-28 11:59:54,900 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 11:59:54,900 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - = connection is CONNECTING
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > GET / HTTP/1.1
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > Host: localhost:8084
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > Upgrade: websocket
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > Connection: Upgrade
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > Sec-WebSocket-Key: TOQuUukortiHCRxCvWA+wQ==
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > Sec-WebSocket-Version: 13
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 11:59:54,938 - websockets.client - DEBUG - > User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - = connection is CONNECTING
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > GET / HTTP/1.1
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > Host: localhost:8080
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > Upgrade: websocket
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > Connection: Upgrade
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > Sec-WebSocket-Key: aImWk6CQYQebpzmkc9ibGg==
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > Sec-WebSocket-Version: 13
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > EOF
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < EOF
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - = connection is CLOSED
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < HTTP/1.1 101 Switching Protocols
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < Upgrade: websocket
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < Connection: Upgrade
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < Sec-WebSocket-Accept: +M/Le7xbuELPZJljqGJoVVdkxk8=
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < Date: Sat, 28 Jun 2025 03:59:54 GMT
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - < Server: Python/3.11 websockets/15.0.1
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - = connection is OPEN
+2025-06-28 11:59:54,939 - websockets.client - DEBUG - > TEXT '{"type": "ping"}' [16 bytes]
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - > CLOSE 1000 (OK) [2 bytes]
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - = connection is CLOSING
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - < TEXT '{"type": "error", "request_id": null, "message"...r role mismatch: ping"}' [102 bytes]
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - < CLOSE 1000 (OK) [2 bytes]
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - < EOF
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - > EOF
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - = connection is CLOSED
+2025-06-28 11:59:54,940 - websockets.client - DEBUG - x half-closing TCP connection
+2025-06-28 11:59:54,941 - services.mcp_server_launcher - DEBUG - ✅ search_tool_server 特定就绪检查通过
+2025-06-28 11:59:54,941 - services.mcp_server_launcher - INFO - ✅ search_tool_server 已就绪
+2025-06-28 11:59:54,941 - services.mcp_server_launcher - DEBUG - 📋 browser_use_server 端口 8084 尚未就绪
+2025-06-28 11:59:54,941 - services.mcp_server_launcher - DEBUG - ✅ deepsearch_server 端口 8086 可连接
+2025-06-28 11:59:54,941 - services.mcp_server_launcher - DEBUG - ✅ deepsearch_server 端口就绪检查通过
+2025-06-28 11:59:54,967 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.llm_client] Initialized LLM client with provider: gemini
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__] Browser-Use server initialized with LLM provider: gemini
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__] 使用动态分配端口: 8084
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__] BrowserUseMCPServer initialized:
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__]   Server Name: browser_use_server
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__]   Server ID: browser_use
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__]   Listen Host: 0.0.0.0
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__]   Listen Port: 8084
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__]   Public Endpoint: ws://localhost:8084
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__]   ToolScore Endpoint: ws://localhost:8081/websocket
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__] Starting browser_use_server...
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [__main__] Attempting to start MCPServer for browser_use_server at ws://localhost:8084...
+2025-06-28 11:59:54,968 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] Attempting to start browser_use_server MCP Server on localhost:8084
+2025-06-28 11:59:54,969 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] server listening on 127.0.0.1:8084
+2025-06-28 11:59:54,969 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] server listening on [::1]:8084
+2025-06-28 11:59:54,969 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] browser_use_server MCP Server started successfully on localhost:8084 (Original endpoint: ws://localhost:8084) with ping_interval=30, ping_timeout=60
+2025-06-28 11:59:54,969 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] Waiting 10 seconds for ToolScore server to fully start...
+2025-06-28 11:59:55,621 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 11:59:55,622 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - = connection is CONNECTING
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > GET / HTTP/1.1
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > Host: localhost:8084
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > Upgrade: websocket
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > Connection: Upgrade
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > Sec-WebSocket-Key: xUUjgG6yb0TaY8qH3SZnxw==
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > Sec-WebSocket-Version: 13
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - > User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 11:59:55,663 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection open
+2025-06-28 11:59:55,663 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] Client connected to browser_use_server MCP Server at path /: ('127.0.0.1', 50154)
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - < HTTP/1.1 101 Switching Protocols
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - < Upgrade: websocket
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - < Connection: Upgrade
+2025-06-28 11:59:55,663 - websockets.client - DEBUG - < Sec-WebSocket-Accept: mn++tsIs56csUetTErZxIteZpms=
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - < Date: Sat, 28 Jun 2025 03:59:55 GMT
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - < Server: Python/3.11 websockets/15.0.1
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - = connection is OPEN
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - > TEXT '{"type": "ping"}' [16 bytes]
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - > CLOSE 1000 (OK) [2 bytes]
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - = connection is CLOSING
+2025-06-28 11:59:55,664 - services.mcp_server_launcher - DEBUG - [browser_use_server] WARNING  [core.toolscore.mcp_server] Unknown request type or server role mismatch: ping
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - < TEXT '{"type": "error", "request_id": null, "message"...r role mismatch: ping"}' [102 bytes]
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - < CLOSE 1000 (OK) [2 bytes]
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - < EOF
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - > EOF
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - = connection is CLOSED
+2025-06-28 11:59:55,664 - websockets.client - DEBUG - x half-closing TCP connection
+2025-06-28 11:59:55,664 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 11:59:55,664 - services.mcp_server_launcher - DEBUG - ✅ browser_use_server 特定就绪检查通过
+2025-06-28 11:59:55,664 - services.mcp_server_launcher - INFO - ✅ browser_use_server 已就绪
+2025-06-28 11:59:55,942 - services.mcp_server_launcher - INFO - ✅ deepsearch_server 已就绪
+2025-06-28 11:59:56,487 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 11:59:56,487 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 11:59:57,525 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 11:59:57,525 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 11:59:58,771 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 11:59:58,771 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 11:59:59,330 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第2次, 5s间隔)
+2025-06-28 12:00:00,265 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:00,265 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:02,058 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:02,058 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:04,210 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:04,210 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:04,332 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第3次, 5s间隔)
+2025-06-28 12:00:04,490 - websockets.server - DEBUG - = connection is CONNECTING
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < GET /websocket HTTP/1.1
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < Host: localhost:8081
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < Upgrade: websocket
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < Connection: Upgrade
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < Sec-WebSocket-Key: mAL5s/N8PrHPdxKlY26ScQ==
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < Sec-WebSocket-Version: 13
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - > HTTP/1.1 101 Switching Protocols
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - > Upgrade: websocket
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - > Connection: Upgrade
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - > Sec-WebSocket-Accept: dtFUYEsCxIOnbRxPZAB+UXHHxnw=
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - > Date: Sat, 28 Jun 2025 04:00:04 GMT
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - > Server: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,491 - websockets.server - INFO - connection open
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - = connection is OPEN
+2025-06-28 12:00:04,491 - core.toolscore.mcp_server - INFO - Client connected to toolscore MCP Server at path /websocket: ('127.0.0.1', 50184)
+2025-06-28 12:00:04,491 - websockets.server - DEBUG - < TEXT '{"type": "register_tool", "request_id": "1d979a...onnection_params": {}}}' [2376 bytes]
+2025-06-28 12:00:04,492 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: search_tool_server (ID: mcp-search-tool)
+2025-06-28 12:00:04,492 - core.toolscore.unified_tool_library - INFO - Successfully registered MCP server to tool registry: search_tool_server
+2025-06-28 12:00:04,492 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: mcp-search-tool -> ws://localhost:8080/mcp
+2025-06-28 12:00:04,492 - core.toolscore.core_manager - INFO - 工具立即可用: mcp-search-tool
+2025-06-28 12:00:04,492 - websockets.server - DEBUG - > TEXT '{"type": "register_tool_response", "request_id"... true, "message": null}' [122 bytes]
+2025-06-28 12:00:04,492 - websockets.server - DEBUG - < CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,492 - websockets.server - DEBUG - = connection is CLOSING
+2025-06-28 12:00:04,492 - websockets.server - DEBUG - > CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,492 - websockets.server - DEBUG - x half-closing TCP connection
+2025-06-28 12:00:04,493 - websockets.server - DEBUG - = connection is CLOSED
+2025-06-28 12:00:04,493 - websockets.server - INFO - connection closed
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - = connection is CONNECTING
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < GET /websocket HTTP/1.1
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < Host: localhost:8081
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < Upgrade: websocket
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < Connection: Upgrade
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < Sec-WebSocket-Key: AVnvI1+ScAapbR1VQqg5BA==
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < Sec-WebSocket-Version: 13
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - < User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,603 - websockets.server - DEBUG - > HTTP/1.1 101 Switching Protocols
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - > Upgrade: websocket
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - > Connection: Upgrade
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - > Sec-WebSocket-Accept: p0PdiSn2JHCMnfJ928eGtLtFH9Q=
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - > Date: Sat, 28 Jun 2025 04:00:04 GMT
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - > Server: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,604 - websockets.server - INFO - connection open
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - = connection is OPEN
+2025-06-28 12:00:04,604 - core.toolscore.mcp_server - INFO - Client connected to toolscore MCP Server at path /websocket: ('127.0.0.1', 50186)
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - < TEXT '{"type": "register_tool", "request_id": "013fdc...onnection_params": {}}}' [3263 bytes]
+2025-06-28 12:00:04,604 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: microsandbox_server (ID: microsandbox)
+2025-06-28 12:00:04,604 - core.toolscore.unified_tool_library - INFO - Successfully registered MCP server to tool registry: microsandbox_server
+2025-06-28 12:00:04,604 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: microsandbox -> ws://localhost:8090
+2025-06-28 12:00:04,604 - core.toolscore.core_manager - INFO - 工具立即可用: microsandbox
+2025-06-28 12:00:04,604 - websockets.server - DEBUG - > TEXT '{"type": "register_tool_response", "request_id"... true, "message": null}' [122 bytes]
+2025-06-28 12:00:04,605 - websockets.server - DEBUG - < CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,605 - websockets.server - DEBUG - = connection is CLOSING
+2025-06-28 12:00:04,605 - websockets.server - DEBUG - > CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,605 - websockets.server - DEBUG - x half-closing TCP connection
+2025-06-28 12:00:04,605 - websockets.server - DEBUG - = connection is CLOSED
+2025-06-28 12:00:04,605 - websockets.server - INFO - connection closed
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - = connection is CONNECTING
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < GET /websocket HTTP/1.1
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < Host: localhost:8081
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < Upgrade: websocket
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < Connection: Upgrade
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < Sec-WebSocket-Key: 6/ABSd6lZz0sFkjAVWSX0A==
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < Sec-WebSocket-Version: 13
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - < User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - > HTTP/1.1 101 Switching Protocols
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - > Upgrade: websocket
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - > Connection: Upgrade
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - > Sec-WebSocket-Accept: pK0Wv9hiepkrY2eJ77JxTZE52vU=
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - > Date: Sat, 28 Jun 2025 04:00:04 GMT
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - > Server: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,662 - websockets.server - INFO - connection open
+2025-06-28 12:00:04,662 - websockets.server - DEBUG - = connection is OPEN
+2025-06-28 12:00:04,662 - core.toolscore.mcp_server - INFO - Client connected to toolscore MCP Server at path /websocket: ('127.0.0.1', 50188)
+2025-06-28 12:00:04,663 - websockets.server - DEBUG - < TEXT '{"type": "register_tool", "request_id": "efa4a8...onnection_params": {}}}' [2313 bytes]
+2025-06-28 12:00:04,663 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: deepsearch_server (ID: deepsearch)
+2025-06-28 12:00:04,663 - core.toolscore.unified_tool_library - INFO - Successfully registered MCP server to tool registry: deepsearch_server
+2025-06-28 12:00:04,663 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: deepsearch -> ws://localhost:8086/mcp
+2025-06-28 12:00:04,663 - core.toolscore.core_manager - INFO - 工具立即可用: deepsearch
+2025-06-28 12:00:04,663 - websockets.server - DEBUG - > TEXT '{"type": "register_tool_response", "request_id"... true, "message": null}' [122 bytes]
+2025-06-28 12:00:04,663 - websockets.server - DEBUG - < CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,663 - websockets.server - DEBUG - = connection is CLOSING
+2025-06-28 12:00:04,663 - websockets.server - DEBUG - > CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,663 - websockets.server - DEBUG - x half-closing TCP connection
+2025-06-28 12:00:04,664 - websockets.server - DEBUG - = connection is CLOSED
+2025-06-28 12:00:04,664 - websockets.server - INFO - connection closed
+2025-06-28 12:00:04,970 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] [browser_use_server] Attempting to connect to toolscore at ws://localhost:8081/websocket for registration...
+2025-06-28 12:00:04,971 - websockets.server - DEBUG - = connection is CONNECTING
+2025-06-28 12:00:04,971 - websockets.server - DEBUG - < GET /websocket HTTP/1.1
+2025-06-28 12:00:04,971 - websockets.server - DEBUG - < Host: localhost:8081
+2025-06-28 12:00:04,971 - websockets.server - DEBUG - < Upgrade: websocket
+2025-06-28 12:00:04,971 - websockets.server - DEBUG - < Connection: Upgrade
+2025-06-28 12:00:04,971 - websockets.server - DEBUG - < Sec-WebSocket-Key: sv2GNGoyL1RFV6NFgKlB9Q==
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - < Sec-WebSocket-Version: 13
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - < User-Agent: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - > HTTP/1.1 101 Switching Protocols
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - > Upgrade: websocket
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - > Connection: Upgrade
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - > Sec-WebSocket-Accept: o4DYEvHUZTrqUKbjw7MvTYg6FIw=
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - > Date: Sat, 28 Jun 2025 04:00:04 GMT
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - > Server: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:04,972 - websockets.server - INFO - connection open
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - = connection is OPEN
+2025-06-28 12:00:04,972 - core.toolscore.mcp_server - INFO - Client connected to toolscore MCP Server at path /websocket: ('127.0.0.1', 50190)
+2025-06-28 12:00:04,972 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] [browser_use_server] Connected to toolscore at ws://localhost:8081/websocket
+2025-06-28 12:00:04,972 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] [browser_use_server] Sending registration request to toolscore: {"type": "register_tool", "request_id": "d456b4d3-c493-4c74-b831-951a83752542", "tool_spec": {"tool_id": "browser_use", "name": "browser_use_server", "description": "\u57fa\u4e8eBrowser-Use\u7684AI\u6d4f\u89c8\u5668\u81ea\u52a8\u5316\u670d\u52a1\u5668\uff0c\u5b8c\u6574\u5b9e\u73b0browser-use\u7684\u6240\u6709\u529f\u80fd", "tool_type": "mcp_server", "capabilities": [{"name": "browser_use_execute_task", "description": "\u4f7f\u7528AI\u6267\u884c\u590d\u6742\u7684\u6d4f\u89c8\u5668\u4efb\u52a1\uff0c\u652f\u6301\u81ea\u7136\u8bed\u8a00\u63cf\u8ff0", "parameters": {"task": {"type": "string", "description": "\u8981\u6267\u884c\u7684\u4efb\u52a1\u63cf\u8ff0\uff0c\u4f7f\u7528\u81ea\u7136\u8bed\u8a00", "required": true}, "max_steps": {"type": "integer", "description": "\u6700\u5927\u6267\u884c\u6b65\u9aa4\u6570\uff0c\u9ed8\u8ba450", "required": false}, "use_vision": {"type": "boolean", "description": "\u662f\u5426\u4f7f\u7528\u89c6\u89c9\u7406\u89e3\uff0c\u9ed8\u8ba4true", "required": false}}, "examples": [{"task": "\u641c\u7d22Python\u6559\u7a0b\u5e76\u6253\u5f00\u7b2c\u4e00\u4e2a\u7ed3\u679c"}, {"task": "\u5728GitHub\u4e0a\u641c\u7d22browser-use\u9879\u76ee\u5e76\u67e5\u770bREADME"}, {"task": "\u767b\u5f55\u7f51\u7ad9\u5e76\u586b\u5199\u8868\u5355", "use_vision": true}], "category": "general"}, {"name": "browser_navigate", "description": "\u5bfc\u822a\u5230\u6307\u5b9a\u7f51\u5740", "parameters": {"url": {"type": "string", "description": "\u8981\u8bbf\u95ee\u7684URL\u5730\u5740", "required": true}}, "examples": [{"url": "https://www.google.com"}, {"url": "https://github.com"}], "category": "general"}, {"name": "browser_search_google", "description": "\u5728Google\u4e2d\u641c\u7d22\u6307\u5b9a\u67e5\u8be2", "parameters": {"query": {"type": "string", "description": "\u641c\u7d22\u67e5\u8be2\u8bcd", "required": true}}, "examples": [{"query": "Python machine learning tutorial"}, {"query": "browser automation tools"}], "category": "general"}, {"name": "browser_go_back", "description": "\u8fd4\u56de\u4e0a\u4e00\u9875", "parameters": {}, "examples": [{}], "category": "general"}, {"name": "browser_click_element", "description": "\u901a\u8fc7\u7d22\u5f15\u70b9\u51fb\u9875\u9762\u5143\u7d20", "parameters": {"index": {"type": "integer", "description": "\u8981\u70b9\u51fb\u7684\u5143\u7d20\u7d22\u5f15", "required": true}}, "examples": [{"index": 1}, {"index": 5}], "category": "general"}, {"name": "browser_input_text", "description": "\u5728\u6307\u5b9a\u5143\u7d20\u4e2d\u8f93\u5165\u6587\u672c", "parameters": {"index": {"type": "integer", "description": "\u8981\u8f93\u5165\u6587\u672c\u7684\u5143\u7d20\u7d22\u5f15", "required": true}, "text": {"type": "string", "description": "\u8981\u8f93\u5165\u7684\u6587\u672c", "required": true}}, "examples": [{"index": 2, "text": "hello world"}, {"index": 0, "text": "test@example.com"}], "category": "general"}, {"name": "browser_send_keys", "description": "\u53d1\u9001\u7279\u6b8a\u952e\u6216\u5feb\u6377\u952e", "parameters": {"keys": {"type": "string", "description": "\u8981\u53d1\u9001\u7684\u952e\uff0c\u5982Enter\u3001Escape\u3001Control+c\u7b49", "required": true}}, "examples": [{"keys": "Enter"}, {"keys": "Control+c"}, {"keys": "Escape"}], "category": "general"}, {"name": "browser_scroll_down", "description": "\u5411\u4e0b\u6eda\u52a8\u9875\u9762", "parameters": {"amount": {"type": "integer", "description": "\u6eda\u52a8\u50cf\u7d20\u6570\uff0c\u4e0d\u6307\u5b9a\u5219\u6eda\u52a8\u4e00\u9875", "required": false}}, "examples": [{}, {"amount": 500}], "category": "general"}, {"name": "browser_scroll_up", "description": "\u5411\u4e0a\u6eda\u52a8\u9875\u9762", "parameters": {"amount": {"type": "integer", "description": "\u6eda\u52a8\u50cf\u7d20\u6570\uff0c\u4e0d\u6307\u5b9a\u5219\u6eda\u52a8\u4e00\u9875", "required": false}}, "examples": [{}, {"amount": 300}], "category": "general"}, {"name": "browser_scroll_to_text", "description": "\u6eda\u52a8\u5230\u5305\u542b\u6307\u5b9a\u6587\u672c\u7684\u5143\u7d20", "parameters": {"text": {"type": "string", "description": "\u8981\u6eda\u52a8\u5230\u7684\u6587\u672c\u5185\u5bb9", "required": true}}, "examples": [{"text": "Sign up"}, {"text": "Contact us"}], "category": "general"}, {"name": "browser_switch_tab", "description": "\u5207\u6362\u5230\u6307\u5b9a\u6807\u7b7e", "parameters": {"page_id": {"type": "integer", "description": "\u8981\u5207\u6362\u5230\u7684\u6807\u7b7eID", "required": true}}, "examples": [{"page_id": 0}, {"page_id": 1}], "category": "general"}, {"name": "browser_open_tab", "description": "\u5728\u65b0\u6807\u7b7e\u4e2d\u6253\u5f00URL", "parameters": {"url": {"type": "string", "description": "\u8981\u5728\u65b0\u6807\u7b7e\u4e2d\u6253\u5f00\u7684URL", "required": true}}, "examples": [{"url": "https://www.example.com"}], "category": "general"}, {"name": "browser_close_tab", "description": "\u5173\u95ed\u6307\u5b9a\u6807\u7b7e", "parameters": {"page_id": {"type": "integer", "description": "\u8981\u5173\u95ed\u7684\u6807\u7b7eID", "required": true}}, "examples": [{"page_id": 1}], "category": "general"}, {"name": "browser_extract_content", "description": "\u4ece\u9875\u9762\u63d0\u53d6\u7279\u5b9a\u5185\u5bb9", "parameters": {"goal": {"type": "string", "description": "\u63d0\u53d6\u76ee\u6807\u63cf\u8ff0", "required": true}, "include_links": {"type": "boolean", "description": "\u662f\u5426\u5305\u542b\u94fe\u63a5\uff0c\u9ed8\u8ba4false", "required": false}}, "examples": [{"goal": "\u63d0\u53d6\u6240\u6709\u516c\u53f8\u540d\u79f0"}, {"goal": "\u83b7\u53d6\u4ea7\u54c1\u4ef7\u683c\u4fe1\u606f", "include_links": true}], "category": "general"}, {"name": "browser_get_content", "description": "\u83b7\u53d6\u9875\u9762\u5185\u5bb9", "parameters": {"selector": {"type": "string", "description": "CSS\u9009\u62e9\u5668\uff0c\u7a7a\u5219\u83b7\u53d6\u5168\u90e8\u5185\u5bb9", "required": false}}, "examples": [{"selector": "h1, p"}, {}], "category": "general"}, {"name": "browser_get_ax_tree", "description": "\u83b7\u53d6\u9875\u9762\u7684\u53ef\u8bbf\u95ee\u6027\u6811\u7ed3\u6784", "parameters": {"number_of_elements": {"type": "integer", "description": "\u8fd4\u56de\u7684\u5143\u7d20\u6570\u91cf", "required": true}}, "examples": [{"number_of_elements": 50}], "category": "general"}, {"name": "browser_get_dropdown_options", "description": "\u83b7\u53d6\u4e0b\u62c9\u83dc\u5355\u7684\u6240\u6709\u9009\u9879", "parameters": {"index": {"type": "integer", "description": "\u4e0b\u62c9\u83dc\u5355\u5143\u7d20\u7684\u7d22\u5f15", "required": true}}, "examples": [{"index": 3}], "category": "general"}, {"name": "browser_select_dropdown_option", "description": "\u9009\u62e9\u4e0b\u62c9\u83dc\u5355\u4e2d\u7684\u9009\u9879", "parameters": {"index": {"type": "integer", "description": "\u4e0b\u62c9\u83dc\u5355\u5143\u7d20\u7684\u7d22\u5f15", "required": true}, "text": {"type": "string", "description": "\u8981\u9009\u62e9\u7684\u9009\u9879\u6587\u672c", "required": true}}, "examples": [{"index": 3, "text": "Option 1"}], "category": "general"}, {"name": "browser_drag_drop", "description": "\u6267\u884c\u62d6\u62fd\u64cd\u4f5c", "parameters": {"element_source": {"type": "string", "description": "\u6e90\u5143\u7d20\u9009\u62e9\u5668", "required": false}, "element_target": {"type": "string", "description": "\u76ee\u6807\u5143\u7d20\u9009\u62e9\u5668", "required": false}, "coord_source_x": {"type": "integer", "description": "\u6e90\u5750\u6807X", "required": false}, "coord_source_y": {"type": "integer", "description": "\u6e90\u5750\u6807Y", "required": false}, "coord_target_x": {"type": "integer", "description": "\u76ee\u6807\u5750\u6807X", "required": false}, "coord_target_y": {"type": "integer", "description": "\u76ee\u6807\u5750\u6807Y", "required": false}, "steps": {"type": "integer", "description": "\u62d6\u62fd\u6b65\u9aa4\u6570\uff0c\u9ed8\u8ba410", "required": false}}, "examples": [{"element_source": ".item1", "element_target": ".dropzone"}], "category": "general"}, {"name": "browser_save_pdf", "description": "\u5c06\u5f53\u524d\u9875\u9762\u4fdd\u5b58\u4e3aPDF", "parameters": {}, "examples": [{}], "category": "general"}, {"name": "browser_screenshot", "description": "\u622a\u53d6\u5f53\u524d\u9875\u9762\u622a\u56fe", "parameters": {"filename": {"type": "string", "description": "\u622a\u56fe\u6587\u4ef6\u540d\uff0c\u53ef\u9009", "required": false}}, "examples": [{"filename": "current_page.png"}, {}], "category": "general"}, {"name": "browser_wait", "description": "\u7b49\u5f85\u6307\u5b9a\u79d2\u6570", "parameters": {"seconds": {"type": "number", "description": "\u7b49\u5f85\u7684\u79d2\u6570\uff0c\u9ed8\u8ba43", "required": false}}, "examples": [{"seconds": 5}, {}], "category": "general"}, {"name": "browser_done", "description": "\u6807\u8bb0\u4efb\u52a1\u5b8c\u6210", "parameters": {"text": {"type": "string", "description": "\u5b8c\u6210\u63cf\u8ff0", "required": true}, "success": {"type": "boolean", "description": "\u662f\u5426\u6210\u529f\u5b8c\u6210", "required": true}}, "examples": [{"text": "\u4efb\u52a1\u5df2\u5b8c\u6210", "success": true}], "category": "general"}, {"name": "browser_get_page_info", "description": "\u83b7\u53d6\u5f53\u524d\u9875\u9762\u4fe1\u606f", "parameters": {}, "examples": [{}], "category": "general"}, {"name": "browser_get_current_url", "description": "\u83b7\u53d6\u5f53\u524d\u9875\u9762URL", "parameters": {}, "examples": [{}], "category": "general"}, {"name": "browser_close_session", "description": "\u5173\u95ed\u6d4f\u89c8\u5668\u4f1a\u8bdd", "parameters": {}, "examples": [{}], "category": "general"}], "endpoint": "ws://localhost:8084", "connection_params": {}}}
+2025-06-28 12:00:04,972 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] [browser_use_server] Waiting for registration response from toolscore...
+2025-06-28 12:00:04,972 - websockets.server - DEBUG - < TEXT '{"type": "register_tool", "request_id": "d456b4...onnection_params": {}}}' [9625 bytes]
+2025-06-28 12:00:04,973 - core.toolscore.tool_registry - INFO - Successfully registered MCP Server: browser_use_server (ID: browser_use)
+2025-06-28 12:00:04,973 - core.toolscore.unified_tool_library - INFO - Successfully registered MCP server to tool registry: browser_use_server
+2025-06-28 12:00:04,973 - core.toolscore.unified_tool_library - INFO - Registered MCP server connection: browser_use -> ws://localhost:8084
+2025-06-28 12:00:04,973 - core.toolscore.core_manager - INFO - 工具立即可用: browser_use
+2025-06-28 12:00:04,973 - websockets.server - DEBUG - > TEXT '{"type": "register_tool_response", "request_id"... true, "message": null}' [122 bytes]
+2025-06-28 12:00:04,973 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] [browser_use_server] Received registration response: {"type": "register_tool_response", "request_id": "d456b4d3-c493-4c74-b831-951a83752542", "success": true, "message": null}
+2025-06-28 12:00:04,973 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [core.toolscore.mcp_server] [browser_use_server] Successfully registered with toolscore.
+2025-06-28 12:00:04,973 - websockets.server - DEBUG - < CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,973 - websockets.server - DEBUG - = connection is CLOSING
+2025-06-28 12:00:04,973 - websockets.server - DEBUG - > CLOSE 1000 (OK) [2 bytes]
+2025-06-28 12:00:04,973 - websockets.server - DEBUG - x half-closing TCP connection
+2025-06-28 12:00:04,973 - websockets.server - DEBUG - = connection is CLOSED
+2025-06-28 12:00:04,973 - websockets.server - INFO - connection closed
+2025-06-28 12:00:06,791 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:06,791 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:09,333 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第4次, 5s间隔)
+2025-06-28 12:00:09,793 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:09,793 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:12,794 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:12,794 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:14,334 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第5次, 5s间隔)
+2025-06-28 12:00:15,795 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:15,795 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:18,796 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:18,797 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:19,335 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第6次, 5s间隔)
+2025-06-28 12:00:21,798 - services.mcp_server_launcher - DEBUG - `microsandbox_server` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.
+2025-06-28 12:00:21,798 - services.mcp_server_launcher - DEBUG - 📋 microsandbox_server 没有配置端口，跳过端口检查
+2025-06-28 12:00:24,308 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:00:24,324 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:00:24,324 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:00:24,324 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:00:24,332 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:00:24,337 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第7次, 5s间隔)
+2025-06-28 12:00:24,799 - services.mcp_server_launcher - DEBUG - ⏱️ microsandbox_server 就绪检测超时 (30秒)
+2025-06-28 12:00:24,800 - services.mcp_server_launcher - WARNING - ⚠️ microsandbox_server 启动超时，但进程仍在运行，可能需要更多时间
+2025-06-28 12:00:24,800 - services.mcp_server_launcher - INFO - ✅ 成功启动 4/4 个MCP服务器: ['microsandbox_server', 'search_tool_server', 'browser_use_server', 'deepsearch_server']
+2025-06-28 12:00:24,800 - services.service_manager - INFO - 启动服务: task_api
+2025-06-28 12:00:24,800 - services.task_api_service - INFO - 正在启动任务API服务...
+2025-06-28 12:00:24,810 - services.task_api_service - INFO - 任务API服务已启动于 0.0.0.0:8000
+2025-06-28 12:00:24,810 - services.service_manager - INFO - 启动服务: runtime
+2025-06-28 12:00:24,810 - services.runtime_service - INFO - 正在启动推理运行时服务...
+2025-06-28 12:00:24,810 - services.service_manager - INFO - 启动服务: synthesis
+2025-06-28 12:00:24,811 - services.synthesis_service - INFO - 正在启动合成服务...
+2025-06-28 12:00:24,811 - services.synthesis_service - INFO - 合成服务工作线程已启动
+2025-06-28 12:00:24,811 - services.synthesis_service - INFO - SynthesisCore v2.0监控器工作线程已启动
+2025-06-28 12:00:24,811 - services.synthesis_service - INFO - 开始处理轨迹数据...
+2025-06-28 12:00:24,811 - services.synthesis_service - INFO - 🚀 启动SynthesisCore v2.0监控器
+2025-06-28 12:00:24,811 - asyncio - DEBUG - Using selector: KqueueSelector
+2025-06-28 12:00:24,811 - asyncio - DEBUG - Using selector: KqueueSelector
+2025-06-28 12:00:24,811 - services.synthesis_service - INFO - 合成服务已启动
+2025-06-28 12:00:24,811 - services.service_manager - INFO - 所有服务已启动
+2025-06-28 12:00:24,811 - __main__ - DEBUG - ✅ 所有服务启动完成
+2025-06-28 12:00:24,811 - core.synthesiscore.synthesis - INFO - 🔄 Processing only unprocessed trajectories...
+2025-06-28 12:00:24,811 - __main__ - INFO - 🎉 所有服务已启动，系统运行中...
+2025-06-28 12:00:24,811 - __main__ - INFO - 📊 系统状态监控已启用，按 Ctrl+C 停止
+2025-06-28 12:00:24,811 - services.runtime_service - INFO - 启动运行时实例: enhanced-reasoning-1
+2025-06-28 12:00:24,812 - runtimes.reasoning.enhanced_runtime - INFO - 🚀 初始化Enhanced Reasoning Runtime - 简化版本
+2025-06-28 12:00:24,812 - core.llm.response_parsers.reasoning_response_parser - DEBUG - ✅ 响应解析器已连接工具Schema管理器
+2025-06-28 12:00:24,812 - runtimes.reasoning.enhanced_runtime - INFO - ✅ 工具Schema管理器已注入到响应解析器
+2025-06-28 12:00:24,812 - asyncio - DEBUG - Using selector: KqueueSelector
+2025-06-28 12:00:24,812 - runtimes.reasoning.enhanced_runtime - INFO - ⏳ 等待ToolScore服务就绪...
+2025-06-28 12:00:24,812 - core.synthesiscore.synthesis - INFO - 🎯 Unprocessed trajectories completed: 0 new trajectories processed
+2025-06-28 12:00:24,812 - services.synthesis_service - DEBUG - 等待 300 秒后再次处理...
+2025-06-28 12:00:24,813 - core.synthesiscore.enhanced_redis_manager - INFO - ✅ Redis连接初始化成功
+2025-06-28 12:00:24,813 - core.synthesiscore.enhanced_redis_manager - DEBUG - ⚠️ 消费者组已存在: synthesis:v2:corpus_queue
+2025-06-28 12:00:24,813 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:24 +0800] "GET /health HTTP/1.1" 200 231 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:24,813 - runtimes.reasoning.toolscore_client - INFO - ✅ ToolScore服务已就绪
+2025-06-28 12:00:24,814 - core.synthesiscore.enhanced_redis_manager - DEBUG - ⚠️ 消费者组已存在: synthesis:v2:atomic_tasks
+2025-06-28 12:00:24,814 - runtimes.reasoning.enhanced_runtime - INFO - ✅ ToolScore HTTP服务已就绪
+2025-06-28 12:00:24,814 - runtimes.reasoning.enhanced_runtime - INFO - 🔌 正在连接WebSocket端点: ws://localhost:8081/websocket
+2025-06-28 12:00:24,814 - core.synthesiscore.enhanced_redis_manager - DEBUG - ⚠️ 消费者组已存在: synthesis:v2:extended_tasks
+2025-06-28 12:00:24,814 - runtimes.reasoning.real_time_tool_client - INFO - 🔌 连接到ToolScore实时更新: ws://localhost:8081/websocket
+2025-06-28 12:00:24,814 - core.synthesiscore.enhanced_redis_manager - DEBUG - ⚠️ 消费者组已存在: synthesis:v2:verification_queue
+2025-06-28 12:00:24,815 - core.synthesiscore.enhanced_redis_manager - DEBUG - ⚠️ 消费者组已存在: synthesis:v2:training_data
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - = connection is CONNECTING
+2025-06-28 12:00:24,815 - core.synthesiscore.enhanced_redis_manager - DEBUG - ⚠️ 消费者组已存在: synthesis:v2:quality_reports
+2025-06-28 12:00:24,815 - websockets.server - DEBUG - = connection is CONNECTING
+2025-06-28 12:00:24,815 - core.synthesiscore.enhanced_redis_manager - INFO - ✅ Redis配置键初始化完成
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - > GET /websocket HTTP/1.1
+2025-06-28 12:00:24,815 - core.synthesiscore.enhanced_redis_manager - INFO - ✅ 增强合成Redis管理器初始化完成
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - > Host: localhost:8081
+2025-06-28 12:00:24,815 - core.synthesiscore.enhanced_synthesis_engine - INFO - ✅ Enhanced Synthesis Engine 初始化完成
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - > Upgrade: websocket
+2025-06-28 12:00:24,815 - core.synthesiscore.enhanced_synthesis_engine - INFO - 🚀 SynthesisCore v2.0 已启动
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - > Connection: Upgrade
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - > Sec-WebSocket-Key: uQmQ/ehszedRNIpXuh6Yzg==
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - > Sec-WebSocket-Version: 13
+2025-06-28 12:00:24,815 - websockets.client - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 12:00:24,816 - websockets.client - DEBUG - > User-Agent: Enhanced-Reasoning-Runtime/1.0
+2025-06-28 12:00:24,816 - core.synthesiscore.trajectory_monitor - INFO - 🔄 检查并处理现有轨迹...
+2025-06-28 12:00:24,816 - core.synthesiscore.trajectory_monitor - INFO - 📝 没有现有轨迹文件
+2025-06-28 12:00:24,816 - websockets.server - DEBUG - < GET /websocket HTTP/1.1
+2025-06-28 12:00:24,816 - core.synthesiscore.trajectory_monitor - INFO - ✅ TrajectoryMonitor初始化完成
+2025-06-28 12:00:24,816 - websockets.server - DEBUG - < Host: localhost:8081
+2025-06-28 12:00:24,816 - core.synthesiscore.trajectory_monitor - DEBUG - ✅ 获取主事件循环引用成功
+2025-06-28 12:00:24,816 - websockets.server - DEBUG - < Upgrade: websocket
+2025-06-28 12:00:24,816 - websockets.server - DEBUG - < Connection: Upgrade
+2025-06-28 12:00:24,816 - websockets.server - DEBUG - < Sec-WebSocket-Key: uQmQ/ehszedRNIpXuh6Yzg==
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - < Sec-WebSocket-Version: 13
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2025-06-28 12:00:24,818 - core.synthesiscore.trajectory_monitor - INFO - 👁️ 开始监控轨迹文件变化: output/trajectories
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - < User-Agent: Enhanced-Reasoning-Runtime/1.0
+2025-06-28 12:00:24,818 - services.synthesis_service - INFO - ✅ SynthesisCore v2.0监控器已启动
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - > HTTP/1.1 101 Switching Protocols
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - > Upgrade: websocket
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - > Connection: Upgrade
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - > Sec-WebSocket-Accept: P5ksiyMPQBBhTjWHsxTcui9Ou2w=
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - > Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+INFO:     Started server process [76995]
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - > Date: Sat, 28 Jun 2025 04:00:24 GMT
+INFO:     Waiting for application startup.
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - > Server: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:24,818 - websockets.server - INFO - connection open
+2025-06-28 12:00:24,818 - websockets.client - DEBUG - < HTTP/1.1 101 Switching Protocols
+2025-06-28 12:00:24,818 - websockets.server - DEBUG - = connection is OPEN
+2025-06-28 12:00:24,818 - websockets.client - DEBUG - < Upgrade: websocket
+2025-06-28 12:00:24,819 - core.toolscore.mcp_server - INFO - Client connected to toolscore MCP Server at path /websocket: ('127.0.0.1', 50214)
+2025-06-28 12:00:24,819 - websockets.client - DEBUG - < Connection: Upgrade
+2025-06-28 12:00:24,819 - websockets.client - DEBUG - < Sec-WebSocket-Accept: P5ksiyMPQBBhTjWHsxTcui9Ou2w=
+2025-06-28 12:00:24,819 - websockets.client - DEBUG - < Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+2025-06-28 12:00:24,819 - websockets.client - DEBUG - < Date: Sat, 28 Jun 2025 04:00:24 GMT
+2025-06-28 12:00:24,819 - websockets.client - DEBUG - < Server: Python/3.11 websockets/15.0.1
+2025-06-28 12:00:24,819 - websockets.client - DEBUG - = connection is OPEN
+2025-06-28 12:00:24,819 - runtimes.reasoning.real_time_tool_client - INFO - ✅ 已连接到ToolScore实时更新流
+2025-06-28 12:00:24,819 - runtimes.reasoning.enhanced_runtime - INFO - ✅ WebSocket实时更新连接成功
+2025-06-28 12:00:24,819 - runtimes.reasoning.real_time_tool_client - DEBUG - 已注册工具更新回调，当前回调数量: 1
+2025-06-28 12:00:24,819 - runtimes.reasoning.enhanced_runtime - INFO - 🚀 启动背景工具健康监控...
+2025-06-28 12:00:24,819 - core.toolscore.async_tool_state_manager - INFO - Started background tool health monitoring
+2025-06-28 12:00:24,819 - runtimes.reasoning.enhanced_runtime - INFO - ✅ 工具状态管理器已启动，将在后台持续监控工具健康状态
+2025-06-28 12:00:24,819 - runtimes.reasoning.enhanced_runtime - INFO - 🔍 开始MCP服务器同步验证...
+2025-06-28 12:00:24,819 - core.tool_schema_manager - INFO - 正在执行MCP同步验证...
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔄 开始刷新Schema缓存 (force=False)，当前缓存: 0 个工具
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔍 开始安全Schema刷新...
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具注册表中发现 4 个工具
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 deepsearch 版本 8174ce27
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 microsandbox 版本 33c2a85a
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 browser_use 版本 998559b7
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 mcp-search-tool 版本 4f907873
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 📋 获取到 4 个工具版本信息
+2025-06-28 12:00:24,819 - core.tool_schema_manager - INFO - 🔄 检测到 4 个工具需要更新: ['deepsearch', 'microsandbox', 'browser_use', 'mcp-search-tool']
+2025-06-28 12:00:24,819 - core.tool_schema_manager - INFO - 🔄 执行增量更新: 4 个工具
+2025-06-28 12:00:24,819 - core.tool_schema_manager - INFO - 🔄 缓存为空，转为全量刷新模式
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔄 开始增强刷新工具Schemas...
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG - 🔍 工具注册表状态检查: _tools 字典包含 4 个条目
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: deepsearch
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: microsandbox
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: browser_use
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: mcp-search-tool
+2025-06-28 12:00:24,819 - core.tool_schema_manager - INFO - 🔧 选项1: 从工具注册表获取到 4 个工具
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG -   工具 0: id=deepsearch, name=网络信息研究工具, actions=3
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG -   工具 1: id=microsandbox, name=MicroSandbox安全代码执行器, actions=7
+2025-06-28 12:00:24,819 - core.tool_schema_manager - DEBUG -   工具 2: id=browser_use, name=智能浏览器操作工具, actions=6
+2025-06-28 12:00:24,820 - core.tool_schema_manager - DEBUG -   工具 3: id=mcp-search-tool, name=工具管理和项目文件搜索器, actions=4
+2025-06-28 12:00:24,820 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: deepsearch
+2025-06-28 12:00:24,820 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: comprehensive_research
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: quick_research
+2025-06-28 12:00:24,821 - core.task_api - INFO - Connected to Redis: redis://localhost:6379
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: research
+INFO:     Application startup complete.
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 deepsearch (包含 3 个动作)
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG -    当前缓存大小: 1 个工具
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: microsandbox
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_cleanup_expired
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_close_session
+2025-06-28 12:00:24,821 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_execute
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_get_health_status
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_get_performance_stats
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_install_package
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_list_sessions
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 microsandbox (包含 7 个动作)
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -    当前缓存大小: 2 个工具
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: browser_use
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_click_element
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_use_execute_task
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_extract_content
+2025-06-28 12:00:24,822 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_input_text
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_navigate
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_search_google
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 browser_use (包含 6 个动作)
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -    当前缓存大小: 3 个工具
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: mcp-search-tool
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: analyze_tool_needs
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: list_code_definitions
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: search_and_install_tools
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: search_file_content
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 mcp-search-tool (包含 4 个动作)
+2025-06-28 12:00:24,823 - core.tool_schema_manager - DEBUG -    当前缓存大小: 4 个工具
+2025-06-28 12:00:24,823 - core.tool_schema_manager - INFO - 🔧 选项1: 成功处理 4/4 个工具，当前缓存 4 个工具
+2025-06-28 12:00:24,824 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: mcp-search-tool
+2025-06-28 12:00:24,824 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: microsandbox
+2025-06-28 12:00:24,824 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: browser_use
+2025-06-28 12:00:24,824 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: deepsearch
+2025-06-28 12:00:24,824 - core.tool_schema_manager - INFO - ✅ 增强刷新完成，当前可用工具: 4个
+2025-06-28 12:00:24,824 - core.toolscore.async_tool_state_manager - INFO - Starting background tool health monitoring loop
+2025-06-28 12:00:24,825 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/search_tool_server/service.json
+2025-06-28 12:00:24,825 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:24 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:24,825 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/microsandbox_server/service.json
+2025-06-28 12:00:24,826 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/browser_use_server/service.json
+2025-06-28 12:00:24,826 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/deepsearch_server/service.json
+2025-06-28 12:00:24,826 - core.tool_schema_manager - INFO - ✅ Schema安全刷新完成，备份 4 个工具
+2025-06-28 12:00:24,826 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/search_tool_server/service.json
+2025-06-28 12:00:24,826 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/microsandbox_server/service.json
+2025-06-28 12:00:24,826 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/browser_use_server/service.json
+2025-06-28 12:00:24,827 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/deepsearch_server/service.json
+2025-06-28 12:00:24,827 - core.tool_schema_manager - DEBUG - 🔍 结构验证完成: 4/4 个Schema有效
+2025-06-28 12:00:24,827 - core.tool_schema_manager - INFO - ✅ Schema刷新成功，缓存 4 个工具
+2025-06-28 12:00:24,827 - core.tool_schema_manager - INFO - 🔍 同步验证完成: unhealthy (0/4 工具Schema一致)
+2025-06-28 12:00:24,827 - runtimes.reasoning.enhanced_runtime - ERROR - ❌ MCP服务器同步验证失败: 未知错误
+2025-06-28 12:00:24,827 - runtimes.reasoning.enhanced_runtime - DEBUG - 🔧 开始获取可用工具ID列表...
+2025-06-28 12:00:24,827 - runtimes.reasoning.real_time_tool_client - DEBUG - 可用工具ID列表: ['deepsearch', 'browser_use', 'mcp-search-tool', 'microsandbox']
+2025-06-28 12:00:24,827 - runtimes.reasoning.enhanced_runtime - DEBUG - 📋 获取到的工具列表: ['deepsearch', 'browser_use', 'mcp-search-tool', 'microsandbox']
+2025-06-28 12:00:24,827 - runtimes.reasoning.enhanced_runtime - INFO - ✅ 工具Schema管理器已初始化
+2025-06-28 12:00:24,827 - runtimes.reasoning.enhanced_runtime - DEBUG - 🔧 更新Guardrails和ValidationCritic工具配置...
+2025-06-28 12:00:24,827 - core.llm.guardrails_middleware - INFO - 🔧 初始化输入验证Guard...
+2025-06-28 12:00:24,828 - root - DEBUG - Returning existing HubTelemetry instance...
+2025-06-28 12:00:24,829 - root - DEBUG - Returning existing HubTelemetry instance...
+2025-06-28 12:00:24,829 - core.llm.guardrails_middleware - INFO - 🔧 初始化输出验证Guard...
+2025-06-28 12:00:24,829 - core.llm.guardrails_middleware - INFO - 🔧 使用本地LLM客户端初始化Guard...
+2025-06-28 12:00:24,830 - root - DEBUG - Returning existing HubTelemetry instance...
+2025-06-28 12:00:24,831 - root - DEBUG - Returning existing HubTelemetry instance...
+2025-06-28 12:00:24,831 - core.llm.guardrails_middleware - INFO - ✅ 使用LLM的Guard创建成功
+2025-06-28 12:00:24,831 - core.llm.guardrails_middleware - INFO - ✅ Guardrails Guards初始化成功
+2025-06-28 12:00:24,831 - core.llm.guardrails_middleware - INFO -    - 输入Guard: ✅
+2025-06-28 12:00:24,831 - core.llm.guardrails_middleware - INFO -    - 输出Guard: ✅
+2025-06-28 12:00:24,831 - core.llm.guardrails_middleware - INFO - 🔄 Guardrails工具列表已更新: 4个工具
+2025-06-28 12:00:24,831 - core.agents.validation_critic - INFO - 🔄 ValidationCritic工具列表已更新: 4个工具
+2025-06-28 12:00:24,831 - runtimes.reasoning.enhanced_runtime - INFO - ✅ Guardrails和ValidationCritic已配置4个工具: deepsearch, browser_use, mcp-search-tool, microsandbox
+2025-06-28 12:00:24,831 - runtimes.reasoning.enhanced_runtime - INFO - ✅ Enhanced Reasoning Runtime 已成功初始化为纯推理引擎（集成Guardrails + ValidationCritic）
+2025-06-28 12:00:24,833 - services.runtime_service - INFO - 启动运行时任务消费: enhanced-reasoning-1
+2025-06-28 12:00:24,833 - services.runtime_service - INFO - 推理运行时服务已启动 1 个实例和 1 个任务消费协程
+2025-06-28 12:00:24,833 - core.tool_schema_manager - INFO - 🔍 启动MCP服务器配置监控...
+2025-06-28 12:00:24,833 - core.task_manager - INFO - Runtime enhanced-reasoning-1 starting to consume from queue: tasks:reasoning
+2025-06-28 12:00:24,834 - core.tool_schema_manager - INFO - 📋 检测到MCP配置变化: mcp_servers/search_tool_server/service.json
+2025-06-28 12:00:24,834 - core.tool_schema_manager - INFO - 📋 检测到MCP配置变化: mcp_servers/microsandbox_server/service.json
+2025-06-28 12:00:24,834 - core.tool_schema_manager - INFO - 📋 检测到MCP配置变化: mcp_servers/browser_use_server/service.json
+2025-06-28 12:00:24,834 - core.tool_schema_manager - INFO - 📋 检测到MCP配置变化: mcp_servers/deepsearch_server/service.json
+2025-06-28 12:00:24,835 - core.tool_schema_manager - INFO - 🔄 MCP配置变化，强制刷新schema...
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔄 开始刷新Schema缓存 (force=True)，当前缓存: 0 个工具
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔍 开始安全Schema刷新...
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具注册表中发现 4 个工具
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 deepsearch 版本 8174ce27
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 microsandbox 版本 33c2a85a
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 browser_use 版本 998559b7
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 mcp-search-tool 版本 4f907873
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 📋 获取到 4 个工具版本信息
+2025-06-28 12:00:24,835 - core.tool_schema_manager - INFO - 🔄 检测到 4 个工具需要更新: ['deepsearch', 'microsandbox', 'browser_use', 'mcp-search-tool']
+2025-06-28 12:00:24,835 - core.tool_schema_manager - INFO - 🔄 执行增量更新: 4 个工具
+2025-06-28 12:00:24,835 - core.tool_schema_manager - INFO - 🔄 缓存为空，转为全量刷新模式
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔄 开始增强刷新工具Schemas...
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔍 工具注册表状态检查: _tools 字典包含 4 个条目
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: deepsearch
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: microsandbox
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: browser_use
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   - 注册表中的工具: mcp-search-tool
+2025-06-28 12:00:24,835 - core.tool_schema_manager - INFO - 🔧 选项1: 从工具注册表获取到 4 个工具
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   工具 0: id=deepsearch, name=网络信息研究工具, actions=3
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   工具 1: id=microsandbox, name=MicroSandbox安全代码执行器, actions=7
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   工具 2: id=browser_use, name=智能浏览器操作工具, actions=6
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   工具 3: id=mcp-search-tool, name=工具管理和项目文件搜索器, actions=4
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: deepsearch
+2025-06-28 12:00:24,835 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: comprehensive_research
+2025-06-28 12:00:24,836 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: quick_research
+2025-06-28 12:00:24,836 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: research
+2025-06-28 12:00:24,836 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 deepsearch (包含 3 个动作)
+2025-06-28 12:00:24,836 - core.tool_schema_manager - DEBUG -    当前缓存大小: 1 个工具
+2025-06-28 12:00:24,836 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: microsandbox
+2025-06-28 12:00:24,836 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_cleanup_expired
+2025-06-28 12:00:24,836 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_close_session
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_execute
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_get_health_status
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_get_performance_stats
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_install_package
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: microsandbox_list_sessions
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 microsandbox (包含 7 个动作)
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG -    当前缓存大小: 2 个工具
+2025-06-28 12:00:24,837 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: browser_use
+2025-06-28 12:00:24,837 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-49' coro=<start.<locals>.start_all_runtimes() running at /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/services/runtime_service.py:95> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()]>>
+2025-06-28 12:00:24,838 - services.runtime_service - INFO - 运行时服务正常停止，取消所有任务
+Exception ignored in: <coroutine object start.<locals>.start_all_runtimes at 0x134577610>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/pydantic/json_schema.py", line 319, in build_schema_type_to_method
+    mapping[key] = getattr(self, method_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: coroutine ignored GeneratorExit
+2025-06-28 12:00:24,838 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task cancelling name='runtime-enhanced-reasoning-1' coro=<start_runtime_service() running at /Users/zhaoxiang/Documents/Datapresso/agent-data-platform/core/task_manager.py:424> wait_for=<Future cancelled> cb=[gather.<locals>._done_callback() at /Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/tasks.py:764, gather.<locals>._done_callback() at /Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/tasks.py:764]>
+2025-06-28 12:00:24,838 - core.task_manager - INFO - Runtime enhanced-reasoning-1 service stopped normally
+2025-06-28 12:00:24,838 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_click_element
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_use_execute_task
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_extract_content
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_input_text
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_navigate
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: browser_search_google
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 browser_use (包含 6 个动作)
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -    当前缓存大小: 3 个工具
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG - 🔧 处理工具定义: mcp-search-tool
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: analyze_tool_needs
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: list_code_definitions
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: search_and_install_tools
+2025-06-28 12:00:24,839 - core.tool_schema_manager - DEBUG -   ✅ 处理动作: search_file_content
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ✅ 选项1: 成功缓存工具 mcp-search-tool (包含 4 个动作)
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG -    当前缓存大小: 4 个工具
+2025-06-28 12:00:24,840 - core.tool_schema_manager - INFO - 🔧 选项1: 成功处理 4/4 个工具，当前缓存 4 个工具
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: mcp-search-tool
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: microsandbox
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: browser_use
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ✅ 从 service.json 加载工具: deepsearch
+2025-06-28 12:00:24,840 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:24 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - 🔍 从ToolScore获取到工具列表: ['mcp-search-tool', 'microsandbox', 'browser_use', 'deepsearch']
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - 🔧 映射后的工具列表: ['mcp-search-tool', 'microsandbox', 'browser_use', 'deepsearch']
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ⏭️ 工具 mcp-search-tool 已在缓存中，跳过ToolScore获取
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ⏭️ 工具 microsandbox 已在缓存中，跳过ToolScore获取
+2025-06-28 12:00:24,840 - core.tool_schema_manager - DEBUG - ⏭️ 工具 browser_use 已在缓存中，跳过ToolScore获取
+2025-06-28 12:00:24,841 - core.tool_schema_manager - DEBUG - ⏭️ 工具 deepsearch 已在缓存中，跳过ToolScore获取
+2025-06-28 12:00:24,841 - core.tool_schema_manager - INFO - ✅ 增强刷新完成，当前可用工具: 4个
+2025-06-28 12:00:24,841 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/search_tool_server/service.json
+2025-06-28 12:00:24,841 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/microsandbox_server/service.json
+2025-06-28 12:00:24,841 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/browser_use_server/service.json
+2025-06-28 12:00:24,842 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/deepsearch_server/service.json
+2025-06-28 12:00:24,842 - core.tool_schema_manager - INFO - ✅ Schema安全刷新完成，备份 4 个工具
+2025-06-28 12:00:24,842 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/search_tool_server/service.json
+2025-06-28 12:00:24,842 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/microsandbox_server/service.json
+2025-06-28 12:00:24,842 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/browser_use_server/service.json
+2025-06-28 12:00:24,843 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/deepsearch_server/service.json
+2025-06-28 12:00:24,843 - core.tool_schema_manager - DEBUG - 🔍 结构验证完成: 4/4 个Schema有效
+2025-06-28 12:00:24,843 - core.tool_schema_manager - INFO - ✅ Schema刷新成功，缓存 4 个工具
+2025-06-28 12:00:29,338 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第8次, 5s间隔)
+2025-06-28 12:00:29,828 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:29 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:34,339 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第9次, 5s间隔)
+2025-06-28 12:00:34,830 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:34 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:34,830 - core.toolscore.async_tool_state_manager - INFO - Tool deepsearch state changed: initializing -> unhealthy
+2025-06-28 12:00:34,830 - core.toolscore.async_tool_state_manager - INFO - Tool browser_use state changed: initializing -> unhealthy
+2025-06-28 12:00:34,830 - core.toolscore.async_tool_state_manager - INFO - Tool mcp-search-tool state changed: initializing -> unhealthy
+2025-06-28 12:00:34,831 - core.toolscore.async_tool_state_manager - INFO - Tool microsandbox state changed: initializing -> unhealthy
+2025-06-28 12:00:39,341 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第10次, 5s间隔)
+2025-06-28 12:00:39,832 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:39 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:44,342 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第11次, 5s间隔)
+2025-06-28 12:00:44,825 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:00:44,825 - websockets.client - DEBUG - > PING ec e9 41 9e [binary, 4 bytes]
+2025-06-28 12:00:44,826 - websockets.server - DEBUG - < PING ec e9 41 9e [binary, 4 bytes]
+2025-06-28 12:00:44,826 - websockets.server - DEBUG - > PONG ec e9 41 9e [binary, 4 bytes]
+2025-06-28 12:00:44,826 - websockets.client - DEBUG - < PONG ec e9 41 9e [binary, 4 bytes]
+2025-06-28 12:00:44,826 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:00:44,834 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:44 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13991 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:49,343 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第12次, 5s间隔)
+2025-06-28 12:00:49,835 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:49 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:54,314 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:00:54,329 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:00:54,330 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:00:54,330 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:00:54,337 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:00:54,344 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第13次, 30s间隔)
+2025-06-28 12:00:54,820 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:00:54,820 - websockets.server - DEBUG - > PING 28 d0 a1 8a [binary, 4 bytes]
+2025-06-28 12:00:54,821 - websockets.client - DEBUG - < PING 28 d0 a1 8a [binary, 4 bytes]
+2025-06-28 12:00:54,821 - websockets.client - DEBUG - > PONG 28 d0 a1 8a [binary, 4 bytes]
+2025-06-28 12:00:54,822 - websockets.server - DEBUG - < PONG 28 d0 a1 8a [binary, 4 bytes]
+2025-06-28 12:00:54,822 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:00:54,838 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:54 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:00:59,842 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:00:59 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:00,357 - core.task_api - INFO - Task ab35a556-8bce-4f7a-b0f7-5be35d2c842a submitted successfully
+INFO:     127.0.0.1:50281 - "POST /api/v1/tasks HTTP/1.1" 200 OK
+2025-06-28 12:01:04,827 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:01:04,827 - websockets.client - DEBUG - > PING f1 83 ce 83 [binary, 4 bytes]
+2025-06-28 12:01:04,828 - websockets.server - DEBUG - < PING f1 83 ce 83 [binary, 4 bytes]
+2025-06-28 12:01:04,828 - websockets.server - DEBUG - > PONG f1 83 ce 83 [binary, 4 bytes]
+2025-06-28 12:01:04,828 - websockets.client - DEBUG - < PONG f1 83 ce 83 [binary, 4 bytes]
+2025-06-28 12:01:04,828 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:01:04,846 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:04 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:09,851 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:09 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:14,853 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:14 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:19,857 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:19 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:24,318 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:01:24,335 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:01:24,335 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:01:24,336 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:01:24,343 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:01:24,344 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第14次, 30s间隔)
+2025-06-28 12:01:24,812 - __main__ - DEBUG - ⏰ 系统运行时间: 0h 1m 0s
+2025-06-28 12:01:24,822 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:01:24,823 - websockets.server - DEBUG - > PING 15 c1 97 f4 [binary, 4 bytes]
+2025-06-28 12:01:24,823 - websockets.client - DEBUG - < PING 15 c1 97 f4 [binary, 4 bytes]
+2025-06-28 12:01:24,823 - websockets.client - DEBUG - > PONG 15 c1 97 f4 [binary, 4 bytes]
+2025-06-28 12:01:24,824 - websockets.server - DEBUG - < PONG 15 c1 97 f4 [binary, 4 bytes]
+2025-06-28 12:01:24,824 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:01:24,828 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:01:24,829 - websockets.client - DEBUG - > PING 3a 14 90 63 [binary, 4 bytes]
+2025-06-28 12:01:24,829 - websockets.server - DEBUG - < PING 3a 14 90 63 [binary, 4 bytes]
+2025-06-28 12:01:24,829 - websockets.server - DEBUG - > PONG 3a 14 90 63 [binary, 4 bytes]
+2025-06-28 12:01:24,829 - websockets.client - DEBUG - < PONG 3a 14 90 63 [binary, 4 bytes]
+2025-06-28 12:01:24,829 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:01:24,859 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:24 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:29,860 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:29 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+INFO:     127.0.0.1:50395 - "GET /api/v1/tasks/ab35a556-8bce-4f7a-b0f7-5be35d2c842a HTTP/1.1" 200 OK
+2025-06-28 12:01:34,864 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:34 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:39,867 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:39 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:44,830 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:01:44,831 - websockets.client - DEBUG - > PING cb a1 69 eb [binary, 4 bytes]
+2025-06-28 12:01:44,831 - websockets.server - DEBUG - < PING cb a1 69 eb [binary, 4 bytes]
+2025-06-28 12:01:44,831 - websockets.server - DEBUG - > PONG cb a1 69 eb [binary, 4 bytes]
+2025-06-28 12:01:44,831 - websockets.client - DEBUG - < PONG cb a1 69 eb [binary, 4 bytes]
+2025-06-28 12:01:44,832 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:01:44,870 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:44 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:49,872 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:49 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:54,323 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:01:54,337 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:01:54,338 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:01:54,338 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:01:54,345 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第15次, 30s间隔)
+2025-06-28 12:01:54,348 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:01:54,825 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:01:54,825 - websockets.server - DEBUG - > PING '\x02Dv\x1c' [text, 4 bytes]
+2025-06-28 12:01:54,826 - websockets.client - DEBUG - < PING '\x02Dv\x1c' [text, 4 bytes]
+2025-06-28 12:01:54,826 - websockets.client - DEBUG - > PONG '\x02Dv\x1c' [text, 4 bytes]
+2025-06-28 12:01:54,826 - websockets.server - DEBUG - < PONG '\x02Dv\x1c' [text, 4 bytes]
+2025-06-28 12:01:54,826 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:01:54,875 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:54 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:01:59,878 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:01:59 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:04,833 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:02:04,833 - websockets.client - DEBUG - > PING 'rF˦' [text, 4 bytes]
+2025-06-28 12:02:04,834 - websockets.server - DEBUG - < PING 'rF˦' [text, 4 bytes]
+2025-06-28 12:02:04,834 - websockets.server - DEBUG - > PONG 'rF˦' [text, 4 bytes]
+2025-06-28 12:02:04,835 - websockets.client - DEBUG - < PONG 'rF˦' [text, 4 bytes]
+2025-06-28 12:02:04,835 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:02:04,881 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:04 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:09,882 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:09 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:14,885 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:14 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:19,887 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:19 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:24,329 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:02:24,340 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:02:24,342 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:02:24,342 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:02:24,346 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第16次, 30s间隔)
+2025-06-28 12:02:24,354 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:02:24,813 - __main__ - DEBUG - ⏰ 系统运行时间: 0h 2m 0s
+2025-06-28 12:02:24,827 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:02:24,828 - websockets.server - DEBUG - > PING 39 9e ca 71 [binary, 4 bytes]
+2025-06-28 12:02:24,828 - websockets.client - DEBUG - < PING 39 9e ca 71 [binary, 4 bytes]
+2025-06-28 12:02:24,829 - websockets.client - DEBUG - > PONG 39 9e ca 71 [binary, 4 bytes]
+2025-06-28 12:02:24,829 - websockets.server - DEBUG - < PONG 39 9e ca 71 [binary, 4 bytes]
+2025-06-28 12:02:24,829 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:02:24,836 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:02:24,836 - websockets.client - DEBUG - > PING a8 05 4b bd [binary, 4 bytes]
+2025-06-28 12:02:24,836 - websockets.server - DEBUG - < PING a8 05 4b bd [binary, 4 bytes]
+2025-06-28 12:02:24,836 - websockets.server - DEBUG - > PONG a8 05 4b bd [binary, 4 bytes]
+2025-06-28 12:02:24,837 - websockets.client - DEBUG - < PONG a8 05 4b bd [binary, 4 bytes]
+2025-06-28 12:02:24,837 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:02:24,890 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:24 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:29,893 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:29 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:34,896 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:34 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:39,899 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:39 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:44,838 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:02:44,838 - websockets.client - DEBUG - > PING da dd 7c 37 [binary, 4 bytes]
+2025-06-28 12:02:44,839 - websockets.server - DEBUG - < PING da dd 7c 37 [binary, 4 bytes]
+2025-06-28 12:02:44,839 - websockets.server - DEBUG - > PONG da dd 7c 37 [binary, 4 bytes]
+2025-06-28 12:02:44,840 - websockets.client - DEBUG - < PONG da dd 7c 37 [binary, 4 bytes]
+2025-06-28 12:02:44,840 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:02:44,902 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:44 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:49,905 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:49 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:54,334 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:02:54,344 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:02:54,345 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:02:54,346 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:02:54,347 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第17次, 30s间隔)
+2025-06-28 12:02:54,359 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:02:54,830 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:02:54,830 - websockets.server - DEBUG - > PING f4 01 c7 d6 [binary, 4 bytes]
+2025-06-28 12:02:54,830 - websockets.client - DEBUG - < PING f4 01 c7 d6 [binary, 4 bytes]
+2025-06-28 12:02:54,830 - websockets.client - DEBUG - > PONG f4 01 c7 d6 [binary, 4 bytes]
+2025-06-28 12:02:54,830 - websockets.server - DEBUG - < PONG f4 01 c7 d6 [binary, 4 bytes]
+2025-06-28 12:02:54,830 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:02:54,908 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:54 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:02:59,915 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:02:59 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:04,841 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:03:04,842 - websockets.client - DEBUG - > PING 'sH҄' [text, 4 bytes]
+2025-06-28 12:03:04,842 - websockets.server - DEBUG - < PING 'sH҄' [text, 4 bytes]
+2025-06-28 12:03:04,842 - websockets.server - DEBUG - > PONG 'sH҄' [text, 4 bytes]
+2025-06-28 12:03:04,843 - websockets.client - DEBUG - < PONG 'sH҄' [text, 4 bytes]
+2025-06-28 12:03:04,843 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:03:04,919 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:04 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:09,922 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:09 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:14,925 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:14 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:19,929 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:19 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13991 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:24,339 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:03:24,348 - core.task_processing.task_loader - INFO - 📋 任务文件 tasks.jsonl 不存在，等待... (第18次, 30s间隔) - 建议通过API提交任务
+2025-06-28 12:03:24,349 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:03:24,351 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:03:24,351 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:03:24,363 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:03:24,814 - __main__ - DEBUG - ⏰ 系统运行时间: 0h 3m 0s
+2025-06-28 12:03:24,832 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:03:24,832 - websockets.server - DEBUG - > PING ca 44 78 f7 [binary, 4 bytes]
+2025-06-28 12:03:24,833 - websockets.client - DEBUG - < PING ca 44 78 f7 [binary, 4 bytes]
+2025-06-28 12:03:24,833 - websockets.client - DEBUG - > PONG ca 44 78 f7 [binary, 4 bytes]
+2025-06-28 12:03:24,833 - websockets.server - DEBUG - < PONG ca 44 78 f7 [binary, 4 bytes]
+2025-06-28 12:03:24,834 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:03:24,844 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:03:24,844 - websockets.client - DEBUG - > PING a7 92 e7 64 [binary, 4 bytes]
+2025-06-28 12:03:24,845 - websockets.server - DEBUG - < PING a7 92 e7 64 [binary, 4 bytes]
+2025-06-28 12:03:24,845 - websockets.server - DEBUG - > PONG a7 92 e7 64 [binary, 4 bytes]
+2025-06-28 12:03:24,845 - websockets.client - DEBUG - < PONG a7 92 e7 64 [binary, 4 bytes]
+2025-06-28 12:03:24,845 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:03:24,933 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:24 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:29,937 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:29 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:34,939 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:34 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:39,943 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:39 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:44,847 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:03:44,847 - websockets.client - DEBUG - > PING 38 0d cd 71 [binary, 4 bytes]
+2025-06-28 12:03:44,848 - websockets.server - DEBUG - < PING 38 0d cd 71 [binary, 4 bytes]
+2025-06-28 12:03:44,848 - websockets.server - DEBUG - > PONG 38 0d cd 71 [binary, 4 bytes]
+2025-06-28 12:03:44,848 - websockets.client - DEBUG - < PONG 38 0d cd 71 [binary, 4 bytes]
+2025-06-28 12:03:44,848 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:03:44,945 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:44 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:49,949 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:49 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:51,571 - core.task_api - INFO - Task 5ca93a0c-50d0-4cd3-a4cb-8285d686629c submitted successfully
+INFO:     127.0.0.1:50688 - "POST /api/v1/tasks HTTP/1.1" 200 OK
+2025-06-28 12:03:54,345 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:03:54,349 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第19次, 30s间隔)
+2025-06-28 12:03:54,353 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:03:54,353 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:03:54,354 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:03:54,367 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:03:54,835 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:03:54,835 - websockets.server - DEBUG - > PING 8f 6b cc 78 [binary, 4 bytes]
+2025-06-28 12:03:54,835 - websockets.client - DEBUG - < PING 8f 6b cc 78 [binary, 4 bytes]
+2025-06-28 12:03:54,835 - websockets.client - DEBUG - > PONG 8f 6b cc 78 [binary, 4 bytes]
+2025-06-28 12:03:54,835 - websockets.server - DEBUG - < PONG 8f 6b cc 78 [binary, 4 bytes]
+2025-06-28 12:03:54,835 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:03:54,952 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:54 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:03:59,955 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:03:59 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:04,849 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:04:04,850 - websockets.client - DEBUG - > PING f2 b3 3c 07 [binary, 4 bytes]
+2025-06-28 12:04:04,851 - websockets.server - DEBUG - < PING f2 b3 3c 07 [binary, 4 bytes]
+2025-06-28 12:04:04,851 - websockets.server - DEBUG - > PONG f2 b3 3c 07 [binary, 4 bytes]
+2025-06-28 12:04:04,851 - websockets.client - DEBUG - < PONG f2 b3 3c 07 [binary, 4 bytes]
+2025-06-28 12:04:04,852 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:04:04,959 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:04 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:09,962 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:09 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:14,966 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:14 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13990 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:19,969 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:19 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+INFO:     127.0.0.1:50759 - "GET /api/v1/tasks/5ca93a0c-50d0-4cd3-a4cb-8285d686629c HTTP/1.1" 200 OK
+2025-06-28 12:04:24,346 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:04:24,350 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第20次, 30s间隔)
+2025-06-28 12:04:24,355 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:04:24,356 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:04:24,356 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:04:24,369 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:04:24,816 - __main__ - DEBUG - ⏰ 系统运行时间: 0h 4m 0s
+2025-06-28 12:04:24,836 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:04:24,836 - websockets.server - DEBUG - > PING 75 db cb 50 [binary, 4 bytes]
+2025-06-28 12:04:24,837 - websockets.client - DEBUG - < PING 75 db cb 50 [binary, 4 bytes]
+2025-06-28 12:04:24,837 - websockets.client - DEBUG - > PONG 75 db cb 50 [binary, 4 bytes]
+2025-06-28 12:04:24,837 - websockets.server - DEBUG - < PONG 75 db cb 50 [binary, 4 bytes]
+2025-06-28 12:04:24,838 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:04:24,853 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:04:24,853 - websockets.client - DEBUG - > PING b6 ae ba c9 [binary, 4 bytes]
+2025-06-28 12:04:24,854 - websockets.server - DEBUG - < PING b6 ae ba c9 [binary, 4 bytes]
+2025-06-28 12:04:24,854 - websockets.server - DEBUG - > PONG b6 ae ba c9 [binary, 4 bytes]
+2025-06-28 12:04:24,854 - websockets.client - DEBUG - < PONG b6 ae ba c9 [binary, 4 bytes]
+2025-06-28 12:04:24,854 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:04:24,972 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:24 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:29,976 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:29 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:34,979 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:34 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:39,981 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:39 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:44,856 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:04:44,856 - websockets.client - DEBUG - > PING f1 4a 6c 4d [binary, 4 bytes]
+2025-06-28 12:04:44,857 - websockets.server - DEBUG - < PING f1 4a 6c 4d [binary, 4 bytes]
+2025-06-28 12:04:44,857 - websockets.server - DEBUG - > PONG f1 4a 6c 4d [binary, 4 bytes]
+2025-06-28 12:04:44,857 - websockets.client - DEBUG - < PONG f1 4a 6c 4d [binary, 4 bytes]
+2025-06-28 12:04:44,858 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:04:44,985 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:44 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:49,988 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:49 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:54,351 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第21次, 30s间隔)
+2025-06-28 12:04:54,352 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:04:54,358 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:04:54,358 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:04:54,359 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:04:54,371 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:04:54,839 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:04:54,839 - websockets.server - DEBUG - > PING 06 08 b2 df [binary, 4 bytes]
+2025-06-28 12:04:54,840 - websockets.client - DEBUG - < PING 06 08 b2 df [binary, 4 bytes]
+2025-06-28 12:04:54,840 - websockets.client - DEBUG - > PONG 06 08 b2 df [binary, 4 bytes]
+2025-06-28 12:04:54,840 - websockets.server - DEBUG - < PONG 06 08 b2 df [binary, 4 bytes]
+2025-06-28 12:04:54,841 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:04:54,992 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:54 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:04:59,995 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:04:59 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:05:01,950 - core.task_api - INFO - Task 949d6122-f705-4e7b-bc66-28f3809771cf submitted successfully
+INFO:     127.0.0.1:50880 - "POST /api/v1/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+2025-06-28 12:05:04,859 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:05:04,859 - websockets.client - DEBUG - > PING '\x0fnVg' [text, 4 bytes]
+2025-06-28 12:05:04,859 - websockets.server - DEBUG - < PING '\x0fnVg' [text, 4 bytes]
+2025-06-28 12:05:04,860 - websockets.server - DEBUG - > PONG '\x0fnVg' [text, 4 bytes]
+2025-06-28 12:05:04,860 - websockets.client - DEBUG - < PONG '\x0fnVg' [text, 4 bytes]
+2025-06-28 12:05:04,860 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:05:04,999 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:04 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+2025-06-28 12:05:10,001 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:10 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+2025-06-28 12:05:15,003 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:15 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+2025-06-28 12:05:20,007 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:20 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+2025-06-28 12:05:24,353 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第22次, 30s间隔)
+2025-06-28 12:05:24,356 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:05:24,359 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:05:24,360 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:05:24,360 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:05:24,374 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:05:24,817 - __main__ - DEBUG - ⏰ 系统运行时间: 0h 5m 0s
+2025-06-28 12:05:24,832 - runtimes.reasoning.enhanced_runtime - DEBUG - 🔍 执行定期MCP同步验证...
+2025-06-28 12:05:24,833 - core.tool_schema_manager - INFO - 正在执行MCP同步验证...
+2025-06-28 12:05:24,833 - core.tool_schema_manager - DEBUG - 🔄 开始刷新Schema缓存 (force=False)，当前缓存: 4 个工具
+2025-06-28 12:05:24,833 - core.tool_schema_manager - DEBUG - 🔍 开始安全Schema刷新...
+2025-06-28 12:05:24,833 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具注册表中发现 4 个工具
+2025-06-28 12:05:24,834 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 deepsearch 版本 8174ce27
+2025-06-28 12:05:24,834 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 microsandbox 版本 33c2a85a
+2025-06-28 12:05:24,834 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 browser_use 版本 998559b7
+2025-06-28 12:05:24,834 - core.tool_schema_manager - DEBUG - 🔧 选项1: 工具 mcp-search-tool 版本 4f907873
+2025-06-28 12:05:24,834 - core.tool_schema_manager - DEBUG - 📋 获取到 4 个工具版本信息
+2025-06-28 12:05:24,834 - core.tool_schema_manager - DEBUG - 📊 Schema版本无变化，跳过更新
+2025-06-28 12:05:24,836 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/search_tool_server/service.json
+2025-06-28 12:05:24,836 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/microsandbox_server/service.json
+2025-06-28 12:05:24,837 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/browser_use_server/service.json
+2025-06-28 12:05:24,838 - core.tool_schema_manager - DEBUG - ✅ 加载MCP服务配置: mcp_servers/deepsearch_server/service.json
+2025-06-28 12:05:24,839 - core.tool_schema_manager - DEBUG - 🔍 结构验证完成: 4/4 个Schema有效
+2025-06-28 12:05:24,839 - core.tool_schema_manager - INFO - ✅ Schema刷新成功，缓存 4 个工具
+2025-06-28 12:05:24,839 - core.tool_schema_manager - INFO - 🔍 同步验证完成: unhealthy (0/4 工具Schema一致)
+2025-06-28 12:05:24,839 - runtimes.reasoning.enhanced_runtime - WARNING - ⚠️ MCP同步验证发现问题: {'total_tools': 4, 'connected_tools': 0, 'schema_consistent_tools': 0, 'failed_tools': 0}
+2025-06-28 12:05:24,842 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:05:24,842 - websockets.server - DEBUG - > PING b7 fe d4 84 [binary, 4 bytes]
+2025-06-28 12:05:24,842 - websockets.client - DEBUG - < PING b7 fe d4 84 [binary, 4 bytes]
+2025-06-28 12:05:24,842 - websockets.client - DEBUG - > PONG b7 fe d4 84 [binary, 4 bytes]
+2025-06-28 12:05:24,842 - websockets.server - DEBUG - < PONG b7 fe d4 84 [binary, 4 bytes]
+2025-06-28 12:05:24,843 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:05:24,861 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:05:24,861 - websockets.client - DEBUG - > PING 40 b7 6e b0 [binary, 4 bytes]
+2025-06-28 12:05:24,862 - websockets.server - DEBUG - < PING 40 b7 6e b0 [binary, 4 bytes]
+2025-06-28 12:05:24,862 - websockets.server - DEBUG - > PONG 40 b7 6e b0 [binary, 4 bytes]
+2025-06-28 12:05:24,862 - websockets.client - DEBUG - < PONG 40 b7 6e b0 [binary, 4 bytes]
+2025-06-28 12:05:24,862 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:05:25,011 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:25 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:05:25,956 - services.synthesis_service - INFO - 开始处理轨迹数据...
+2025-06-28 12:05:25,957 - asyncio - DEBUG - Using selector: KqueueSelector
+2025-06-28 12:05:25,957 - core.synthesiscore.synthesis - INFO - 🔄 Processing only unprocessed trajectories...
+2025-06-28 12:05:25,958 - core.synthesiscore.synthesis - INFO - 🎯 Unprocessed trajectories completed: 0 new trajectories processed
+2025-06-28 12:05:25,959 - services.synthesis_service - DEBUG - 等待 300 秒后再次处理...
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+2025-06-28 12:05:30,014 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:30 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+INFO:     127.0.0.1:50880 - "GET /api/v1/tasks/949d6122-f705-4e7b-bc66-28f3809771cf HTTP/1.1" 200 OK
+2025-06-28 12:05:35,016 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:35 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:05:40,019 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:40 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13991 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:05:44,862 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:05:44,863 - websockets.client - DEBUG - > PING f2 72 50 48 [binary, 4 bytes]
+2025-06-28 12:05:44,863 - websockets.server - DEBUG - < PING f2 72 50 48 [binary, 4 bytes]
+2025-06-28 12:05:44,863 - websockets.server - DEBUG - > PONG f2 72 50 48 [binary, 4 bytes]
+2025-06-28 12:05:44,863 - websockets.client - DEBUG - < PONG f2 72 50 48 [binary, 4 bytes]
+2025-06-28 12:05:44,863 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:05:45,022 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:45 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:05:50,026 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:50 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:05:54,354 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第23次, 30s间隔)
+2025-06-28 12:05:54,362 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:05:54,364 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:05:54,365 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:05:54,365 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:05:54,380 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:05:54,844 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:05:54,844 - websockets.server - DEBUG - > PING 19 b4 9d 79 [binary, 4 bytes]
+2025-06-28 12:05:54,844 - websockets.client - DEBUG - < PING 19 b4 9d 79 [binary, 4 bytes]
+2025-06-28 12:05:54,844 - websockets.client - DEBUG - > PONG 19 b4 9d 79 [binary, 4 bytes]
+2025-06-28 12:05:54,844 - websockets.server - DEBUG - < PONG 19 b4 9d 79 [binary, 4 bytes]
+2025-06-28 12:05:54,845 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:05:55,029 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:05:55 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:00,030 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:00 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:04,865 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:06:04,865 - websockets.client - DEBUG - > PING 7e a3 a7 cf [binary, 4 bytes]
+2025-06-28 12:06:04,865 - websockets.server - DEBUG - < PING 7e a3 a7 cf [binary, 4 bytes]
+2025-06-28 12:06:04,865 - websockets.server - DEBUG - > PONG 7e a3 a7 cf [binary, 4 bytes]
+2025-06-28 12:06:04,865 - websockets.client - DEBUG - < PONG 7e a3 a7 cf [binary, 4 bytes]
+2025-06-28 12:06:04,865 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:06:05,033 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:05 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:10,036 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:10 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:15,040 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:15 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:20,044 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:20 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:24,356 - core.task_processing.task_loader - INFO - 📋 任务文件 tasks.jsonl 不存在，等待... (第24次, 30s间隔) - 建议通过API提交任务
+2025-06-28 12:06:24,368 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:06:24,370 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:06:24,371 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:06:24,371 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:06:24,383 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:06:24,818 - __main__ - DEBUG - ⏰ 系统运行时间: 0h 6m 0s
+2025-06-28 12:06:24,846 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:06:24,846 - websockets.server - DEBUG - > PING 03 3a f0 3e [binary, 4 bytes]
+2025-06-28 12:06:24,846 - websockets.client - DEBUG - < PING 03 3a f0 3e [binary, 4 bytes]
+2025-06-28 12:06:24,846 - websockets.client - DEBUG - > PONG 03 3a f0 3e [binary, 4 bytes]
+2025-06-28 12:06:24,846 - websockets.server - DEBUG - < PONG 03 3a f0 3e [binary, 4 bytes]
+2025-06-28 12:06:24,847 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:06:24,866 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:06:24,867 - websockets.client - DEBUG - > PING 'BU\x1cP' [text, 4 bytes]
+2025-06-28 12:06:24,867 - websockets.server - DEBUG - < PING 'BU\x1cP' [text, 4 bytes]
+2025-06-28 12:06:24,867 - websockets.server - DEBUG - > PONG 'BU\x1cP' [text, 4 bytes]
+2025-06-28 12:06:24,867 - websockets.client - DEBUG - < PONG 'BU\x1cP' [text, 4 bytes]
+2025-06-28 12:06:24,867 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:06:25,047 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:25 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:30,050 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:30 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:35,053 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:35 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:40,062 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:40 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:44,874 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:06:44,874 - websockets.client - DEBUG - > PING fd a3 b9 c0 [binary, 4 bytes]
+2025-06-28 12:06:44,875 - websockets.server - DEBUG - < PING fd a3 b9 c0 [binary, 4 bytes]
+2025-06-28 12:06:44,875 - websockets.server - DEBUG - > PONG fd a3 b9 c0 [binary, 4 bytes]
+2025-06-28 12:06:44,876 - websockets.client - DEBUG - < PONG fd a3 b9 c0 [binary, 4 bytes]
+2025-06-28 12:06:44,876 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:06:45,066 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:45 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:50,070 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:50 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:06:54,357 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第25次, 30s间隔)
+2025-06-28 12:06:54,371 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:06:54,374 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:06:54,375 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:06:54,375 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:06:54,388 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:06:54,848 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:06:54,848 - websockets.server - DEBUG - > PING e3 0e c3 30 [binary, 4 bytes]
+2025-06-28 12:06:54,849 - websockets.client - DEBUG - < PING e3 0e c3 30 [binary, 4 bytes]
+2025-06-28 12:06:54,849 - websockets.client - DEBUG - > PONG e3 0e c3 30 [binary, 4 bytes]
+2025-06-28 12:06:54,849 - websockets.server - DEBUG - < PONG e3 0e c3 30 [binary, 4 bytes]
+2025-06-28 12:06:54,849 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:06:55,073 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:06:55 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:00,077 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:00 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13991 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:04,877 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:07:04,877 - websockets.client - DEBUG - > PING fd 83 d9 df [binary, 4 bytes]
+2025-06-28 12:07:04,878 - websockets.server - DEBUG - < PING fd 83 d9 df [binary, 4 bytes]
+2025-06-28 12:07:04,878 - websockets.server - DEBUG - > PONG fd 83 d9 df [binary, 4 bytes]
+2025-06-28 12:07:04,878 - websockets.client - DEBUG - < PONG fd 83 d9 df [binary, 4 bytes]
+2025-06-28 12:07:04,879 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:07:05,080 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:05 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:10,083 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:10 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:15,086 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:15 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13991 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:20,090 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:20 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:24,358 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第26次, 30s间隔)
+2025-06-28 12:07:24,377 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:07:24,377 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:07:24,378 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:07:24,378 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:07:24,394 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:07:24,818 - __main__ - DEBUG - ⏰ 系统运行时间: 0h 7m 0s
+2025-06-28 12:07:24,850 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:07:24,851 - websockets.server - DEBUG - > PING a4 66 27 06 [binary, 4 bytes]
+2025-06-28 12:07:24,851 - websockets.client - DEBUG - < PING a4 66 27 06 [binary, 4 bytes]
+2025-06-28 12:07:24,851 - websockets.client - DEBUG - > PONG a4 66 27 06 [binary, 4 bytes]
+2025-06-28 12:07:24,851 - websockets.server - DEBUG - < PONG a4 66 27 06 [binary, 4 bytes]
+2025-06-28 12:07:24,851 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:07:24,880 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:07:24,880 - websockets.client - DEBUG - > PING f8 87 83 62 [binary, 4 bytes]
+2025-06-28 12:07:24,880 - websockets.server - DEBUG - < PING f8 87 83 62 [binary, 4 bytes]
+2025-06-28 12:07:24,881 - websockets.server - DEBUG - > PONG f8 87 83 62 [binary, 4 bytes]
+2025-06-28 12:07:24,881 - websockets.client - DEBUG - < PONG f8 87 83 62 [binary, 4 bytes]
+2025-06-28 12:07:24,881 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:07:25,094 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:25 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:30,097 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:30 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:35,101 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:35 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:40,105 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:40 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:44,882 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:07:44,883 - websockets.client - DEBUG - > PING 53 ea 4f a5 [binary, 4 bytes]
+2025-06-28 12:07:44,883 - websockets.server - DEBUG - < PING 53 ea 4f a5 [binary, 4 bytes]
+2025-06-28 12:07:44,883 - websockets.server - DEBUG - > PONG 53 ea 4f a5 [binary, 4 bytes]
+2025-06-28 12:07:44,884 - websockets.client - DEBUG - < PONG 53 ea 4f a5 [binary, 4 bytes]
+2025-06-28 12:07:44,884 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:07:45,109 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:45 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:50,113 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:50 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:07:54,360 - core.task_processing.task_loader - DEBUG - 任务文件 tasks.jsonl 不存在，等待... (第27次, 30s间隔)
+2025-06-28 12:07:54,383 - services.mcp_server_launcher - DEBUG - 💚 search_tool_server 健康检查通过 (端口 8080)
+2025-06-28 12:07:54,383 - services.mcp_server_launcher - DEBUG - 💚 browser_use_server 健康检查通过 (端口 8084)
+2025-06-28 12:07:54,385 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection rejected (400 Bad Request)
+2025-06-28 12:07:54,385 - services.mcp_server_launcher - DEBUG - [browser_use_server] INFO     [websockets.server] connection closed
+2025-06-28 12:07:54,400 - services.mcp_server_launcher - DEBUG - 💚 deepsearch_server 健康检查通过 (端口 8086)
+2025-06-28 12:07:54,853 - websockets.server - DEBUG - % sending keepalive ping
+2025-06-28 12:07:54,853 - websockets.server - DEBUG - > PING 13 fd f5 c2 [binary, 4 bytes]
+2025-06-28 12:07:54,854 - websockets.client - DEBUG - < PING 13 fd f5 c2 [binary, 4 bytes]
+2025-06-28 12:07:54,854 - websockets.client - DEBUG - > PONG 13 fd f5 c2 [binary, 4 bytes]
+2025-06-28 12:07:54,854 - websockets.server - DEBUG - < PONG 13 fd f5 c2 [binary, 4 bytes]
+2025-06-28 12:07:54,854 - websockets.server - DEBUG - % received keepalive pong
+2025-06-28 12:07:55,116 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:07:55 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:08:00,119 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:08:00 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:08:04,885 - websockets.client - DEBUG - % sending keepalive ping
+2025-06-28 12:08:04,886 - websockets.client - DEBUG - > PING 24 58 ab e2 [binary, 4 bytes]
+2025-06-28 12:08:04,886 - websockets.server - DEBUG - < PING 24 58 ab e2 [binary, 4 bytes]
+2025-06-28 12:08:04,886 - websockets.server - DEBUG - > PONG 24 58 ab e2 [binary, 4 bytes]
+2025-06-28 12:08:04,887 - websockets.client - DEBUG - < PONG 24 58 ab e2 [binary, 4 bytes]
+2025-06-28 12:08:04,887 - websockets.client - DEBUG - % received keepalive pong
+2025-06-28 12:08:05,122 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:08:05 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:08:10,126 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:08:10 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:08:15,129 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:08:15 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13992 "-" "Python/3.11 aiohttp/3.10.11"
+2025-06-28 12:08:20,133 - aiohttp.access - INFO - 127.0.0.1 [28/Jun/2025:12:08:20 +0800] "GET /api/v1/tools/available HTTP/1.1" 200 13993 "-" "Python/3.11 aiohttp/3.10.11"

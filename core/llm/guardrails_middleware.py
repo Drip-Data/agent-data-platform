@@ -115,7 +115,7 @@ class GuardrailsLLMMiddleware:
 
         try:
             # 优先使用本地LLM客户端作为Guard的API
-            if self.llm_client and hasattr(self.llm_client, 'call_api'):
+            if self.llm_client and hasattr(self.llm_client, '_call_api'):
                 logger.info("🔧 使用本地LLM客户端初始化Guard...")
                 # 使用 functools.partial 来包装异步的 call_api
                 import functools
@@ -133,13 +133,22 @@ class GuardrailsLLMMiddleware:
                     
                     # 运行异步任务
                     if loop.is_running():
-                        future = asyncio.run_coroutine_threadsafe(self.llm_client.call_api(messages), loop)
+                        future = asyncio.run_coroutine_threadsafe(self.llm_client._call_api(messages), loop)
                         return future.result()
                     else:
-                        return loop.run_until_complete(self.llm_client.call_api(messages))
+                        return loop.run_until_complete(self.llm_client._call_api(messages))
 
                 rail_schema = self._build_comprehensive_rail_schema()
-                guard = Guard.from_rail_string(rail_schema, api=llm_api_wrapper, num_reasks=2)
+                # 兼容不同版本的Guardrails API
+                try:
+                    guard = Guard.from_rail_string(rail_schema, api=llm_api_wrapper, num_reasks=2)
+                except TypeError:
+                    # 新版本可能使用不同的API
+                    guard = Guard.from_rail_string(rail_schema)
+                    if hasattr(guard, 'with_llm'):
+                        guard = guard.with_llm(llm_api_wrapper)
+                    elif hasattr(guard, 'use_llm'):
+                        guard = guard.use_llm(llm_api_wrapper)
                 logger.info("✅ 使用LLM的Guard创建成功")
                 return guard
             else:
@@ -731,8 +740,8 @@ class GuardrailsLLMMiddleware:
             "auto_corrections": 0
         }
 
-# 全局Guardrails中间件实例
-guardrails_middleware = GuardrailsLLMMiddleware()
+# 全局Guardrails中间件实例 - 延迟初始化
+guardrails_middleware = None
 
 def setup_guardrails_middleware(available_tool_ids: List[str], llm_client=None):
     """设置全局Guardrails中间件"""
@@ -743,11 +752,17 @@ def setup_guardrails_middleware(available_tool_ids: List[str], llm_client=None):
 
 async def validate_llm_input(input_data: Dict[str, Any]) -> GuardrailsValidationResult:
     """验证LLM输入的便捷函数"""
+    global guardrails_middleware
+    if not guardrails_middleware:
+        logger.warning("Guardrails中间件未初始化，使用默认配置")
+        guardrails_middleware = GuardrailsLLMMiddleware()
     return await guardrails_middleware.validate_input(input_data)
 
 async def validate_llm_output(output_text: str, context: Dict[str, Any] = None) -> GuardrailsValidationResult:
     """验证LLM输出的便捷函数"""
+    global guardrails_middleware
     # 确保中间件已经设置
     if not guardrails_middleware:
-        raise RuntimeError("Guardrails中间件未初始化。请先调用setup_guardrails_middleware()")
+        logger.warning("Guardrails中间件未初始化，使用默认配置")
+        guardrails_middleware = GuardrailsLLMMiddleware()
     return await guardrails_middleware.validate_output(output_text, context)

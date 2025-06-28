@@ -18,6 +18,7 @@ from core.toolscore.mcp_client import MCPToolClient
 from core.utils.path_utils import get_trajectories_dir
 from runtimes.reasoning.toolscore_client import ToolScoreClient
 from runtimes.reasoning.real_time_tool_client import RealTimeToolClient
+from core.toolscore.async_tool_state_manager import AsyncToolStateManager, ToolState
 from core.local_python_executor import LocalPythonExecutor
 from core.tool_usage_tracker import ToolUsageTracker
 from core.memory_manager import MemoryManager
@@ -87,10 +88,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         }
         
         # 🛡️ 新增：Guardrails LLM中间件 - 使用本地LLM客户端
-        self.guardrails_middleware = GuardrailsLLMMiddleware(llm_client=llm_client)
+        self.guardrails_middleware = GuardrailsLLMMiddleware(llm_client=self.client)
         
         # 🎯 新增：ValidationCritic智能错误分析代理
-        self.validation_critic = ValidationCritic(llm_client, [])
+        self.validation_critic = ValidationCritic(self.client, [])
         
         # 🔍 连续失败计数器和阈值
         self.consecutive_failures = 0
@@ -100,6 +101,44 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 🔧 工具Schema管理器
         self.tool_schema_manager = get_tool_schema_manager()
         
+        # 🚀 新增：异步工具状态管理器 - 替代阻塞式wait_for_tools_ready
+        self.async_tool_manager = AsyncToolStateManager(
+            toolscore_client=self.toolscore_client,
+            essential_tools={'deepsearch', 'microsandbox', 'browser_use', 'mcp-search-tool'}
+        )
+        
+    def _check_tool_availability_jit(self, tool_name: str) -> tuple[bool, str]:
+        """
+        Just-in-Time tool availability check
+        Returns (is_available, error_message)
+        """
+        if not hasattr(self, 'async_tool_manager'):
+            return False, f"Tool state manager not initialized"
+        
+        tool_state = self.async_tool_manager.get_tool_state(tool_name)
+        
+        if tool_state == ToolState.READY:
+            return True, ""
+        elif tool_state == ToolState.INITIALIZING:
+            return False, f"Tool '{tool_name}' is still initializing"
+        elif tool_state == ToolState.UNHEALTHY:
+            return False, f"Tool '{tool_name}' is unhealthy"
+        else:
+            return False, f"Tool '{tool_name}' is unavailable"
+    
+    def _get_available_tools_summary(self) -> str:
+        """Get summary of currently available tools"""
+        if not hasattr(self, 'async_tool_manager'):
+            return "Tool state manager not initialized"
+        
+        health_summary = self.async_tool_manager.get_health_summary()
+        ready_tools = [tool for tool, state in health_summary.items() if state == 'ready']
+        
+        if ready_tools:
+            return f"Available tools: {', '.join(ready_tools)}"
+        else:
+            return "No tools currently available"
+
     async def initialize(self):
         """初始化运行时 - 简化为纯工具消费者"""
         logger.info("🚀 初始化Enhanced Reasoning Runtime - 简化版本")
@@ -131,14 +170,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             self._on_new_tool_available
         )
         
-        # 🔍 等待关键工具完全就绪
-        logger.info("⏳ 等待关键工具完全就绪...")
-        # 🔧 智能工具就绪检测 - 增加超时时间和重试机制
-        tools_ready = await self._wait_for_essential_tools_enhanced(timeout=60, max_retries=3)
-        if not tools_ready:
-            logger.warning("⚠️ 部分关键工具未就绪，将在降级模式下运行")
-        else:
-            logger.info("✅ 所有关键工具已就绪")
+        # 🚀 启动异步工具状态管理器 - 非阻塞
+        logger.info("🚀 启动背景工具健康监控...")
+        await self.async_tool_manager.start_background_monitoring()
+        logger.info("✅ 工具状态管理器已启动，将在后台持续监控工具健康状态")
         
         # 🔧 P1修复1: 执行MCP服务器同步验证
         logger.info("🔍 开始MCP服务器同步验证...")
@@ -251,7 +286,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         return False
     
     async def _wait_for_essential_tools(self, timeout: int = 30) -> bool:
-        """等待关键工具完全就绪"""
+        """
+        ⚠️ DEPRECATED: 替换为异步工具状态管理器
+        此方法已被AsyncToolStateManager替代，不应再使用
+        """
+        logger.warning("⚠️ _wait_for_essential_tools is deprecated. Use async_tool_manager.are_essential_tools_ready() instead")
+        if hasattr(self, 'async_tool_manager'):
+            return self.async_tool_manager.are_essential_tools_ready()
+        return False  # 旧方法返回False，强制使用新系统
+    
+    async def _wait_for_essential_tools_original_blocking(self, timeout: int = 30) -> bool:
+        """原始的阻塞式等待方法 - 已弃用"""
         essential_tools = [
             'deepsearch',
             'microsandbox', 
@@ -1471,6 +1516,35 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     # 优先尝试直接通过MCP客户端调用 python-executor-mcp-server
                     # 🔍 统一通过ToolScore HTTP API执行所有工具
                     try:
+                        # 🚀 JIT工具可用性检查 - 立即失败而不是等待
+                        tool_available, availability_error = self._check_tool_availability_jit(tool_id)
+                        if not tool_available:
+                            # 立即失败任务，提供清晰的错误信息
+                            error_msg = f"Tool '{tool_id}' is not available: {availability_error}. {self._get_available_tools_summary()}"
+                            logger.warning(f"⚠️ JIT检查失败: {error_msg}")
+                            
+                            # 创建失败步骤而不是继续等待
+                            observation = f"❌ 工具不可用: {error_msg}"
+                            current_outputs.append(observation)
+                            
+                            step = ExecutionStep(
+                                step_id=step_id,
+                                action_type=ActionType.TOOL_CALL,
+                                action_params=params,
+                                observation=observation,
+                                success=False,
+                                thinking=thinking,
+                                execution_code=execution_code,
+                                error_type=ErrorType.TOOL_ERROR,
+                                error_message=error_msg,
+                                timestamp=time.time(),
+                                duration=0.1,
+                                llm_interactions=current_step_llm_interactions
+                            )
+                            steps.append(step)
+                            step_id += 1
+                            continue  # 继续下一步，不阻塞整个任务
+                        
                         logger.info(f"🌐 通过ToolScore HTTP API执行工具: {tool_id}/{action}")
                         
                         execution_start_time = time.time()
@@ -2406,6 +2480,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     async def cleanup(self):
         """清理资源"""
         logger.info("🧹 清理Enhanced Reasoning Runtime资源")
+        
+        # 🚀 停止异步工具状态监控
+        if hasattr(self, 'async_tool_manager'):
+            await self.async_tool_manager.stop_background_monitoring()
         
         # 关闭ToolScore客户端
         if self.toolscore_client:

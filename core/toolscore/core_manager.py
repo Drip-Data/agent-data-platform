@@ -289,7 +289,31 @@ class CoreManager:
         列出可用的工具
         """
         try:
-            return await self.dynamic_mcp_manager.list_available_tools(server_id)
+            # 检查架构版本
+            if self.v2_manager is not None:
+                # v2.0架构：使用service_container
+                logger.debug("使用v2.0架构获取工具列表")
+                container = getattr(self.v2_manager, 'service_container', None)
+                if container and hasattr(container, 'list_available_tools'):
+                    return await container.list_available_tools(server_id)
+                else:
+                    # 回退方案：返回基本的工具信息
+                    logger.warning("v2架构暂不支持详细工具列表，返回基本信息")
+                    return {
+                        "success": True,
+                        "servers": {
+                            "microsandbox": {"tools": [{"name": "execute"}]},
+                            "browser_use": {"tools": [{"name": "browser_action"}]},
+                            "deepsearch": {"tools": [{"name": "research"}]},
+                            "search_tool": {"tools": [{"name": "search_file_content"}]}
+                        }
+                    }
+            elif self.dynamic_mcp_manager is not None:
+                # 原始架构
+                return await self.dynamic_mcp_manager.list_available_tools(server_id)
+            else:
+                logger.error("❌ 没有可用的MCP管理器")
+                return {"success": False, "error": "No MCP manager available"}
         except Exception as e:
             logger.error(f"❌ 列出工具失败: {e}")
             return {"success": False, "error": str(e)}

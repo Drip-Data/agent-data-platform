@@ -1,0 +1,1 @@
+{"task_id": "test_cascade", "description": "级联修复测试：1+1=?", "expected_tools": [], "max_steps": 1}

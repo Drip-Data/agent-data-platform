@@ -1,0 +1,20 @@
+{
+  "test_time": "2025-06-28T12:05:32.024562",
+  "total_tasks": 1,
+  "successful_tasks": 0,
+  "failed_tasks": 1,
+  "results": [
+    {
+      "task_id": "949d6122-f705-4e7b-bc66-28f3809771cf",
+      "original_task_id": null,
+      "description": "级联修复测试：1+1=?",
+      "status": "timeout",
+      "success": false,
+      "final_result": null,
+      "error_message": "任务超时 (30秒)",
+      "total_duration": 30,
+      "submit_time": "2025-06-28T12:05:01.945984",
+      "complete_time": "2025-06-28T12:05:32.021771"
+    }
+  ]
+}

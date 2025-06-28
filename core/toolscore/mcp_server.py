@@ -63,6 +63,14 @@ class MCPServer:
         """注册处理工具动作的函数"""
         self.tool_action_handler = handler
 
+    async def _safe_send(self, websocket, data):
+        """安全发送数据到WebSocket，检查连接状态"""
+        try:
+            if not websocket.closed:
+                await websocket.send(data)
+        except Exception as e:
+            logger.debug(f"WebSocket发送失败，连接可能已关闭: {e}")
+
     async def _handle_message(self, websocket: WebSocketServerProtocol, message: Union[str, bytes]): # 允许 str 或 bytes
         """处理接收到的WebSocket消息"""
         try:
@@ -112,7 +120,7 @@ class MCPServer:
                         "success": False,
                         "message": "Missing tool_spec in registration request"
                     }
-                await websocket.send(json.dumps(response))
+                await self._safe_send(websocket, json.dumps(response))
 
             elif request_type == "request" and self.server_name == "toolscore":
                 # 处理ToolScoreClient发送的请求类型消息
@@ -148,7 +156,7 @@ class MCPServer:
                             "error_message": "UnifiedToolLibrary not initialized for this server.",
                             "data": []
                         }
-                    await websocket.send(json.dumps(response))
+                    await self._safe_send(websocket, json.dumps(response))
                 else:
                     # 处理其他action类型
                     response = {
@@ -157,7 +165,7 @@ class MCPServer:
                         "success": False,
                         "error_message": f"Unknown action: {action}"
                     }
-                    await websocket.send(json.dumps(response))
+                    await self._safe_send(websocket, json.dumps(response))
 
             elif request_type == "list_tools" and self.server_name == "toolscore":
                 # 只有toolscore才处理工具列表请求
@@ -200,7 +208,7 @@ class MCPServer:
                         "tools": [],
                         "total_count": 0
                     }
-                await websocket.send(json.dumps(response))
+                await self._safe_send(websocket, json.dumps(response))
 
             elif request_type == "execute_tool" and self.server_name == "toolscore":
                 # 只有toolscore才处理工具执行请求并路由
@@ -278,7 +286,7 @@ class MCPServer:
                         "error": "UnifiedToolLibrary not initialized for this server.",
                         "error_type": ErrorType.SYSTEM_ERROR.value
                     }
-                await websocket.send(json.dumps(response))
+                await self._safe_send(websocket, json.dumps(response))
 
             elif request_type == "execute_tool_action":
                 # 其他MCP Server处理自身的工具动作
@@ -313,7 +321,7 @@ class MCPServer:
                         "action": action,
                         "result": {"success": False, "error": "No action handler registered", "error_type": "ServerError"}
                     }
-                await websocket.send(json.dumps(response))
+                await self._safe_send(websocket, json.dumps(response))
             else:
                 logger.warning(f"Unknown request type or server role mismatch: {request_type}")
                 response = {
@@ -321,14 +329,14 @@ class MCPServer:
                     "request_id": request_id,
                     "message": f"Unknown request type or server role mismatch: {request_type}"
                 }
-                await websocket.send(json.dumps(response))
+                await self._safe_send(websocket, json.dumps(response))
 
         except json.JSONDecodeError:
             logger.error(f"Received invalid JSON: {message}")
-            await websocket.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+            await self._safe_send(websocket, json.dumps({"type": "error", "message": "Invalid JSON"}))
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
-            await websocket.send(json.dumps({"type": "error", "message": str(e)}))
+            await self._safe_send(websocket, json.dumps({"type": "error", "message": str(e)}))
                 
     async def _forward_to_mcp_server(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """转发请求到实际的MCP服务器"""
