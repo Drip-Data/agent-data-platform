@@ -1,20 +1,32 @@
 {
-  "test_time": "2025-06-28T12:05:32.024562",
-  "total_tasks": 1,
+  "test_time": "2025-06-30T01:12:51.693923",
+  "total_tasks": 2,
   "successful_tasks": 0,
-  "failed_tasks": 1,
+  "failed_tasks": 2,
   "results": [
     {
-      "task_id": "949d6122-f705-4e7b-bc66-28f3809771cf",
+      "task_id": "ca8e29a7-778e-445a-8e05-226665e2f7f8",
       "original_task_id": null,
-      "description": "级联修复测试：1+1=?",
-      "status": "timeout",
+      "description": "测试修复：先搜索Python创造者，然后用Python代码计算2+3的结果",
+      "status": "failed",
       "success": false,
-      "final_result": null,
-      "error_message": "任务超时 (30秒)",
-      "total_duration": 30,
-      "submit_time": "2025-06-28T12:05:01.945984",
-      "complete_time": "2025-06-28T12:05:32.021771"
+      "final_result": "任务执行完成，已输出原始XML轨迹格式",
+      "error_message": null,
+      "total_duration": 3.4990758895874023,
+      "submit_time": "2025-06-30T01:12:43.651808",
+      "complete_time": "2025-06-30T01:12:47.675688"
+    },
+    {
+      "task_id": "013eebee-68c1-4a93-add2-9bed88fa9920",
+      "original_task_id": null,
+      "description": "复合推理任务：先用DeepSearch研究Python数据分析最佳实践，然后用MicroSandbox编写并执行一个简单的数据分析示例代码，最后用Search Tool查找项目中相关的代码模式",
+      "status": "failed",
+      "success": false,
+      "final_result": "任务执行完成，已输出原始XML轨迹格式",
+      "error_message": null,
+      "total_duration": 3.7977211475372314,
+      "submit_time": "2025-06-30T01:12:47.676687",
+      "complete_time": "2025-06-30T01:12:51.692425"
     }
   ]
 }

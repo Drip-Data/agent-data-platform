@@ -33,6 +33,7 @@ class ExecutionContext:
     max_steps: int = 10
     timeout_per_step: int = 300  # 5 minutes per step
     total_timeout: int = 1800    # 30 minutes total
+    session_id: str = ""  # 会话ID
 
 class StreamingStateManager:
     """流式执行状态管理器"""
@@ -203,9 +204,10 @@ class StreamingStateManager:
         if execution_time > self.context.total_timeout:
             return True, f"总执行时间超时 ({execution_time:.2f}s > {self.context.total_timeout}s)"
         
-        # 检查步骤数量限制
-        if len(self.steps) > self.context.max_steps:
-            return True, f"步骤数量超过限制 ({len(self.steps)} > {self.context.max_steps})"
+        # 检查已执行步骤数量限制
+        executed_steps = len([s for s in self.steps if s.status in ['completed', 'failed']])
+        if executed_steps > self.context.max_steps:
+            return True, f"执行步骤数量超过限制 ({executed_steps} > {self.context.max_steps})"
         
         # 检查错误率
         if self.error_count >= 3:

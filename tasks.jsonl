@@ -1,3 +1,3 @@
-{"task_id": "test-xml-1", "task_type": "reasoning", "description": "使用Python写一个简单的快速排序算法，然后用几个测试用例来验证它的正确性"}
-{"task_id": "test-xml-2", "task_type": "reasoning", "description": "搜索关于Python装饰器的信息，然后写一个简单的计时装饰器例子"}
-{"task_id": "test-xml-3", "task_type": "reasoning", "description": "创建一个计算器类，支持基本的四则运算，并测试每个功能"}
+{"task_id": "test-fix", "task_type": "reasoning", "description": "先搜索Python创造者是谁, 然后用Python代码计算2的5次方的结果"}
+{"task_id": "test_reasoning_combo", "task_type": "reasoning", "description": "先用DeepSearch研究Python数据分析最佳实践，然后用MicroSandbox编写并执行一个简单的数据分析示例代码，最后用Search Tool查找项目中相关的代码模式"}
+{"task_id": "冒泡测试", "task_type": "reasoning", "description": "用python写一个冒泡排序，然后放4个测试集测试"}

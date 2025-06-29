@@ -4,14 +4,13 @@ from typing import Dict, Optional, List
 
 # 导入运行时相关模块
 from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
-from runtimes.reasoning.simple_runtime import SimpleReasoningRuntime
 
 logger = logging.getLogger(__name__)
 
 # 全局变量
 runtime_instances = []
 
-def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, xml_streaming_mode: bool = False, use_simple_runtime: bool = False, trajectory_storage_mode: str = "daily_grouped"):
+def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, trajectory_storage_mode: str = "daily_grouped"):
     """初始化推理运行时服务"""
     global runtime_instances
     
@@ -31,28 +30,21 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
     # 从环境变量中获取运行时实例数量
     instance_count = int(os.getenv('RUNTIME_INSTANCES', 1))
     
-    # 创建指定数量的运行时实例
+    # 创建指定数量的运行时实例 (默认启用XML streaming模式)
     for i in range(instance_count):
-        if use_simple_runtime:
-            instance_name = f"simple-runtime-{i+1}"
-            logger.info(f"创建简化运行时实例: {instance_name} (存储模式: {trajectory_storage_mode})")
-            # 创建简化运行时实例
-            runtime = SimpleReasoningRuntime(
-                config_manager=config_manager, 
-                llm_client=llm_client, 
-                toolscore_client=toolscore_client, 
-                redis_manager=redis_manager,  # 修复：传入redis_manager
-                xml_streaming_mode=xml_streaming_mode, 
-                trajectory_storage_mode=trajectory_storage_mode
-            )
-            runtime._runtime_id = f"simple-reasoning-{i+1}"
-        else:
-            instance_name = f"enhanced-runtime-{i+1}"
-            logger.info(f"创建运行时实例: {instance_name}")
-            # 创建运行时实例并传入依赖，包括新的websocket端点和redis_manager
-            runtime = EnhancedReasoningRuntime(config_manager, llm_client, toolscore_client, redis_manager, toolscore_websocket_endpoint, xml_streaming_mode)
-            runtime._runtime_id = f"enhanced-reasoning-{i+1}"
-        
+        instance_name = f"enhanced-runtime-{i+1}"
+        logger.info(f"创建增强运行时实例: {instance_name} (存储模式: {trajectory_storage_mode})")
+        # 创建运行时实例并传入依赖，默认启用XML streaming模式
+        runtime = EnhancedReasoningRuntime(
+            config_manager=config_manager, 
+            llm_client=llm_client, 
+            toolscore_client=toolscore_client, 
+            redis_manager=redis_manager, 
+            toolscore_websocket_endpoint=toolscore_websocket_endpoint, 
+            xml_streaming_mode=True,  # 默认启用XML streaming
+            trajectory_storage_mode=trajectory_storage_mode
+        )
+        runtime._runtime_id = f"enhanced-reasoning-{i+1}"
         runtime_instances.append(runtime)
     
     logger.info(f"推理运行时服务初始化完成，创建了 {len(runtime_instances)} 个实例")
@@ -172,7 +164,7 @@ def health_check():
         'instance_count': len(runtime_instances)
     }
 
-def get_runtime_instances() -> List[EnhancedReasoningRuntime]:
+def get_runtime_instances():
     """获取所有运行时实例"""
     if not runtime_instances:
         raise RuntimeError("推理运行时未初始化，请先调用initialize()")

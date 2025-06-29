@@ -65,7 +65,8 @@ class SequentialStreamingExecutor:
             current_response=initial_response,
             max_steps=max_steps,
             timeout_per_step=timeout_per_step,
-            total_timeout=total_timeout
+            total_timeout=total_timeout,
+            session_id=session_id
         )
         
         state_manager = StreamingStateManager(context)
@@ -139,19 +140,47 @@ class SequentialStreamingExecutor:
     
     def _parse_sequential_steps(self, xml_response: str) -> List[ExecutionStep]:
         steps = []
-        xml_pattern = r'<(think|microsandbox|deepsearch|browser|search|answer|parallel)>(.*?)</\1>'
-        for match in re.finditer(xml_pattern, xml_response, re.DOTALL):
+        
+        # 首先检测并移除任何虚假的<result>标签，这些是LLM幻觉生成的
+        cleaned_response = self._remove_hallucinated_results(xml_response)
+        
+        # 解析工具调用标签
+        xml_pattern = r'<(think|microsandbox|deepsearch|browser_use|browser|search|answer|parallel)>(.*?)</\1>'
+        for match in re.finditer(xml_pattern, cleaned_response, re.DOTALL):
             tag_name, content, position = match.group(1), match.group(2).strip(), match.span()
             step_id = f"{tag_name}_{len(steps)}_{uuid.uuid4().hex[:6]}"
+            
+            # 标准化工具名称
+            if tag_name == 'browser':
+                tag_name = 'browser_use'
             
             if tag_name == 'parallel':
                 step = ExecutionStep(step_id=step_id, step_type='parallel', content=self._parse_parallel_block(content, position), position=position, needs_execution=True)
             else:
-                step = ExecutionStep(step_id=step_id, step_type=tag_name, content=content, position=position, needs_execution=tag_name in ['microsandbox', 'deepsearch', 'browser', 'search'])
+                # 只有工具调用需要执行，think和answer不需要
+                needs_execution = tag_name in ['microsandbox', 'deepsearch', 'browser_use', 'search']
+                step = ExecutionStep(step_id=step_id, step_type=tag_name, content=content, position=position, needs_execution=needs_execution)
             
             steps.append(step)
             logger.debug(f"📝 解析步骤: {step_id} ({tag_name})")
+        
         return steps
+    
+    def _remove_hallucinated_results(self, xml_response: str) -> str:
+        """移除LLM生成的虚假<result>标签，防止幻觉"""
+        # 查找所有<result>标签并记录位置
+        result_pattern = r'<result>(.*?)</result>'
+        fake_results = list(re.finditer(result_pattern, xml_response, re.DOTALL))
+        
+        if fake_results:
+            logger.warning(f"🚨 检测到 {len(fake_results)} 个虚假<result>标签，正在移除...")
+            # 从后往前移除，避免位置偏移
+            for match in reversed(fake_results):
+                start, end = match.span()
+                logger.warning(f"🚨 移除虚假结果: {xml_response[start:end][:100]}...")
+                xml_response = xml_response[:start] + xml_response[end:]
+        
+        return xml_response
 
     def _parse_parallel_block(self, block_content: str, parent_position: Tuple[int, int]) -> List[ExecutionStep]:
         sub_steps = []
@@ -257,6 +286,9 @@ class SequentialStreamingExecutor:
                 if not action_match: raise ValueError("无效的嵌套工具调用格式")
                 action, parameters = action_match.group(1), {"instruction": action_match.group(2).strip()}
 
+            # 修复动作名称映射
+            action = self._fix_action_name(tool_id, action)
+            
             logger.info(f"🔧 准备��行: tool_id='{tool_id}', action='{action}'")
             
             execution_result = await self.tool_executor.execute_tool(
@@ -366,6 +398,27 @@ Execution status:
 - Failed steps: {stats['failed_steps']}
 Please continue with your analysis and next steps in XML format.
 Continue:"""
+    
+    def _fix_action_name(self, tool_id: str, action: str) -> str:
+        """修复LLM生成的动作名称与实际工具支持的动作名称不匹配的问题"""
+        action_mapping = {
+            'microsandbox': {
+                'execute_code': 'microsandbox_execute'
+            },
+            'browser_use': {
+                'browser_search_google': 'browser_search_google',
+                'browser_navigate': 'browser_navigate',
+                'browser_click_element': 'browser_click_element'
+            }
+        }
+        
+        if tool_id in action_mapping and action in action_mapping[tool_id]:
+            fixed_action = action_mapping[tool_id][action]
+            if fixed_action != action:
+                logger.info(f"🔧 动作名称映射: {tool_id}.{action} -> {fixed_action}")
+            return fixed_action
+        
+        return action
     
     def _should_continue_after_error(self, error: Exception, state_manager: StreamingStateManager) -> bool:
         stats = state_manager.get_execution_stats()
