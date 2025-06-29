@@ -123,9 +123,9 @@ JSON only, no explanatory text!"""
                                    tool_descriptions: Optional[str] = None,
                                    previous_steps: Optional[List[Dict[str, Any]]] = None,
                                    execution_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """构建简洁的XML流式执行提示"""
+        """构建支持分层工具选择的XML流式执行提示"""
         
-        # 构建工具能力展示
+        # 构建工具能力展示（只展示高层级的Server）
         tools_capabilities = self._build_tool_capabilities_section(available_tools, tool_descriptions)
         
         # 构建执行历史
@@ -141,46 +141,55 @@ JSON only, no explanatory text!"""
         # 构建上下文信息
         context_info = ""
         if execution_context:
-            memory_context = execution_context.get('memory_context', {})
-            if memory_context:
-                context_info = f"\n\nContext: {len(memory_context.get('related_memories', []))} related memories available\n"
-        
-        prompt_template = f"""You are a helpful AI assistant that can solve the given task step by step with the help of available MCP tools.
+            memory_context = execution_context.get('memory_context')
+            if memory_context and isinstance(memory_context, str):
+                context_info = f"\n\nContext from Memory:\n{memory_context}\n"
 
-        **Task**: {task_description}
+        prompt_template = f"""You are an expert AI assistant that solves tasks by generating a plan using a sequence of tools in XML format.
 
-        **Available Tools**:
-        {tools_capabilities}
-        {execution_history}
-        {context_info}
+**Primary Goal**: Solve the user's task by thinking step-by-step and using the available services.
 
-        During problem solving, you need to first think about the reasoning process and then use appropriate tools if needed. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags respectively. Tool usage is enclosed within MCP server tags:
+**XML Rules**:
+1.  **Think First**: Always start with a `<think>` block to describe your reasoning and plan.
+2.  **Hierarchical Tools**: You must use a two-level nested structure for tool calls. First, select a high-level service (e.g., `<microsandbox>`), then inside it, specify the exact action (e.g., `<execute_code>`).
+3.  **Provide Full Context**: The content inside the inner action tag is the complete input for that action.
+4.  **Sequential & Parallel**: Place tool calls sequentially for dependent tasks. Use a `<parallel>` block to wrap independent tool calls that can run simultaneously.
+5.  **Final Answer**: Conclude your work with an `<answer>` tag containing the final, user-facing result.
 
-        - `<microsandbox>code or instruction</microsandbox>` for code execution, package installation, session management
-        - `<deepsearch>research question</deepsearch>` for research and information gathering  
-        - `<browser>task description</browser>` for web browsing and automation
-        - `<search>search instruction</search>` for file searching and code analysis
+**Available Services**:
+{tools_capabilities}
+{execution_history}
+{context_info}
+**Execution Example**:
 
-        **Optional Confidence**: You can include `<confidence>score</confidence>` inside any tool tag to specify your confidence level (0.0-1.0) for that specific operation.
+<think>First, I need to see what files are in the current directory to understand the project structure. Then, I will read the `main.py` file.</think>
+<microsandbox>
+  <list_files>
+    .
+  </list_files>
+</microsandbox>
+<result>
+  - main.py
+  - README.md
+</result>
+<think>Okay, I see the main file. Now I will read its content.</think>
+<microsandbox>
+  <read_file>
+    main.py
+  </read_file>
+</microsandbox>
+<result>
+  # content of main.py
+  ...
+</result>
+<think>I have analyzed the file. The task is complete.</think>
+<answer>I have successfully analyzed the project structure by listing files and reading the content of main.py.</answer>
 
-        The system will automatically insert results after each tool call in <result> </result> tags.
+---
+Now, begin solving the following task.
 
-        For example:
-        <think>I need to research this topic first, then implement the solution.</think>
-        <deepsearch>Python quicksort algorithm best practices</deepsearch>
-        <result>research results here</result>
-        <think>Based on the research, I'll implement the algorithm with performance testing.</think>
-        <microsandbox>
-        def quicksort(arr):
-            # implementation here
-            pass
-        # test the algorithm
-        </microsandbox>
-        <result>execution results here</result>
-        <think>The implementation works correctly.</think>
-        <answer>Task completed successfully.</answer>
-
-        Start solving the task:"""
+**Task**: {task_description}
+"""
 
         return [{"role": "user", "content": prompt_template}]
     

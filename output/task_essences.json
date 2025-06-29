@@ -534,5 +534,47 @@
     },
     "extracted_at": "2025-06-29T19:57:47.014159",
     "source_trajectory_id": "87fd3e78-f64c-4df2-b085-89d6f6d29939"
+  },
+  {
+    "essence_id": "essence_1751201766_90f7f036-23c8-4258-ad93-ecd67e970e39",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "搜索美国现任领导人信息，并使用Python实现一个深度搜索树的示例，同时提供三个测试用例进行验证。此任务旨在结合信息检索与算法实践，考察对搜索技术和编程实现的理解。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 55.742,
+      "steps_count": 4,
+      "key_features": [
+        "多工具协同（搜索与代码执行）",
+        "信息检索与知识获取",
+        "算法实现与测试",
+        "推理与决策过程"
+      ],
+      "confidence": 0.9,
+      "tools_used": []
+    },
+    "extracted_at": "2025-06-29T20:56:06.362134",
+    "source_trajectory_id": "90f7f036-23c8-4258-ad93-ecd67e970e39"
+  },
+  {
+    "essence_id": "essence_1751201767_f205608b-6afb-4603-9722-16ae580e965d",
+    "task_type": "reasoning",
+    "domain": "research",
+    "query": "查询当前美国领导人的身份信息。此任务需要利用搜索工具获取最新、准确的政治信息，并可能涉及对信息的验证和提炼，以确保结果的可靠性。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 37.05,
+      "steps_count": 4,
+      "key_features": [
+        "信息查询",
+        "实时性要求",
+        "政治领域",
+        "工具调用失败"
+      ],
+      "confidence": 0.9,
+      "tools_used": []
+    },
+    "extracted_at": "2025-06-29T20:56:07.536670",
+    "source_trajectory_id": "f205608b-6afb-4603-9722-16ae580e965d"
   }
 ]

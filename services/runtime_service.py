@@ -37,7 +37,14 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
             instance_name = f"simple-runtime-{i+1}"
             logger.info(f"创建简化运行时实例: {instance_name} (存储模式: {trajectory_storage_mode})")
             # 创建简化运行时实例
-            runtime = SimpleReasoningRuntime(config_manager, llm_client, toolscore_client, xml_streaming_mode, trajectory_storage_mode)
+            runtime = SimpleReasoningRuntime(
+                config_manager=config_manager, 
+                llm_client=llm_client, 
+                toolscore_client=toolscore_client, 
+                redis_manager=redis_manager,  # 修复：传入redis_manager
+                xml_streaming_mode=xml_streaming_mode, 
+                trajectory_storage_mode=trajectory_storage_mode
+            )
             runtime._runtime_id = f"simple-reasoning-{i+1}"
         else:
             instance_name = f"enhanced-runtime-{i+1}"
