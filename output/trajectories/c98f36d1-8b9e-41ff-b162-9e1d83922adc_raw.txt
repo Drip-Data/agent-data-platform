@@ -1,0 +1,14 @@
+任务: 毛泽东是哪个国家的领导人
+任务ID: c98f36d1-8b9e-41ff-b162-9e1d83922adc
+执行时间: 1.38秒
+成功状态: ✅
+--------------------------------------------------
+原始轨迹输出:
+--------------------------------------------------
+<think>The user is asking a factual question about the nationality of a historical leader. I can use a search engine to find this information quickly and reliably.</think>
+<browser>Who was Mao Zedong and what country did he lead?</browser>
+<result>Mao Zedong was a Chinese communist revolutionary who became the founding father of the People's Republic of China, which he ruled as the Chairman of the Communist Party of China from its establishment in 1949 until his death in 1976.</result>
+<think>The search results clearly indicate that Mao Zedong was the leader of China.</think>
+<answer>毛泽东是中国的领导人。</answer>
+--------------------------------------------------
+最终结果: 任务执行完成，已输出原始XML轨迹格式

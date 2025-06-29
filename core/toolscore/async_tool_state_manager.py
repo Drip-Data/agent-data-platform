@@ -153,8 +153,18 @@ class AsyncToolStateManager:
             available_tools = await self.toolscore_client.get_available_tools()
             available_tool_names = set()
             
-            if isinstance(available_tools, dict) and available_tools.get('success'):
-                # Extract tool names from response
+            # Handle both list and dict responses from get_available_tools()
+            if isinstance(available_tools, list):
+                # New format: list of tool names like ['server.tool_name']
+                for tool_full_name in available_tools:
+                    if '.' in tool_full_name:
+                        # Extract just the server name (first part before dot)
+                        server_name = tool_full_name.split('.')[0]
+                        available_tool_names.add(server_name)
+                    else:
+                        available_tool_names.add(tool_full_name)
+            elif isinstance(available_tools, dict) and available_tools.get('success'):
+                # Legacy format: dict with success flag and tools data
                 tools_data = available_tools.get('tools', {})
                 if isinstance(tools_data, dict):
                     available_tool_names = set(tools_data.keys())

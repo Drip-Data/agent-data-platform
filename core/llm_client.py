@@ -56,9 +56,10 @@ class LLMClient:
         self._enrich_config_with_env_vars()
         
         # 实例化提示构建器
+        streaming_mode = config.get('streaming_mode', True)  # 默认启用XML流式模式
         self.code_prompt_builder: IPromptBuilder = CodePromptBuilder()
         self.web_prompt_builder: IPromptBuilder = WebPromptBuilder()
-        self.reasoning_prompt_builder: IPromptBuilder = ReasoningPromptBuilder()
+        self.reasoning_prompt_builder: IPromptBuilder = ReasoningPromptBuilder(streaming_mode=streaming_mode)
         self.summary_prompt_builder: IPromptBuilder = SummaryPromptBuilder()
         self.completion_check_prompt_builder: IPromptBuilder = CompletionCheckPromptBuilder()
         self.task_analysis_prompt_builder: IPromptBuilder = TaskAnalysisPromptBuilder()
@@ -223,14 +224,16 @@ class LLMClient:
     async def generate_enhanced_reasoning(self, task_description: str, available_tools: List[str],
                                          tool_descriptions: str,
                                          previous_steps: Optional[List[Dict[str, Any]]] = None,
-                                         execution_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """生成增强推理步骤和工具调用 - 使用丰富的工具描述和执行上下文"""
+                                         execution_context: Optional[Dict[str, Any]] = None,
+                                         streaming_mode: Optional[bool] = None) -> Dict[str, Any]:
+        """生成增强推理步骤和工具调用 - 使用丰富的工具描述和执行上下文，支持XML流式模式"""
         messages = self.reasoning_prompt_builder.build_prompt(
             task_description=task_description,
             available_tools=available_tools,
             tool_descriptions=tool_descriptions,
             previous_steps=previous_steps,
-            execution_context=execution_context
+            execution_context=execution_context,
+            streaming_mode=streaming_mode
         )
         
         try:

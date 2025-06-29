@@ -1,0 +1,142 @@
+任务: 搜索关于Python装饰器的信息，然后写一个简单的计时装饰器例子
+任务ID: test-xml-2
+执行时间: 4.63秒
+成功状态: ✅
+--------------------------------------------------
+原始轨迹输出:
+--------------------------------------------------
+<think>The user wants to understand Python decorators and see a simple timing decorator example. I should first research what Python decorators are and then create a practical example of a timing decorator.</think>
+<deepsearch>what are python decorators</deepsearch>
+<result>
+Python decorators are a powerful and flexible feature that allows you to modify or enhance functions or methods. They are a type of callable that is used to modify a function or a class. A decorator is a function that takes another function as an argument, adds some functionality to it, and then returns another function. This is done without altering the source code of the original function.
+
+Decorators are often used for:
+*   **Logging**: Recording function calls, arguments, and return values.
+*   **Access Control**: Checking permissions before executing a function.
+*   **Instrumentation**: Timing function execution, counting calls, etc.
+*   **Rate Limiting**: Restricting how often a function can be called.
+*   **Memoization**: Caching function results to speed up repeated calls with the same arguments.
+
+The syntax for applying a decorator is the `@decorator_name` syntax placed directly above the function definition.
+
+Here's a basic structure:
+
+```python
+def my_decorator(func):
+    def wrapper(*args, **kwargs):
+        # Do something before the function is called
+        result = func(*args, **kwargs)
+        # Do something after the function is called
+        return result
+    return wrapper
+
+@my_decorator
+def say_hello():
+    print("Hello!")
+```
+</result>
+<think>The research provided a good overview of Python decorators and their structure. Now I need to create a specific example of a timing decorator. This decorator should measure the execution time of a function and print it.</think>
+<microsandbox>
+import time
+import functools
+
+def timer_decorator(func):
+    @functools.wraps(func)
+    def wrapper_timer(*args, **kwargs):
+        start_time = time.perf_counter()    # 1. Record start time
+        value = func(*args, **kwargs)
+        end_time = time.perf_counter()      # 2. Record end time
+        run_time = end_time - start_time    # 3. Calculate run time
+        print(f"Finished {func.__name__!r} in {run_time:.4f} secs")
+        return value
+    return wrapper_timer
+
+@timer_decorator
+def slow_function(delay):
+    """Simulates a function that takes some time to execute."""
+    time.sleep(delay)
+    print(f"Function executed after {delay} seconds.")
+
+# Example usage:
+slow_function(2)
+slow_function(1)
+
+@timer_decorator
+def fast_function():
+    """A function that executes quickly."""
+    result = sum(i*i for i in range(1000000))
+    print("Fast function completed.")
+    return result
+
+fast_function()
+</microsandbox>
+<result>
+Function executed after 2 seconds.
+Finished 'slow_function' in 2.0012 secs
+Function executed after 1 seconds.
+Finished 'slow_function' in 1.0008 secs
+Fast function completed.
+Finished 'fast_function' in 0.0785 secs
+</result>
+<think>The timing decorator works as expected. It correctly measures and prints the execution time of both the slow and fast functions. The use of `functools.wraps` ensures that the metadata of the original function (like its name) is preserved.</think>
+<answer>
+Python decorators are a way to modify or enhance functions or methods. They are functions that take another function as an argument, add some functionality, and return a new function. This allows you to add features like logging, access control, or timing without changing the original function's code.
+
+Here's a simple timing decorator example:
+
+```python
+import time
+import functools
+
+def timer_decorator(func):
+    '''A decorator that logs the execution time of a function.'''
+    @functools.wraps(func) # Preserves original function's metadata
+    def wrapper_timer(*args, **kwargs):
+        start_time = time.perf_counter()    # 1. Record start time
+        value = func(*args, **kwargs)
+        end_time = time.perf_counter()      # 2. Record end time
+        run_time = end_time - start_time    # 3. Calculate run time
+        print(f"Finished {func.__name__!r} in {run_time:.4f} secs")
+        return value
+    return wrapper_timer
+
+# Example usage:
+
+@timer_decorator
+def slow_function(delay):
+    """Simulates a function that takes some time to execute."""
+    time.sleep(delay)
+    print(f"Function executed after {delay} seconds.")
+
+@timer_decorator
+def fast_function():
+    """A function that executes quickly."""
+    result = sum(i*i for i in range(1000000))
+    print("Fast function completed.")
+    return result
+
+print("Testing slow_function:")
+slow_function(2)
+slow_function(1)
+
+print("\nTesting fast_function:")
+fast_function()
+```
+
+**Explanation:**
+
+1.  **`timer_decorator(func)`**: This is the decorator function. It takes the function to be decorated (`func`) as an argument.
+2.  **`@functools.wraps(func)`**: This is itself a decorator applied to the `wrapper_timer` function. It's important because it copies the original function's metadata (like `__name__`, `__doc__`, etc.) to the wrapper function. Without it, the decorated function would appear as `wrapper_timer` in introspection.
+3.  **`wrapper_timer(*args, **kwargs)`**: This is the inner function that will replace the original function. It accepts arbitrary positional (`*args`) and keyword arguments (`**kwargs`) to handle any function signature.
+4.  **`start_time = time.perf_counter()`**: Records the precise time before the decorated function starts executing.
+5.  **`value = func(*args, **kwargs)`**: Calls the original decorated function with its arguments and stores its return value.
+6.  **`end_time = time.perf_counter()`**: Records the time after the decorated function finishes.
+7.  **`run_time = end_time - start_time`**: Calculates the difference to get the execution duration.
+8.  **`print(...)`**: Prints a message indicating the function's name and its execution time.
+9.  **`return value`**: Returns the original function's result.
+10. **`@timer_decorator`**: This syntax is syntactic sugar. Applying `@timer_decorator` above a function definition is equivalent to `my_function = timer_decorator(my_function)` after the function is defined.
+
+When you run this code, you will see output showing how long each function took to execute.
+</answer>
+--------------------------------------------------
+最终结果: 任务执行完成，已输出原始XML轨迹格式

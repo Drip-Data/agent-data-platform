@@ -204,7 +204,7 @@ class BuiltinServiceDiscovery:
                 "port": 8090,
                 "capabilities": [
                     {
-                        "name": "execute_code",
+                        "name": "microsandbox_execute",
                         "description": "在沙盒中安全执行代码",
                         "parameters": {
                             "code": {"type": "string", "description": "要执行的代码"},

@@ -615,10 +615,8 @@ class ParameterValidator:
         elif tool_id == "microsandbox":
             # MicroSandbox的代码参数验证
             if action == "microsandbox_execute" and "code" in validated:
-                # 确保代码包含基本的Python语法
-                code = validated["code"]
-                if not any(keyword in code for keyword in ['print', 'import', '=', 'def', 'class']):
-                    validated["code"] = f"# {code}\nprint('执行开始')\n# TODO: 添加具体逻辑\nprint('执行完成')"
+                # 保持原始代码不变，移除自动替换逻辑
+                pass
         
         return validated
     

@@ -10,11 +10,17 @@ class TaskEnhancer:
     """
     任务增强器，负责调用 ToolScore 服务并根据推荐结果增强任务。
     """
-    def __init__(self, toolscore_client: ToolScoreClient):
+    def __init__(self, toolscore_client: ToolScoreClient, simple_mode: bool = False):
         self.toolscore_client = toolscore_client
+        self.simple_mode = simple_mode
 
     async def enhance_task_with_tools(self, task: TaskSpec) -> TaskSpec:
         """为任务增强工具选择"""
+        # 简单模式：跳过工具增强，直接返回任务
+        if self.simple_mode:
+            logger.debug(f"简单模式：跳过任务 {task.task_id} 的工具增强")
+            return task
+            
         # 如果已经有明确的工具指定，且不是auto，就保持不变
         if task.expected_tools and task.expected_tools != ["auto"]:
             logger.debug(f"任务 {task.task_id} 已有明确工具: {task.expected_tools}")

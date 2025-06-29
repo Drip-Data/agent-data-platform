@@ -37,12 +37,13 @@ logger = logging.getLogger(__name__)
 
 class EnhancedReasoningRuntime(RuntimeInterface):
     """增强推理运行时 - 简化版本，专注LLM推理和执行"""
-    def __init__(self, config_manager, llm_client, toolscore_client, redis_manager=None, toolscore_websocket_endpoint: Optional[str] = None):
+    def __init__(self, config_manager, llm_client, toolscore_client, redis_manager=None, toolscore_websocket_endpoint: Optional[str] = None, xml_streaming_mode: bool = False):
         self._runtime_id = f"enhanced-reasoning-{uuid.uuid4()}"
         self.config_manager = config_manager
         self.client = llm_client
         self.toolscore_client = toolscore_client
         self.metrics = EnhancedMetrics(port=8003)
+        self.xml_streaming_mode = xml_streaming_mode  # 新增：XML streaming输出模式
         
         # 初始化记忆管理器和步骤规划器
         self.memory_manager = MemoryManager(redis_manager=redis_manager)
@@ -138,6 +139,54 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return f"Available tools: {', '.join(ready_tools)}"
         else:
             return "No tools currently available"
+    
+    async def _get_available_tools_list(self) -> List[str]:
+        """获取可用工具ID列表"""
+        try:
+            available_tools = await self.toolscore_client.get_available_tools()
+            if not available_tools:
+                return []
+            
+            # 提取工具ID列表
+            tool_ids = []
+            for tool in available_tools:
+                if isinstance(tool, dict):
+                    tool_id = tool.get('id', '')
+                    if tool_id:
+                        tool_ids.append(tool_id)
+                elif isinstance(tool, str):
+                    tool_ids.append(tool)
+            
+            return tool_ids
+        except Exception as e:
+            logger.error(f"获取工具列表失败: {e}")
+            return []
+    
+    async def _get_tool_descriptions(self) -> str:
+        """获取工具描述"""
+        try:
+            # 使用现有的工具描述获取逻辑
+            if hasattr(self, 'tool_schema_manager') and self.tool_schema_manager:
+                return await self.tool_schema_manager.generate_llm_tools_description()
+            elif hasattr(self, 'real_time_client') and self.real_time_client:
+                available_tools = await self._get_available_tools_list()
+                return await self.real_time_client.get_fresh_tools_for_llm(
+                    available_tools, force_refresh=True
+                )
+            else:
+                # 简单的工具描述
+                available_tools = await self._get_available_tools_list()
+                if not available_tools:
+                    return "暂无可用工具"
+                
+                tool_descriptions = []
+                for tool_id in available_tools:
+                    tool_descriptions.append(f"- **{tool_id}**: 可用工具")
+                
+                return "\n".join(tool_descriptions)
+        except Exception as e:
+            logger.error(f"获取工具描述失败: {e}")
+            return "工具描述获取失败"
 
     async def initialize(self):
         """初始化运行时 - 简化为纯工具消费者"""
@@ -283,62 +332,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if required_cap.lower() in tool_cap.lower() or tool_cap.lower() in required_cap.lower():
                     return True
         
-        return False
-    
-    async def _wait_for_essential_tools(self, timeout: int = 30) -> bool:
-        """
-        ⚠️ DEPRECATED: 替换为异步工具状态管理器
-        此方法已被AsyncToolStateManager替代，不应再使用
-        """
-        logger.warning("⚠️ _wait_for_essential_tools is deprecated. Use async_tool_manager.are_essential_tools_ready() instead")
-        if hasattr(self, 'async_tool_manager'):
-            return self.async_tool_manager.are_essential_tools_ready()
-        return False  # 旧方法返回False，强制使用新系统
-    
-    async def _wait_for_essential_tools_original_blocking(self, timeout: int = 30) -> bool:
-        """原始的阻塞式等待方法 - 已弃用"""
-        essential_tools = [
-            'deepsearch',
-            'microsandbox', 
-            'browser_use',
-            'mcp-search-tool'
-        ]
-        
-        start_time = time.time()
-        check_interval = 1  # 每秒检查一次
-        
-        while time.time() - start_time < timeout:
-            try:
-                # 获取当前可用工具
-                available_tools = await self.toolscore_client.get_available_tools()
-                if not available_tools:
-                    logger.debug("🔍 ToolScore服务返回空工具列表，继续等待...")
-                    await asyncio.sleep(check_interval)
-                    continue
-                
-                # 检查必需工具是否都已就绪
-                available_tool_ids = [tool.get('id', '') for tool in available_tools if isinstance(tool, dict)]
-                available_tool_ids.extend([tool_id for tool_id in available_tools if isinstance(tool_id, str)])
-                
-                missing_tools = [tool for tool in essential_tools if tool not in available_tool_ids]
-                
-                if not missing_tools:
-                    logger.info(f"✅ 所有关键工具已就绪: {essential_tools}")
-                    
-                    # 额外验证：确保工具确实可以响应
-                    await self._verify_tools_connectivity(essential_tools)
-                    
-                    return True
-                else:
-                    logger.debug(f"⏳ 等待工具就绪... 缺少: {missing_tools}")
-                
-                await asyncio.sleep(check_interval)
-                
-            except Exception as e:
-                logger.debug(f"⚠️ 检查工具状态时出错: {e}")
-                await asyncio.sleep(check_interval)
-        
-        logger.warning(f"⚠️ 超时等待关键工具就绪 ({timeout}秒)")
         return False
     
     async def _wait_for_essential_tools_enhanced(self, timeout: int = 60, max_retries: int = 3) -> bool:
@@ -650,6 +643,12 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     async def execute(self, task: TaskSpec) -> TrajectoryResult:
         """执行任务"""
         logger.info(f"🧠 开始执行任务: {task.description}")
+        
+        # 🎯 XML Streaming模式：直接输出原始XML格式
+        if self.xml_streaming_mode:
+            return await self._execute_xml_streaming(task)
+        
+        # 🔄 传统模式：生成JSON轨迹格式
         start_time = time.time()
         trajectory_id = task.task_id
         success = False
@@ -1137,6 +1136,26 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     action = action_result.get('action')
                     tool_id = action_result.get('tool_id') or action_result.get('tool')
                     params = action_result.get('parameters', {})
+                    
+                    # 🚀 处理XML流式模式的auto_select
+                    if action == "auto_select":
+                        # 检测是否为Sequential模式
+                        if self._is_sequential_mode(thinking):
+                            logger.info(f"🎯 检测到Sequential模式，启动Sequential执行")
+                            return await self._execute_sequential_streaming(task_spec, thinking)
+                        else:
+                            # 原有单步逻辑
+                            logger.info(f"🎯 检测到auto_select，智能选择action for {tool_id}")
+                            action, params = self._auto_select_action(tool_id, params, thinking)
+                            logger.info(f"✅ 自动选择: {tool_id}.{action}")
+                        
+                        # 更新execution_code记录
+                        execution_code = json.dumps({
+                            'action': action,
+                            'tool_id': tool_id,
+                            'parameters': params,
+                            'auto_selected': True
+                        }, ensure_ascii=False)
                 
                 # 🔧 修复：不要将action和tool_id添加到parameters中
                 # 这些元数据应该与业务参数分开
@@ -1670,7 +1689,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         
                         try:
                             # 让LLM分析错误并生成修正的工具调用
-                            corrected_response = await self.client.call_llm(reflection_prompt)
+                            corrected_response = await self.client._call_api(reflection_prompt)
                             logger.info(f"🧠 LLM反思响应 (长度: {len(corrected_response)})")
                             
                             # 解析修正后的响应
@@ -1678,7 +1697,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                             parser = ReasoningResponseParser()
                             corrected_result = parser.parse_response(corrected_response)
                             
-                            if corrected_result.get('action') and corrected_result.get('tool_id'):
+                            # 添加类型检查防止'str' object has no attribute 'get'错误
+                            if isinstance(corrected_result, dict) and corrected_result.get('action') and corrected_result.get('tool_id'):
                                 # 使用修正后的参数进行下一次尝试
                                 action = corrected_result['action']
                                 tool_id = corrected_result['tool_id']
@@ -2247,27 +2267,83 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         """保存轨迹到文件"""
         out_dir = get_trajectories_dir()
         
-        collection_file = os.path.join(out_dir, "trajectories_collection.json")
-        
-        trajectories = []
-        if os.path.exists(collection_file):
-            try:
-                with open(collection_file, 'r', encoding='utf-8') as f:
-                    trajectories = json.load(f)
-                    if not isinstance(trajectories, list):
-                        trajectories = []
-            except (json.JSONDecodeError, Exception) as e:
-                logging.error(f"Error reading trajectories collection: {e}")
-                trajectories = []
-        
-        # 使用格式化的轨迹数据
-        formatted_trajectory = self._format_trajectory_for_readable_output(trajectory)
-        trajectories.append(formatted_trajectory)
-        
-        with open(collection_file, 'w', encoding='utf-8') as f:
-            json.dump(trajectories, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"Saved trajectory {trajectory.task_id} to collection")
+        # 检查是否是原始XML格式
+        if (trajectory.metadata and 
+            trajectory.metadata.get('output_format') == 'raw_xml_streaming' and 
+            trajectory.metadata.get('raw_llm_response')):
+            
+            # 保存原始XML格式到txt文件
+            raw_response = trajectory.metadata['raw_llm_response']
+            raw_file = os.path.join(out_dir, f"{trajectory.task_id}_raw.txt")
+            
+            with open(raw_file, 'w', encoding='utf-8') as f:
+                f.write(f"任务: {trajectory.task_description}\n")
+                f.write(f"任务ID: {trajectory.task_id}\n")
+                f.write(f"执行时间: {trajectory.total_duration:.2f}秒\n")
+                f.write(f"成功状态: {'✅' if trajectory.success else '❌'}\n")
+                f.write("-" * 50 + "\n")
+                f.write("原始轨迹输出:\n")
+                f.write("-" * 50 + "\n")
+                f.write(raw_response)
+                f.write("\n" + "-" * 50 + "\n")
+                f.write(f"最终结果: {trajectory.final_result}\n")
+            
+            logger.info(f"Saved raw XML trajectory {trajectory.task_id} to {raw_file}")
+            
+            # 同时保存到集合文件（简化的条目）
+            collection_file = os.path.join(out_dir, "trajectories_collection.json")
+            trajectories = []
+            
+            if os.path.exists(collection_file):
+                try:
+                    with open(collection_file, 'r', encoding='utf-8') as f:
+                        trajectories = json.load(f)
+                        if not isinstance(trajectories, list):
+                            trajectories = []
+                except (json.JSONDecodeError, Exception) as e:
+                    logging.error(f"Error reading trajectories collection: {e}")
+                    trajectories = []
+            
+            # 添加简化的轨迹条目，指向原始文件
+            simplified_entry = {
+                'task_id': trajectory.task_id,
+                'task_description': trajectory.task_description,
+                'success': trajectory.success,
+                'total_duration': trajectory.total_duration,
+                'final_result': trajectory.final_result,
+                'output_format': 'raw_xml_streaming',
+                'raw_file': f"{trajectory.task_id}_raw.txt",
+                'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ')
+            }
+            
+            trajectories.append(simplified_entry)
+            
+            with open(collection_file, 'w', encoding='utf-8') as f:
+                json.dump(trajectories, f, ensure_ascii=False, indent=2)
+            
+        else:
+            # 传统JSON格式保存
+            collection_file = os.path.join(out_dir, "trajectories_collection.json")
+            
+            trajectories = []
+            if os.path.exists(collection_file):
+                try:
+                    with open(collection_file, 'r', encoding='utf-8') as f:
+                        trajectories = json.load(f)
+                        if not isinstance(trajectories, list):
+                            trajectories = []
+                except (json.JSONDecodeError, Exception) as e:
+                    logging.error(f"Error reading trajectories collection: {e}")
+                    trajectories = []
+            
+            # 使用格式化的轨迹数据
+            formatted_trajectory = self._format_trajectory_for_readable_output(trajectory)
+            trajectories.append(formatted_trajectory)
+            
+            with open(collection_file, 'w', encoding='utf-8') as f:
+                json.dump(trajectories, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Saved trajectory {trajectory.task_id} to collection")
     
     async def _detect_error_patterns(self, steps: List[ExecutionStep], current_step_id: int) -> bool:
         """检测错误模式"""
@@ -2515,7 +2591,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             
             # 分析执行步骤
             successful_steps = [s for s in steps if s.success]
-            tool_steps = [s for s in steps if s.action_type == ActionType.TOOL_CALL and s.step_id > 1]
+            # 🔥 修复：统计所有实际工具执行步骤，包括CODE_EXECUTION类型
+            tool_steps = [s for s in steps if s.action_type in [ActionType.TOOL_CALL, ActionType.CODE_EXECUTION] and s.step_id > 1]
             successful_tool_steps = [s for s in tool_steps if s.success]
             
             # 🔥 修复：正确统计工具使用情况
@@ -3320,6 +3397,158 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             'should_abort': False
         }
     
+    def _is_sequential_mode(self, response: str) -> bool:
+        """
+        检测是否为Sequential流式模式
+        
+        Args:
+            response: LLM响应内容
+            
+        Returns:
+            是否为Sequential模式
+        """
+        # 检测多个工具调用标签
+        tool_tags = ['<microsandbox>', '<deepsearch>', '<browser>', '<search>']
+        tool_count = sum(1 for tag in tool_tags if tag in response)
+        
+        # 检测是否有<think>和工具调用交替模式
+        has_thinking_flow = '<think>' in response and any(tag in response for tag in tool_tags)
+        
+        # 检测是否有多步骤模式的特征
+        has_sequential_pattern = (
+            tool_count > 1 or  # 多个工具调用
+            has_thinking_flow or  # thinking + 工具调用
+            ('<think>' in response and '<answer>' in response)  # 完整的推理流程
+        )
+        
+        logger.debug(f"🔍 Sequential检测 - 工具数: {tool_count}, 思维流: {has_thinking_flow}, 模式: {has_sequential_pattern}")
+        return has_sequential_pattern
+    
+    async def _execute_sequential_streaming(self, task_spec: Dict[str, Any], xml_response: str) -> Dict[str, Any]:
+        """
+        执行Sequential流式任务
+        
+        Args:
+            task_spec: 任务规格
+            xml_response: XML响应内容
+            
+        Returns:
+            Sequential执行结果
+        """
+        try:
+            from core.streaming.sequential_executor import SequentialStreamingExecutor
+            
+            # 创建Sequential执行器
+            executor = SequentialStreamingExecutor(
+                llm_client=self.client,
+                tool_executor=self
+            )
+            
+            # 执行Sequential任务
+            result = await executor.execute_streaming_task(
+                initial_response=xml_response,
+                task_description=task_spec.get('description', ''),
+                max_steps=10,
+                timeout_per_step=300,
+                total_timeout=1800
+            )
+            
+            logger.info(f"🎉 Sequential执行完成 - 成功: {result.get('success', False)}")
+            
+            # 转换为标准格式
+            return {
+                'success': result.get('success', False),
+                'observation': result.get('final_answer', result.get('final_response', '')),
+                'thinking': result.get('complete_thinking', ''),
+                'execution_stats': result.get('execution_stats', {}),
+                'step_results': result.get('step_results', {}),
+                'execution_id': result.get('execution_id', ''),
+                'sequential_mode': True
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Sequential执行失败: {e}")
+            return {
+                'success': False,
+                'observation': f"Sequential执行错误: {str(e)}",
+                'thinking': xml_response,
+                'error': str(e),
+                'sequential_mode': True
+            }
+    
+    def _auto_select_action(self, tool_id: str, params: Dict[str, Any], thinking: str) -> tuple:
+        """
+        根据MCP Server和指令智能选择具体的action
+        
+        Args:
+            tool_id: MCP Server ID 
+            params: 包含instruction的参数
+            thinking: LLM的思考过程
+            
+        Returns:
+            tuple: (action, processed_params)
+        """
+        instruction = params.get('instruction', '').lower()
+        
+        if tool_id == 'microsandbox':
+            if any(keyword in instruction for keyword in ['install', 'pip', 'package', '安装']):
+                # 从instruction中提取包名
+                words = instruction.split()
+                package_name = None
+                for word in words:
+                    if word not in ['install', 'pip', 'package', '安装'] and not word.startswith('-'):
+                        package_name = word
+                        break
+                if package_name:
+                    return 'microsandbox_install_package', {'package_name': package_name}
+            elif any(keyword in instruction for keyword in ['session', 'list', '会话', '列表']):
+                return 'microsandbox_list_sessions', {}
+            else:
+                # 默认执行代码
+                return 'microsandbox_execute', {'code': params.get('instruction', '')}
+                
+        elif tool_id == 'mcp-deepsearch':
+            if any(keyword in instruction for keyword in ['quick', 'fast', '快速', '简单']):
+                return 'quick_research', {'question': params.get('instruction', '')}
+            elif any(keyword in instruction for keyword in ['comprehensive', 'detailed', '全面', '详细']):
+                return 'comprehensive_research', {'question': params.get('instruction', '')}
+            else:
+                # 默认普通研究
+                return 'research', {'question': params.get('instruction', '')}
+                
+        elif tool_id == 'browser_use':
+            if any(keyword in instruction for keyword in ['navigate', 'goto', 'visit', '访问', '导航']):
+                # 尝试提取URL
+                words = instruction.split()
+                url = None
+                for word in words:
+                    if 'http' in word or '.' in word:
+                        url = word
+                        break
+                if url:
+                    return 'browser_navigate', {'url': url}
+            elif any(keyword in instruction for keyword in ['search', 'google', '搜索']):
+                return 'browser_search_google', {'query': params.get('instruction', '')}
+            else:
+                # 默认任务执行
+                return 'browser_use_execute_task', {'task': params.get('instruction', '')}
+                
+        elif tool_id == 'mcp-search-tool':
+            if any(keyword in instruction for keyword in ['definition', 'define', '定义', '查找']):
+                return 'list_code_definitions', {'directory_path': 'src/'}
+            elif any(keyword in instruction for keyword in ['analyze', 'need', '分析', '需求']):
+                return 'analyze_tool_needs', {'task_description': params.get('instruction', '')}
+            else:
+                # 默认文件搜索
+                return 'search_file_content', {
+                    'regex_pattern': params.get('instruction', ''),
+                    'file_path': 'src/'
+                }
+        
+        # 无法识别，返回原始指令
+        logger.warning(f"⚠️ 无法为 {tool_id} 自动选择action，使用默认")
+        return 'execute', {'instruction': params.get('instruction', '')}
+    
     async def _smart_parameter_regeneration(self, task, tool_id: str, action: str, 
                                          original_params: Dict[str, Any], validation_error: str,
                                          step_id: int, original_thinking: str, 
@@ -3812,4 +4041,77 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 return "任务已完成。"
         else:
             return "任务执行失败。"
+    
+    async def _execute_xml_streaming(self, task: TaskSpec) -> TrajectoryResult:
+        """执行任务并输出原始XML格式，保存LLM的原始响应"""
+        logger.info(f"🎯 XML Streaming模式 - 任务: {task.description}")
+        
+        start_time = time.time()
+        success = False
+        final_result = ""
+        raw_llm_response = ""
+        
+        try:
+            # 构建XML streaming提示
+            available_tools = await self._get_available_tools_list()
+            tool_descriptions = await self._get_tool_descriptions()
+            
+            # 使用推理提示构建器构建XML streaming提示
+            from core.llm.prompt_builders.reasoning_prompt_builder import ReasoningPromptBuilder
+            prompt_builder = ReasoningPromptBuilder(streaming_mode=True)
+            
+            messages = prompt_builder.build_prompt(
+                task_description=task.description,
+                available_tools=available_tools,
+                tool_descriptions=tool_descriptions,
+                streaming_mode=True
+            )
+            
+            # 调用LLM获取原始XML响应
+            logger.info("🤖 调用LLM获取XML响应...")
+            raw_llm_response = await self.client._call_api(messages)
+            logger.info(f"📥 获得LLM原始响应 (长度: {len(raw_llm_response)})")
+            
+            # 直接打印原始响应（这就是用户想要的原始轨迹格式）
+            print("\n" + "="*50)
+            print("原始轨迹输出:")
+            print("="*50)
+            print(raw_llm_response)
+            print("="*50 + "\n")
+            
+            # 简单检查是否成功（包含answer标签或者没有明显错误）
+            success = ('<answer>' in raw_llm_response.lower() or 
+                      ('think>' in raw_llm_response.lower() and 'error>' not in raw_llm_response.lower()))
+            
+            if success:
+                final_result = "任务执行完成，已输出原始XML轨迹格式"
+            else:
+                final_result = "任务执行可能存在问题，请检查原始输出"
+                
+        except Exception as e:
+            logger.error(f"XML streaming执行失败: {e}")
+            raw_llm_response = f"<error>LLM调用失败: {str(e)}</error>"
+            print(f"\n执行失败: {str(e)}\n")
+            success = False
+            final_result = f"执行失败: {str(e)}"
+        
+        total_duration = time.time() - start_time
+        
+        # 创建轨迹结果，但存储原始响应而不是步骤
+        return TrajectoryResult(
+            task_name=task.task_id,
+            task_id=task.task_id,
+            task_description=task.description,
+            runtime_id=self._runtime_id,
+            steps=[],  # XML streaming模式不使用传统步骤格式
+            success=success,
+            final_result=final_result,
+            total_duration=total_duration,
+            metadata={
+                'output_format': 'raw_xml_streaming',
+                'runtime_id': self._runtime_id,
+                'raw_llm_response': raw_llm_response,  # 保存原始LLM响应
+                'response_length': len(raw_llm_response)
+            }
+        )
 

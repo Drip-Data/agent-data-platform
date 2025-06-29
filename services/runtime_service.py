@@ -4,13 +4,14 @@ from typing import Dict, Optional, List
 
 # 导入运行时相关模块
 from runtimes.reasoning.enhanced_runtime import EnhancedReasoningRuntime
+from runtimes.reasoning.simple_runtime import SimpleReasoningRuntime
 
 logger = logging.getLogger(__name__)
 
 # 全局变量
 runtime_instances = []
 
-def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None):
+def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, xml_streaming_mode: bool = False, use_simple_runtime: bool = False, trajectory_storage_mode: str = "daily_grouped"):
     """初始化推理运行时服务"""
     global runtime_instances
     
@@ -32,14 +33,18 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
     
     # 创建指定数量的运行时实例
     for i in range(instance_count):
-        instance_name = f"enhanced-runtime-{i+1}"
-        logger.info(f"创建运行时实例: {instance_name}")
-        # 创建运行时实例并传入依赖，包括新的websocket端点和redis_manager
-        runtime = EnhancedReasoningRuntime(config_manager, llm_client, toolscore_client, redis_manager, toolscore_websocket_endpoint)
-        
-        # 设置实例名称（如果运行时支持的话）
-        # 始终使用_runtime_id作为标识
-        runtime._runtime_id = f"enhanced-reasoning-{i+1}"
+        if use_simple_runtime:
+            instance_name = f"simple-runtime-{i+1}"
+            logger.info(f"创建简化运行时实例: {instance_name} (存储模式: {trajectory_storage_mode})")
+            # 创建简化运行时实例
+            runtime = SimpleReasoningRuntime(config_manager, llm_client, toolscore_client, xml_streaming_mode, trajectory_storage_mode)
+            runtime._runtime_id = f"simple-reasoning-{i+1}"
+        else:
+            instance_name = f"enhanced-runtime-{i+1}"
+            logger.info(f"创建运行时实例: {instance_name}")
+            # 创建运行时实例并传入依赖，包括新的websocket端点和redis_manager
+            runtime = EnhancedReasoningRuntime(config_manager, llm_client, toolscore_client, redis_manager, toolscore_websocket_endpoint, xml_streaming_mode)
+            runtime._runtime_id = f"enhanced-reasoning-{i+1}"
         
         runtime_instances.append(runtime)
     

@@ -239,6 +239,11 @@ def parse_arguments():
     parser.add_argument('--config-dir', type=str, default="config", help='配置文件目录路径')
     parser.add_argument('--debug', action='store_true', help='启用调试模式')
     parser.add_argument('--start-services', action='store_true', help='启动所有服务（默认行为）')
+    parser.add_argument('--xml-streaming', action='store_true', help='启用XML streaming输出格式（显示原始的<think>、<search>、<answer>标签）')
+    parser.add_argument('--simple-runtime', action='store_true', help='使用简化运行时（减少冗余代码，专注核心功能）')
+    parser.add_argument('--trajectory-storage', type=str, default='daily_grouped', 
+                       choices=['individual', 'daily_grouped', 'weekly_grouped', 'monthly_grouped'],
+                       help='轨迹存储模式：individual(单独文件), daily_grouped(按日分组), weekly_grouped(按周分组), monthly_grouped(按月分组)')
     return parser.parse_args()
 
 def setup_signal_handlers(service_manager):
@@ -416,7 +421,7 @@ async def main_async():
     
     # Task Processing Components
     task_loader = TaskLoader(task_file)
-    task_enhancer = TaskEnhancer(core_toolscore_client)
+    task_enhancer = TaskEnhancer(core_toolscore_client, simple_mode=args.simple_runtime)
     task_distributor = TaskDistributor(redis_url, metrics) # 注入metrics
     
     # Monitoring Components
@@ -499,7 +504,10 @@ async def main_async():
             llm_client,
             runtime_toolscore_client,
             toolscore_websocket_endpoint, # 传入WebSocket端点
-            redis_manager # 传入Redis管理器
+            redis_manager, # 传入Redis管理器
+            args.xml_streaming, # 传入XML streaming模式
+            args.simple_runtime, # 传入simple runtime模式
+            args.trajectory_storage # 传入轨迹存储模式
         ),
         start_fn=runtime_service.start,
         stop_fn=runtime_service.stop,

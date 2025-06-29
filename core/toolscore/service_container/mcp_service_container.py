@@ -553,3 +553,57 @@ class MCPServiceContainer:
         """根据类型停止服务"""
         # 根据服务类型选择相应的停止方法
         return True
+    
+    async def list_available_tools(self, server_id: Optional[str] = None) -> Dict[str, Any]:
+        """列出可用工具 - 实现缺失的方法以修复available_actions为空的问题"""
+        try:
+            tools_info = {}
+            
+            # 如果指定了server_id，只返回该服务器的工具
+            if server_id:
+                config = self.service_catalog.get(server_id)
+                if config and config.status == ServiceStatus.RUNNING:
+                    tools_info[server_id] = self._get_service_tools(config)
+            else:
+                # 返回所有运行中服务的工具
+                for service_id, config in self.service_catalog.items():
+                    if config.status == ServiceStatus.RUNNING:
+                        tools_info[service_id] = self._get_service_tools(config)
+            
+            return {
+                "success": True,
+                "servers": tools_info
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 列出工具失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _get_service_tools(self, config: ServiceConfig) -> Dict[str, Any]:
+        """获取服务的工具信息，包含available_actions"""
+        tools = []
+        
+        # 根据服务配置构建工具信息
+        for capability in config.capabilities:
+            tool_name = capability.name if hasattr(capability, 'name') else str(capability)
+            
+            # 为不同服务提供具体的available_actions
+            if config.service_id == "microsandbox":
+                available_actions = ["microsandbox_execute", "microsandbox_install_package", 
+                                   "microsandbox_list_sessions", "microsandbox_close_session"]
+            elif config.service_id == "deepsearch_server":
+                available_actions = ["research", "quick_research", "comprehensive_research"]
+            elif config.service_id == "browser_use_server":
+                available_actions = ["browser_go_to_url", "browser_click", "browser_input_text",
+                                   "browser_get_screenshot", "browser_get_page_content"]
+            elif config.service_id == "search_tool_server":
+                available_actions = ["search_file_content", "find_definition", "search_files"]
+            else:
+                available_actions = [tool_name]
+            
+            tools.append({
+                "name": tool_name,
+                "available_actions": available_actions
+            })
+        
+        return {"tools": tools}

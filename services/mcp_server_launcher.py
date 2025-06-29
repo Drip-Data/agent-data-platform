@@ -447,7 +447,13 @@ async def _check_port_readiness(server_name: str) -> bool:
         
     try:
         ports_config = _config_manager.get_ports_config()
-        server_config = ports_config.get('mcp_servers', {}).get(server_name, {})
+        
+        # 🔧 修复：添加服务器名称映射
+        server_config_key = server_name
+        if server_name == 'microsandbox_server':
+            server_config_key = 'microsandbox'
+        
+        server_config = ports_config.get('mcp_servers', {}).get(server_config_key, {})
         port = server_config.get('port')
         
         if not port:
