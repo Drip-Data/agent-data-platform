@@ -56,52 +56,67 @@ class GeminiProvider(ILLMProvider):
     ) -> Any:
         """
         根据给定的消息生成 Google Gemini LLM 响应。
+        注意：Gemini API不支持stop_sequences参数，会被自动忽略。
         """
+        # 提取 stop_sequences
+        stop_sequences = kwargs.pop('stop_sequences', [])
+        if stop_sequences:
+            logger.debug(f"🔧 Applying stop_sequences for Gemini: {stop_sequences}")
+
+        # 过滤掉Gemini不支持的参数
         if model not in self._supported_models:
             logger.warning(f"模型 {model} 不受 GeminiProvider 支持，将使用默认模型 {self._default_model}。")
             model = self._default_model
         
-        # 🔧 修复消息格式转换 - 安全处理数据类型
+        # 🔧 修复消息格式转换 - 支持角色交替和内容合并
         logger.debug(f"🔍 Gemini消息转换开始 - 输入消息数: {len(messages)}")
-        contents = []
-        for i, msg in enumerate(messages):
-            try:
-                # 确保msg是字典类型
-                if not isinstance(msg, dict):
-                    logger.error(f"消息 {i} 不是字典类型: {type(msg)}, 内容: {msg}")
-                    continue
-                
-                # 安全获取role和content
-                role = msg.get("role")
-                content = msg.get("content")
-                
-                if not role or not content:
-                    logger.warning(f"消息 {i} 缺少必要字段 - role: {role}, content: {content}")
-                    continue
-                
-                # 确保content是字符串
-                if not isinstance(content, str):
-                    if isinstance(content, (dict, list)):
-                        # 如果content是复杂对象，转换为JSON字符串
-                        content = json.dumps(content, ensure_ascii=False)
-                        logger.debug(f"将复杂content转换为字符串: {content[:100]}...")
-                    else:
-                        content = str(content)
-                
-                if role == "user":
-                    contents.append({"parts": [{"text": content}]})
-                elif role == "assistant":
-                    # Gemini的assistant角色需要特殊处理，通常是模型输出
-                    # 这里简化处理，如果需要更复杂的对话历史，可能需要调整
-                    contents.append({"parts": [{"text": content}]})
-                else:
-                    logger.warning(f"未知的消息角色: {role}, 跳过该消息")
-                    
-            except Exception as e:
-                logger.error(f"处理消息 {i} 时出错: {e}, 消息内容: {msg}")
-                continue
         
-        logger.debug(f"🔍 Gemini消息转换完成 - 转换成功: {len(contents)}/{len(messages)}")
+        contents = []
+        current_role = None
+        merged_content = []
+
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content", "")
+
+            if not role:
+                logger.warning(f"消息缺少 'role' 字段, 跳过: {msg}")
+                continue
+
+            # 将 'assistant' 映射到 'model'
+            if role == "assistant":
+                role = "model"
+            
+            # 确保角色是 'user' 或 'model'
+            if role not in ["user", "model"]:
+                logger.warning(f"未知的消息角色: {role}, 跳过该消息")
+                continue
+
+            if current_role is None:
+                current_role = role
+
+            if role == current_role:
+                # 如果角色相同，合并内容
+                merged_content.append(str(content))
+            else:
+                # 如果角色切换，添加前一个角色的合并内容
+                if merged_content:
+                    contents.append({
+                        "role": current_role,
+                        "parts": [{"text": "\n\n".join(merged_content)}]
+                    })
+                # 开始新的角色内容
+                current_role = role
+                merged_content = [str(content)]
+
+        # 添加最后一部分合并的内容
+        if merged_content:
+            contents.append({
+                "role": current_role,
+                "parts": [{"text": "\n\n".join(merged_content)}]
+            })
+
+        logger.debug(f"🔍 Gemini消息转换完成 - 转换后消息数: {len(contents)}")
         
         payload = {
             "contents": contents,
@@ -109,7 +124,7 @@ class GeminiProvider(ILLMProvider):
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
                 "candidateCount": 1,
-                "stopSequences": [],
+                "stopSequences": stop_sequences,
                 "topP": 0.9,
                 "topK": 40
             },

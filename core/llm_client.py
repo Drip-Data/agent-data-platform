@@ -315,7 +315,7 @@ class LLMClient:
             execution_context=execution_context
         )
 
-    async def _call_api(self, messages: List[Dict[str, Any]], timeout: int = 120) -> str: # 修改签名
+    async def _call_api(self, messages: List[Dict[str, Any]], timeout: int = 120, stop_sequences: Optional[List[str]] = None) -> str:
         """调用相应的API，并记录完整的交互信息"""
         # 🔧 新增：预调用数据验证 - 防止数据类型错误传播
         try:
@@ -358,11 +358,20 @@ class LLMClient:
             
             # 获取默认模型并传递给 generate_response
             model_name = self.provider_instance.get_default_model()
-            response = await self.provider_instance.generate_response(
-                messages=validated_messages,
-                model=model_name,
-                timeout=timeout
-            )
+            
+            # 准备参数，包含stop_sequences（如果支持）
+            params = {
+                "messages": validated_messages,
+                "model": model_name,
+                "timeout": timeout
+            }
+            
+            # 如果提供了stop_sequences，添加到参数中
+            if stop_sequences:
+                params["stop_sequences"] = stop_sequences
+                logger.info(f"🔧 使用stop_sequences: {stop_sequences}")
+            
+            response = await self.provider_instance.generate_response(**params)
             
             # 🔍 新增：检查响应类型，防止AsyncMock泄露到响应中
             if hasattr(response, '_mock_name') or "Mock" in type(response).__name__:

@@ -56,6 +56,156 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             tool_executor=self.toolscore_client,
             memory_manager=self.memory_manager
         )
+        self.mcp_servers = self._load_mcp_config("config/mcp_servers.json")
+    
+    def _load_mcp_config(self, config_path: str) -> dict:
+        """从JSON文件加载并格式化MCP服务器配置。"""
+        config = {}
+        try:
+            with open(config_path, 'r') as f:
+                mcp_config = json.load(f)
+                for service_name, details in mcp_config.items():
+                    # 标准化服务名称：去掉 "_server" 后缀，与代码期望一致
+                    clean_name = service_name.replace("_server", "")
+                    config[clean_name] = f"http://127.0.0.1:{details['port']}"
+            logger.info(f"Loaded and formatted MCP server configs: {config}")
+            return config
+        except FileNotFoundError:
+            logger.error(f"Error: MCP config file not found at {config_path}")
+            return {}
+        except json.JSONDecodeError:
+            logger.error(f"Error: Could not decode JSON from {config_path}")
+            return {}
+
+    def _parse_execution_block(self, xml_string: str) -> dict:
+        """
+        从LLM生成的XML文本中解析出执行块。
+        返回一个字典，包含类型（single, parallel, sequential）和动作列表。
+        """
+        from xml.etree import ElementTree as ET
+
+        actions = []
+        block_type = "single" # 默认
+        try:
+            # 清理并包裹XML，以便安全解析
+            clean_xml = f"<root>{xml_string.strip()}</root>"
+            root = ET.fromstring(clean_xml)
+
+            # 检查并行或串行块
+            parallel_block = root.find('parallel')
+            sequential_block = root.find('sequential')
+
+            if parallel_block is not None:
+                block_type = "parallel"
+                service_nodes = list(parallel_block)
+            elif sequential_block is not None:
+                block_type = "sequential"
+                service_nodes = list(sequential_block)
+            else:
+                # 单个任务
+                service_nodes = [elem for elem in root if elem.tag not in ['think', 'answer', 'execute_tools']]
+
+            for service_node in service_nodes:
+                service_name = service_node.tag
+                if len(service_node) > 0:
+                    tool_node = service_node[0]
+                    tool_name = tool_node.tag
+                    tool_input = tool_node.text or ""
+                    actions.append({
+                        "service": service_name,
+                        "tool": tool_name,
+                        "input": tool_input.strip()
+                    })
+        except ET.ParseError as e:
+            logger.error(f"XML Parse Error: {e}\nOriginal XML:\n{xml_string}")
+        
+        return {"type": block_type, "actions": actions}
+
+    async def _execute_tool(self, action: dict) -> str:
+        """
+        根据单个动作字典，通过toolscore_client调用对应的MCP Server并返回结果。
+        """
+        service_name = action.get('service')
+        tool_name = action.get('tool')
+        tool_input = action.get('input')
+
+        if not all([service_name, tool_name]):
+            return "Error: Invalid action format. 'service' and 'tool' are required."
+
+        # 映射服务到其期望的主要参数名
+        param_mapping = {
+            "browser_use": "query",
+            "microsandbox": "code",
+            "deepsearch": "question"
+        }
+        # 默认参数名为 'input'
+        param_name = param_mapping.get(service_name, "input")
+        parameters = {param_name: tool_input}
+
+        logger.info(f"Executing via toolscore_client: service='{service_name}', tool='{tool_name}', params='{param_name}'")
+
+        try:
+            result = await self.toolscore_client.execute_tool(
+                tool_id=service_name,
+                action=tool_name,
+                parameters=parameters
+            )
+            
+            if isinstance(result, dict):
+                if result.get('success', True):
+                    output = result.get('data', result.get('output', result.get('result', str(result))))
+                    return str(output)
+                else:
+                    error_msg = result.get('error_message', result.get('error', 'Unknown error'))
+                    return f"Tool execution failed: {error_msg}"
+            else:
+                return str(result)
+
+        except Exception as e:
+            logger.error(f"An unexpected error occurred while calling tool '{service_name}/{tool_name}': {e}", exc_info=True)
+            return f"An unexpected error occurred while calling {service_name}: {e}"
+
+    async def _execute_parallel(self, actions: list) -> list:
+        """并发执行多个动作。"""
+        import asyncio
+        if not actions:
+            return []
+        
+        tasks = [self._execute_tool(action) for action in actions]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 处理可能发生的异常，确保返回字符串列表
+        return [str(res) if not isinstance(res, Exception) else f"Error: {res}" for res in results]
+
+    async def _execute_sequential(self, actions: list) -> list:
+        """串行执行多个动作，并处理结果占位符。"""
+        step_results = {}
+        final_results = []
+
+        for i, action in enumerate(actions):
+            step_number = i + 1
+            
+            # 替换输入中的占位符
+            action['input'] = self._replace_placeholders(action['input'], step_results)
+
+            # 执行动作
+            result = await self._execute_tool(action)
+            
+            step_results[step_number] = result
+            final_results.append(result)
+            
+        return final_results
+
+    def _replace_placeholders(self, input_str: str, results: dict) -> str:
+        """用之前步骤的结果替换占位符 $result_of_step_N。"""
+        import re
+        
+        # 这个正则表达式查找 $result_of_step_1, $result_of_step_2 等
+        def replacer(match):
+            step_num = int(match.group(1))
+            return str(results.get(step_num, ''))
+
+        return re.sub(r"\$result_of_step_(\d+)", replacer, input_str)
     
     @property
     def runtime_id(self) -> str:
@@ -97,87 +247,112 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return await self._execute_standard(task)
     
     async def _execute_xml_streaming(self, task: TaskSpec) -> TrajectoryResult:
-        """XML Streaming执行模式 - 实现真正的停等执行防止幻觉"""
-        logger.info(f"🎯 XML Streaming模式 - 任务: {task.description}")
+        """
+        执行基于XML的、支持单步、并行和串行工具调用的主控制循环。
+        """
+        logger.info(f"🎯 Orchestrator starting task: {task.description}")
         start_time = time.time()
-        session_id = f"session_{task.task_id}_{int(start_time)}"
-        raw_llm_response = ""
-        final_response = ""
-
-        try:
-            # 1. 从MemoryManager获取上下文
-            logger.info(f"🧠 正在为任务 {task.task_id} 检索记忆上下文...")
-            memory_context = await self.memory_manager.generate_context_summary(session_id)
-            
-            # 2. 获取工具信息
-            available_tools = await self._get_available_tools()
-            tool_descriptions = await self._get_tool_descriptions()
-            
-            # 3. 实现真正的停等执行机制
-            logger.info("🔄 开始迭代停等执行...")
-            execution_result = await self._execute_iterative_stop_and_wait(
-                task_description=task.description,
-                available_tools=available_tools,
-                tool_descriptions=tool_descriptions,
-                memory_context=memory_context,
-                max_steps=task.max_steps or 20,
-                session_id=session_id
-            )
-            success = execution_result.get('success', False)
-            final_response = execution_result.get('final_response', raw_llm_response)
-            
-            # 构建包含原始响应的metadata
-            metadata = execution_result.copy()
-            metadata.update({
-                'raw_response': final_response,
-                'response_length': len(final_response),
-                'initial_llm_response': raw_llm_response
-            })
-
-        except Exception as e:
-            logger.error(f"任务执行过程中发生顶层异常: {e}", exc_info=True)
-            success = False
-            # 如果在sequential执行之前发生异常，使用原始LLM响应
-            if not final_response:
-                final_response = raw_llm_response
-            metadata = {'error': str(e), 'raw_llm_response': raw_llm_response, 'raw_response': final_response, 'response_length': len(final_response)}
-
-        # 4. 直接输出XML格式数据
-        total_duration = time.time() - start_time
         
-        # 构建XML输出数据格式
+        # 准备历史记录
+        available_tools = await self._get_available_tools()
+        tool_descriptions = await self._get_tool_descriptions()
+        history = self.prompt_builder.build_prompt(
+            task_description=task.description,
+            available_tools=available_tools,
+            tool_descriptions=tool_descriptions,
+            history=[]
+        )
+        
+        full_trajectory = [] # 记录完整的交互轨迹
+
+        max_steps = task.max_steps or 20
+        for step in range(max_steps):
+            logger.info(f"--- Starting Step {step + 1}/{max_steps} ---")
+            
+            # 1. 调用LLM，设置动态停止序列
+            response_text = await self.client._call_api(
+                history,
+                stop_sequences=["<execute_tools />", "Final Answer:"]
+            )
+            history.append({"role": "assistant", "content": response_text})
+            full_trajectory.append({"role": "assistant", "content": response_text})
+
+            # 2. 检查是否是最终答案
+            if "Final Answer:" in response_text:
+                logger.info("✅ Final Answer detected. Task complete.")
+                break
+
+            # 3. 解析执行块
+            execution_block = self._parse_execution_block(response_text)
+            actions = execution_block.get("actions", [])
+            
+            if not actions:
+                logger.warning("No executable actions found in LLM response. Continuing.")
+                # 注入一个空结果以避免LLM卡住
+                result_xml = self._format_result(["No action was performed."])
+                history.append({"role": "assistant", "content": result_xml})
+                full_trajectory.append({"role": "assistant", "content": result_xml})
+                continue
+
+            # 4. 根据类型分发执行
+            results = []
+            block_type = execution_block.get("type")
+            if block_type == "sequential":
+                logger.info(f"Executing sequential block with {len(actions)} actions.")
+                results = await self._execute_sequential(actions)
+            elif block_type == "parallel":
+                logger.info(f"Executing parallel block with {len(actions)} actions.")
+                results = await self._execute_parallel(actions)
+            else: # single
+                logger.info(f"Executing single action.")
+                results = [await self._execute_tool(actions[0])]
+
+            # 5. 格式化并注入结果
+            result_xml = self._format_result(results)
+            history.append({"role": "assistant", "content": result_xml})
+            full_trajectory.append({"role": "assistant", "content": result_xml})
+
+        else:
+            logger.warning(f"Max steps ({max_steps}) reached. Terminating task.")
+
+        # 任务结束，处理最终结果
+        final_trajectory_str = "\n".join(item["content"] for item in full_trajectory)
+        total_duration = time.time() - start_time
+        success = "Final Answer:" in final_trajectory_str
+
         xml_output = {
             "timestamp": datetime.now().isoformat(),
             "task_id": task.task_id,
             "task_description": task.description,
             "duration": total_duration,
             "success": success,
-            "final_result": "任务执行完成，已输出原始XML轨迹格式",
-            "raw_response": final_response,
-            "response_length": len(final_response)
+            "final_result": "Task execution completed.",
+            "raw_response": final_trajectory_str,
         }
         
-        # 输出到控制台
-        print(json.dumps(xml_output, ensure_ascii=False, indent=2))
-        
-        # 保存到文件
         await self._save_xml_output(xml_output)
-        
-        # 构建简单的返回对象
-        from core.interfaces import TrajectoryResult
-        trajectory = TrajectoryResult(
+
+        return TrajectoryResult(
             task_name=task.task_id,
             task_id=task.task_id, 
             task_description=task.description,
             runtime_id=self._runtime_id,
             steps=[],  
             success=success,
-            final_result="任务执行完成，已输出原始XML轨迹格式",
+            final_result="Task execution completed.",
             total_duration=total_duration,
-            metadata=metadata
+            metadata={'full_trajectory': full_trajectory}
         )
+
+    def _format_result(self, results: list) -> str:
+        """将工具执行结果列表格式化为单个 <result> XML块。"""
+        if not results:
+            return "<result>No action was performed or no result was returned.</result>"
         
-        return trajectory
+        # 如果有多个结果，将它们组合在一起
+        result_content = "\n".join(str(res) for res in results)
+        
+        return f"<result>{result_content}</result>"
     
     async def _execute_standard(self, task: TaskSpec) -> TrajectoryResult:
         """标准执行模式 (作为备用)"""
@@ -270,253 +445,3 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         self.is_initialized = False
         logger.info("✅ 资源清理完成")
     
-    async def _execute_iterative_stop_and_wait(self, task_description: str, available_tools: List[str], 
-                                              tool_descriptions: str, memory_context: str, 
-                                              max_steps: int, session_id: str) -> dict:
-        """
-        实现真正的迭代停等执行机制 - 防止LLM幻觉
-        LLM生成一个工具调用后立即停止，等待真实执行结果，然后继续
-        """
-        logger.info("🎯 启动迭代停等执行机制")
-        
-        # 构建初始历史记录
-        conversation_history = []
-        step_count = 0
-        success = False
-        
-        # 构建初始提示
-        initial_messages = self.prompt_builder.build_prompt(
-            task_description=task_description,
-            available_tools=available_tools,
-            tool_descriptions=tool_descriptions,
-            history=conversation_history
-        )
-        
-        while step_count < max_steps:
-            step_count += 1
-            logger.info(f"🔄 第 {step_count} 轮迭代...")
-            
-            try:
-                # 1. 获取LLM响应 (应该包含思考+一个工具调用)
-                if step_count == 1:
-                    llm_response = await self.client._call_api(initial_messages)
-                else:
-                    # 继续对话，传入完整历史
-                    continue_messages = self.prompt_builder.build_prompt(
-                        task_description=task_description,
-                        available_tools=available_tools,
-                        tool_descriptions=tool_descriptions,
-                        history=conversation_history
-                    )
-                    llm_response = await self.client._call_api(continue_messages)
-                
-                logger.info(f"📨 LLM响应长度: {len(llm_response)}")
-                
-                # 2. 检查是否包含答案 (任务完成)
-                if '<answer>' in llm_response.lower():
-                    logger.info("✅ 检测到答案标签，任务完成")
-                    conversation_history.append(llm_response)
-                    success = True
-                    break
-                
-                # 3. 解析工具调用
-                tool_call = self._extract_tool_call(llm_response)
-                if not tool_call:
-                    logger.warning("⚠️ 未检测到工具调用，添加响应到历史并继续")
-                    conversation_history.append(llm_response)
-                    continue
-                
-                logger.info(f"🔧 检测到工具调用: {tool_call['tool_name']} - {tool_call['content'][:100]}...")
-                
-                # 4. 执行真实工具调用
-                tool_result = await self._execute_real_tool(tool_call, session_id)
-                
-                # 5. 构建包含真实结果的历史条目
-                history_entry = llm_response + "\n\n<result>\n" + tool_result + "\n</result>"
-                conversation_history.append(history_entry)
-                
-                logger.info(f"✅ 工具执行完成，结果长度: {len(tool_result)}")
-                
-            except Exception as e:
-                logger.error(f"❌ 第 {step_count} 轮执行失败: {e}")
-                error_entry = f"<error>执行第 {step_count} 轮时发生错误: {str(e)}</error>"
-                conversation_history.append(error_entry)
-                continue
-        
-        # 构建最终响应
-        final_response = "\n\n".join(conversation_history)
-        
-        return {
-            'success': success,
-            'final_response': final_response,
-            'steps_executed': step_count,
-            'conversation_history': conversation_history
-        }
-    
-    def _extract_tool_call(self, response: str) -> dict:
-        """从LLM响应中提取工具调用（支持分层结构）"""
-        import re
-        
-        # 优先匹配分层工具调用模式 
-        hierarchical_patterns = [
-            # 匹配 <tool><action>content</action></tool> 格式
-            r'<(microsandbox|deepsearch|browser_use|search)><([^>]+)>(.*?)</\2></\1>',
-        ]
-        
-        for pattern in hierarchical_patterns:
-            match = re.search(pattern, response, re.DOTALL)
-            if match:
-                tool_name = match.group(1)
-                action = match.group(2)
-                content = match.group(3).strip()
-                return {
-                    'tool_name': tool_name,
-                    'action': action,
-                    'content': content,
-                    'raw_match': match.group(0),
-                    'hierarchical': True
-                }
-        
-        # 回退到简单工具调用模式（向后兼容）
-        simple_patterns = [
-            r'<(microsandbox|deepsearch|browser_use|search)>(.*?)</\1>',
-        ]
-        
-        for pattern in simple_patterns:
-            match = re.search(pattern, response, re.DOTALL)
-            if match:
-                tool_name = match.group(1)
-                content = match.group(2).strip()
-                return {
-                    'tool_name': tool_name,
-                    'content': content,
-                    'raw_match': match.group(0),
-                    'hierarchical': False
-                }
-        
-        return None
-    
-    async def _execute_real_tool(self, tool_call: dict, session_id: str) -> str:
-        """执行真实的工具调用并返回结果（支持分层结构）"""
-        try:
-            tool_name = tool_call['tool_name']
-            content = tool_call['content']
-            is_hierarchical = tool_call.get('hierarchical', False)
-            
-            # 标准化工具名称
-            if tool_name == 'search':
-                tool_name = 'deepsearch'
-            
-            # 🚀 处理分层工具调用 - 使用显式的动作
-            if is_hierarchical and 'action' in tool_call:
-                action = tool_call['action']
-                instruction = content
-                logger.info(f"🎯 分层工具调用: {tool_name}.{action} -> {instruction[:50]}...")
-            else:
-                # 回退到旧的动作推断方式
-                action = self._get_default_action(tool_name)
-                instruction = content
-            
-            # 🔧 处理browser_use的特殊格式
-            if tool_name == 'browser_use':
-                # 提取真实的搜索查询
-                instruction = self._extract_search_query(content)
-            
-            # 如果内容以已知动作开头，提取真实指令
-            known_actions = ['research', 'quick_research', 'comprehensive_research', 'microsandbox_execute']
-            for known_action in known_actions:
-                if content.strip().startswith(known_action + ' '):
-                    action = known_action
-                    instruction = content.strip()[len(known_action):].strip()
-                    break
-            
-            logger.info(f"🔧 执行工具: {tool_name}, 动作: {action}, 指令: {instruction[:100]}...")
-            
-            # 构建正确的参数格式
-            if tool_name == 'deepsearch':
-                # deepsearch 需要 question 参数
-                parameters = {'question': instruction}
-            elif tool_name == 'browser_use':
-                # browser_use 需要 query 参数  
-                parameters = {'query': instruction}
-            elif tool_name == 'microsandbox':
-                # microsandbox 需要 code 参数
-                parameters = {'code': instruction}
-            else:
-                # 其他工具使用 instruction 参数
-                parameters = {'instruction': instruction}
-            
-            # 通过toolscore执行工具
-            result = await self.toolscore_client.execute_tool(
-                tool_id=tool_name,
-                action=action,
-                parameters=parameters
-            )
-            
-            if isinstance(result, dict):
-                if result.get('success', True):
-                    # 支持多种结果字段名称：data, output, result
-                    output = result.get('data', result.get('output', result.get('result', str(result))))
-                    return str(output)
-                else:
-                    # 支持多种错误字段名称：error_message, error
-                    error_msg = result.get('error_message', result.get('error', 'Unknown error'))
-                    
-                    # 🔧 特殊处理DeepSearch的结构化错误响应
-                    if 'answer' in result and 'search_results' in result:
-                        # DeepSearch返回的结构化错误
-                        answer = result.get('answer', '')
-                        if '答案生成失败' in answer or 'timed out' in answer:
-                            return f"工具执行失败: {answer}"
-                        elif result.get('search_results'):
-                            # 检查搜索结果中的错误
-                            search_results = result.get('search_results', [])
-                            for search_result in search_results:
-                                content = search_result.get('content', '')
-                                if '搜索失败' in content or 'timed out' in content:
-                                    return f"工具执行失败: {content}"
-                    
-                    return f"工具执行失败: {error_msg}"
-            else:
-                return str(result)
-                
-        except Exception as e:
-            logger.error(f"❌ 工具执行异常: {e}")
-            return f"工具执行发生异常: {str(e)}"
-    
-    def _get_default_action(self, tool_name: str) -> str:
-        """获取工具的默认动作名称"""
-        action_mapping = {
-            'microsandbox': 'microsandbox_execute',
-            'deepsearch': 'research',  # Fixed: use 'research' instead of 'deepsearch_search'
-            'browser_use': 'browser_search_google',
-            'search': 'research'  # Fixed: use 'research' for search tool
-        }
-        return action_mapping.get(tool_name, tool_name)
-    
-    def _extract_search_query(self, content: str) -> str:
-        """从browser_use内容中提取真实的搜索查询"""
-        import re
-        
-        # 移除常见的搜索前缀
-        content = content.strip()
-        
-        # 匹配模式: "search google for ...", "search for ...", "google search ..."
-        patterns = [
-            r'^search\s+google\s+for\s+["\']?(.+?)["\']?$',
-            r'^search\s+for\s+["\']?(.+?)["\']?$', 
-            r'^google\s+search\s+["\']?(.+?)["\']?$',
-            r'^search\s+["\']?(.+?)["\']?$',
-            r'^google\s+["\']?(.+?)["\']?$'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, content, re.IGNORECASE)
-            if match:
-                query = match.group(1).strip()
-                logger.info(f"📝 提取搜索查询: '{query}' 从 '{content}'")
-                return query
-        
-        # 如果没有匹配到特殊模式，直接返回原内容
-        logger.info(f"📝 直接使用原内容作为查询: '{content}'")
-        return content
