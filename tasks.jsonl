@@ -1,3 +1,4 @@
 {"task_id": "test-fix", "task_type": "reasoning", "description": "先用browswer use搜索Python创造者是谁, 然后用Python代码计算2的5次方的结果"}
 {"task_id": "test_reasoning_combo", "task_type": "reasoning", "description": "用DeepSearch研究Python数据分析最佳实践"}
 {"task_id": "冒泡测试", "task_type": "reasoning", "description": "用python写一个冒泡排序，然后放4个测试集测试"}
+{"task_id": "学校测试", "task_type": "reasoning", "description": "新加坡国立大学IORA是什么"}

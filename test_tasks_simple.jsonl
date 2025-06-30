@@ -1,3 +1,0 @@
-{"task_id": "test-xml-1", "task_type": "reasoning", "description": "使用Python写一个简单的快速排序算法，然后用几个测试用例来验证它的正确性"}
-{"task_id": "test-xml-2", "task_type": "reasoning", "description": "搜索关于Python装饰器的信息，然后写一个简单的计时装饰器例子"}
-{"task_id": "test-xml-3", "task_type": "reasoning", "description": "创建一个计算器类，支持基本的四则运算，并测试每个功能"}
