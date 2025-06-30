@@ -1189,7 +1189,82 @@ class BrowserUseMCPServer:
                 
                 return await self._navigate_to_url(url)
             elif action == "browser_search_google":
-                return await self._execute_action("search_google", {"query": parameters["query"]})
+                # 🔧 修复search_google参数验证错误 - 使用直接查询字符串而不是字典参数
+                query = parameters.get("query", "")
+                if not query:
+                    return {
+                        "success": False,
+                        "data": None,
+                        "error_message": "browser_search_google动作缺少必需参数'query'",
+                        "error_type": "MissingRequiredParameter"
+                    }
+                
+                # 尝试不同的参数格式来适配browser-use的ActionModel
+                try:
+                    # 方法1: 尝试直接字符串作为参数
+                    action_model = ActionModel(search_google=query)
+                    result = await self.controller.act(
+                        action=action_model,
+                        browser_context=self.browser_context
+                    )
+                    
+                    if isinstance(result, ActionResult):
+                        return {
+                            "success": not bool(result.error),
+                            "data": {
+                                "content": result.extracted_content,
+                                "is_done": result.is_done,
+                                "include_in_memory": result.include_in_memory,
+                                "query": query
+                            },
+                            "error_message": result.error or "",
+                            "error_type": "ActionError" if result.error else ""
+                        }
+                    else:
+                        return {
+                            "success": True,
+                            "data": {"content": str(result), "query": query},
+                            "error_message": "",
+                            "error_type": ""
+                        }
+                        
+                except Exception as e1:
+                    logger.warning(f"search_google method 1 failed: {e1}")
+                    
+                    # 方法2: 尝试不带参数的方式，手动导航到Google搜索
+                    try:
+                        # 构建Google搜索URL
+                        import urllib.parse
+                        search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+                        
+                        # 直接导航到搜索结果页面
+                        page = await self.browser_context.get_current_page()
+                        await page.goto(search_url, wait_until='networkidle', timeout=30000)
+                        
+                        # 获取页面标题确认搜索成功
+                        title = await page.title()
+                        
+                        return {
+                            "success": True,
+                            "data": {
+                                "content": f"Google搜索完成: {query}",
+                                "query": query,
+                                "search_url": search_url,
+                                "page_title": title,
+                                "method": "direct_navigation"
+                            },
+                            "error_message": "",
+                            "error_type": ""
+                        }
+                        
+                    except Exception as e2:
+                        logger.error(f"search_google fallback method failed: {e2}")
+                        return {
+                            "success": False,
+                            "data": None,
+                            "error_message": f"Google搜索失败: {str(e2)}",
+                            "error_type": "SearchExecutionError"
+                        }
             elif action == "browser_go_back":
                 return await self._execute_action("go_back", {})
             

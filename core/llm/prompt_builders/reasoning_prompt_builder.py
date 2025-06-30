@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class ReasoningPromptBuilder(IPromptBuilder):
     """
     构建支持多轮、分步执行的推理提示。
-    该构建器强制LLM遵循“思考->执行->观察”的循环，以消除幻觉。
+    该构建器强制LLM遵循"思考->执行->观察"的循环，以消除幻觉。
     """
     
     def __init__(self, streaming_mode: bool = False):
@@ -38,59 +38,25 @@ class ReasoningPromptBuilder(IPromptBuilder):
         else:
             tools_info = "\n".join([f"- {tool}" for tool in (available_tools or [])])
 
-        system_prompt = f"""You are a helpful assistant that can solve the given question step by step using the provided tools.
+        system_prompt = f"""You are an expert AI assistant that solves tasks step-by-step using available services.
 
-**CRITICAL ANTI-HALLUCINATION RULES:**
-1. **Think First**: Start with a `<think>` block to analyze the task
-2. **Use ONE Tool**: After thinking, use exactly ONE tool with format `<tool_name>input_content</tool_name>`
-3. **STOP IMMEDIATELY**: After using a tool, you MUST STOP generating. Do NOT continue.
-4. **NEVER Generate Fake Results**: Do NOT write `<result>` tags yourself. Only the system provides real results.
-5. **Wait for Real Results**: The system will execute your tool and provide actual output in `<result>` tags
-6. **Continue Only After Results**: Only after seeing real `<result>`, continue with new `<think>` block
+**Primary Goal**: Solve the user's task by thinking and using the provided tools.
 
-**Available Tools:**
+**XML Rules**:
+1. **Think First**: Always start with a `<think>` block to describe your reasoning and plan.
+2. **Hierarchical Tools**: Use two-level nested structure. First select high-level service (`<microsandbox>`), then specify exact action (`<execute_code>`).
+3. **Stop After Each Tool**: After using a tool, STOP immediately. Wait for real `<result>` before continuing.
+4. **Final Answer**: Conclude with `<answer>` tag containing the final result.
+
+**Available Services:**
 {tools_info}
 
-**Correct Usage Examples:**
-- Research: `<deepsearch>search query here</deepsearch>`
-- Python Code: `<microsandbox>python code here</microsandbox>`
-- Web Browsing: `<browser_use>search query or task</browser_use>`
+**Examples:**
+- Research: `<deepsearch><research>query here</research></deepsearch>`
+- Python Code: `<microsandbox><execute_code>code here</execute_code></microsandbox>`
+- Web Search: `<browser_use><search_google>query</search_google></browser_use>`
 
-**FORBIDDEN - These Will Cause Errors:**
-- Calling tools inside other tools: `<microsandbox>print(browser_use.search(...))</microsandbox>` ❌
-- Generating fake results: `<result>fake content</result>` ❌
-- Continuing after tool call without waiting for results ❌
-
-**Correct Flow Example:**
-<think>I need to search for information about Python's creator</think>
-<deepsearch>who invented Python programming language</deepsearch>
-
-[SYSTEM WILL EXECUTE TOOL AND PROVIDE REAL RESULT HERE]
-
-<result>
-Guido van Rossum invented Python in 1991...
-</result>
-
-<think>Now I have the information. Let me write some Python code to demonstrate.</think>
-<microsandbox>
-print("Python was created by Guido van Rossum")
-result = 2 + 3
-print(f"Example calculation: 2 + 3 = {{result}}")
-</microsandbox>
-
-[SYSTEM WILL EXECUTE CODE AND PROVIDE REAL OUTPUT HERE]
-
-<result>
-Python was created by Guido van Rossum
-Example calculation: 2 + 3 = 5
-</result>
-
-<think>Perfect! I now have all the information needed.</think>
-<answer>
-Python was invented by **Guido van Rossum** in 1991. As demonstrated by the code execution, basic calculations work as expected: 2 + 3 = 5.
-</answer>
-
-**Remember: Use tools ONE AT A TIME, STOP after each tool call, and WAIT for real results!**"""
+**Remember: Use ONE tool at a time, STOP after each call, WAIT for real results!**"""
 
         # 将历史记录格式化为字符串
         history_str = "\n".join(history)

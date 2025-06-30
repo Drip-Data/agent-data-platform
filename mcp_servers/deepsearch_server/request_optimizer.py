@@ -19,7 +19,7 @@ class LLMRequest:
     task_type: str  # "query_generation", "search_execution", "reflection", "synthesis"
     prompt: str
     priority: int = 1  # 1=高优先级, 2=中优先级, 3=低优先级
-    timeout: float = 120.0  # 增加到120秒
+    timeout: float = 180.0  # 增加到180秒
     created_at: datetime = None
     
     def __post_init__(self):
@@ -30,7 +30,7 @@ class RequestOptimizer:
     """请求优化器 - 合并和优化LLM调用"""
     
     def __init__(self, llm_client, batch_size: int = 3, batch_timeout: float = 2.0, 
-                 max_concurrent_requests: int = 5, default_timeout: float = 120.0):  # 增加到120秒
+                 max_concurrent_requests: int = 5, default_timeout: float = 180.0):  # 增加到180秒
         self.llm_client = llm_client
         self.batch_size = batch_size
         self.batch_timeout = batch_timeout
@@ -316,16 +316,16 @@ class RequestOptimizer:
         """执行单个LLM调用（带超时控制）"""
         messages = [{"role": "user", "content": prompt}]
         try:
-            # 应用默认超时控制
-            result = await asyncio.wait_for(
-                self.llm_client._call_api(messages), 
-                timeout=self.default_timeout
-            )
+            # 直接传递超时参数给_call_api，避免双重超时控制
+            result = await self.llm_client._call_api(messages, timeout=self.default_timeout)
             return result
-        except asyncio.TimeoutError:
+        except Exception as e:
             self.stats["timeout_errors"] += 1
-            logger.error(f"Single LLM call timeout after {self.default_timeout}s")
-            raise TimeoutError(f"LLM API call timed out after {self.default_timeout}s")
+            logger.error(f"Single LLM call failed after {self.default_timeout}s: {e}")
+            if "timeout" in str(e).lower():
+                raise TimeoutError(f"LLM API call timed out after {self.default_timeout}s")
+            else:
+                raise
     
     def get_stats(self) -> Dict[str, Any]:
         """获取优化统计信息"""
@@ -428,9 +428,9 @@ class OptimizedSearchMixin:
             )
             return await self.request_optimizer.execute_request(request)
         else:
-            # 回退到直接调用
+            # 回退到直接调用，使用较长的超时时间适应复杂查询
             messages = [{"role": "user", "content": prompt}]
-            return await self.llm_client._call_api(messages)
+            return await self.llm_client._call_api(messages, timeout=180)
     
     def get_optimization_stats(self) -> Dict[str, Any]:
         """获取优化统计信息"""

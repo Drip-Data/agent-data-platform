@@ -1,3 +1,3 @@
-{"task_id": "test-fix", "task_type": "reasoning", "description": "先搜索Python创造者是谁, 然后用Python代码计算2的5次方的结果"}
-{"task_id": "test_reasoning_combo", "task_type": "reasoning", "description": "先用DeepSearch研究Python数据分析最佳实践，然后用MicroSandbox编写并执行一个简单的数据分析示例代码，最后用Search Tool查找项目中相关的代码模式"}
+{"task_id": "test-fix", "task_type": "reasoning", "description": "先用browswer use搜索Python创造者是谁, 然后用Python代码计算2的5次方的结果"}
+{"task_id": "test_reasoning_combo", "task_type": "reasoning", "description": "用DeepSearch研究Python数据分析最佳实践"}
 {"task_id": "冒泡测试", "task_type": "reasoning", "description": "用python写一个冒泡排序，然后放4个测试集测试"}

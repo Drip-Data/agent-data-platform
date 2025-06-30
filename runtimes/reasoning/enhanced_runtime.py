@@ -354,15 +354,35 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         }
     
     def _extract_tool_call(self, response: str) -> dict:
-        """从LLM响应中提取工具调用"""
+        """从LLM响应中提取工具调用（支持分层结构）"""
         import re
         
-        # 支持的工具调用模式
-        tool_patterns = [
+        # 优先匹配分层工具调用模式 
+        hierarchical_patterns = [
+            # 匹配 <tool><action>content</action></tool> 格式
+            r'<(microsandbox|deepsearch|browser_use|search)><([^>]+)>(.*?)</\2></\1>',
+        ]
+        
+        for pattern in hierarchical_patterns:
+            match = re.search(pattern, response, re.DOTALL)
+            if match:
+                tool_name = match.group(1)
+                action = match.group(2)
+                content = match.group(3).strip()
+                return {
+                    'tool_name': tool_name,
+                    'action': action,
+                    'content': content,
+                    'raw_match': match.group(0),
+                    'hierarchical': True
+                }
+        
+        # 回退到简单工具调用模式（向后兼容）
+        simple_patterns = [
             r'<(microsandbox|deepsearch|browser_use|search)>(.*?)</\1>',
         ]
         
-        for pattern in tool_patterns:
+        for pattern in simple_patterns:
             match = re.search(pattern, response, re.DOTALL)
             if match:
                 tool_name = match.group(1)
@@ -370,24 +390,32 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 return {
                     'tool_name': tool_name,
                     'content': content,
-                    'raw_match': match.group(0)
+                    'raw_match': match.group(0),
+                    'hierarchical': False
                 }
         
         return None
     
     async def _execute_real_tool(self, tool_call: dict, session_id: str) -> str:
-        """执行真实的工具调用并返回结果"""
+        """执行真实的工具调用并返回结果（支持分层结构）"""
         try:
             tool_name = tool_call['tool_name']
             content = tool_call['content']
+            is_hierarchical = tool_call.get('hierarchical', False)
             
             # 标准化工具名称
             if tool_name == 'search':
                 tool_name = 'deepsearch'
             
-            # 处理嵌套动作调用 (例如: "research Python analysis")
-            action = self._get_default_action(tool_name)
-            instruction = content
+            # 🚀 处理分层工具调用 - 使用显式的动作
+            if is_hierarchical and 'action' in tool_call:
+                action = tool_call['action']
+                instruction = content
+                logger.info(f"🎯 分层工具调用: {tool_name}.{action} -> {instruction[:50]}...")
+            else:
+                # 回退到旧的动作推断方式
+                action = self._get_default_action(tool_name)
+                instruction = content
             
             # 🔧 处理browser_use的特殊格式
             if tool_name == 'browser_use':

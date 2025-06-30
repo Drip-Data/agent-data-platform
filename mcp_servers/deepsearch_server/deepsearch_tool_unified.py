@@ -156,7 +156,7 @@ class DeepSearchToolUnified(OptimizedSearchMixin):
             
             # 刷新待处理的优化请求并等待完成
             if hasattr(self, 'request_optimizer') and self.request_optimizer:
-                await self.request_optimizer.wait_for_completion(timeout=120.0)
+                await self.request_optimizer.wait_for_completion(timeout=180.0)
             
             # 步骤4: 综合分析并生成最终答案
             final_answer = await self._synthesize_answer(question, search_results)
