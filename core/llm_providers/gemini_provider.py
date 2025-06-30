@@ -18,7 +18,11 @@ class GeminiProvider(ILLMProvider):
         self.config = config
         self.api_key = self.config.get('gemini_api_key') or os.getenv('GEMINI_API_KEY')
         self.api_url = self.config.get('gemini_api_url') or os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta')
-        self.client = httpx.AsyncClient(timeout=60.0)
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout=120.0, connect=30.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            trust_env=False
+        )
         
         # 验证并使用有效的Gemini模型名称
         # 优先从配置文件中读取模型，然后是gemini_default_model，最后是默认值
@@ -47,6 +51,7 @@ class GeminiProvider(ILLMProvider):
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None, # Gemini的工具调用可能不同
         tool_choice: Optional[str] = None,
+        timeout: int = 120,
         **kwargs
     ) -> Any:
         """
@@ -120,20 +125,10 @@ class GeminiProvider(ILLMProvider):
         logger.debug(f"🔍 Gemini API调用开始 - 模型: {model}, payload大小: {len(json.dumps(payload))} 字符")
         
         try:
-            # 🔧 添加DNS解析重试机制 (从llm_client.py中迁移过来)
-            from httpx import Timeout
-            import asyncio # 尽管这里不直接使用asyncio.sleep，但为了保持原逻辑的完整性
-            
-            # 创建一个临时客户端，配置更长的超时和重试
-            temp_client = httpx.AsyncClient(
-                timeout=Timeout(timeout=120.0, connect=30.0),
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-                trust_env=False  # 不使用环境代理设置
-            )
-            
-            response = await temp_client.post(
+            response = await self.client.post(
                 f"{self.api_url}/models/{model}:generateContent?key={self.api_key}",
-                json=payload
+                json=payload,
+                timeout=timeout
             )
             response.raise_for_status()
             
@@ -184,7 +179,6 @@ class GeminiProvider(ILLMProvider):
                     logger.warning(f"text字段不是字符串类型: {type(text_content)}, 尝试转换")
                     text_content = str(text_content)
                 
-                await temp_client.aclose()
                 logger.info(f"✅ Gemini响应解析成功，内容长度: {len(text_content)}")
                 return text_content
                 
@@ -201,7 +195,7 @@ class GeminiProvider(ILLMProvider):
                 try:
                     # 使用备用DNS配置
                     backup_client = httpx.AsyncClient(
-                        timeout=Timeout(timeout=180.0, connect=60.0),
+                        timeout=httpx.Timeout(timeout=180.0, connect=60.0),
                         limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
                         trust_env=False
                     )

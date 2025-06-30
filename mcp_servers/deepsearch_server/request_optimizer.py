@@ -19,7 +19,7 @@ class LLMRequest:
     task_type: str  # "query_generation", "search_execution", "reflection", "synthesis"
     prompt: str
     priority: int = 1  # 1=高优先级, 2=中优先级, 3=低优先级
-    timeout: float = 30.0
+    timeout: float = 120.0  # 增加到120秒
     created_at: datetime = None
     
     def __post_init__(self):
@@ -30,7 +30,7 @@ class RequestOptimizer:
     """请求优化器 - 合并和优化LLM调用"""
     
     def __init__(self, llm_client, batch_size: int = 3, batch_timeout: float = 2.0, 
-                 max_concurrent_requests: int = 5, default_timeout: float = 30.0):
+                 max_concurrent_requests: int = 5, default_timeout: float = 120.0):  # 增加到120秒
         self.llm_client = llm_client
         self.batch_size = batch_size
         self.batch_timeout = batch_timeout
