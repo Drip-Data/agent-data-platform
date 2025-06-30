@@ -389,6 +389,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             action = self._get_default_action(tool_name)
             instruction = content
             
+            # 🔧 处理browser_use的特殊格式
+            if tool_name == 'browser_use':
+                # 提取真实的搜索查询
+                instruction = self._extract_search_query(content)
+            
             # 如果内容以已知动作开头，提取真实指令
             known_actions = ['research', 'quick_research', 'comprehensive_research', 'microsandbox_execute']
             for known_action in known_actions:
@@ -397,7 +402,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     instruction = content.strip()[len(known_action):].strip()
                     break
             
-            logger.info(f"🔧 执行工具: {tool_name}, 动作: {action}")
+            logger.info(f"🔧 执行工具: {tool_name}, 动作: {action}, 指令: {instruction[:100]}...")
             
             # 构建正确的参数格式
             if tool_name == 'deepsearch':
@@ -422,10 +427,27 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             
             if isinstance(result, dict):
                 if result.get('success', True):
-                    output = result.get('output', result.get('result', str(result)))
+                    # 支持多种结果字段名称：data, output, result
+                    output = result.get('data', result.get('output', result.get('result', str(result))))
                     return str(output)
                 else:
-                    error_msg = result.get('error', 'Unknown error')
+                    # 支持多种错误字段名称：error_message, error
+                    error_msg = result.get('error_message', result.get('error', 'Unknown error'))
+                    
+                    # 🔧 特殊处理DeepSearch的结构化错误响应
+                    if 'answer' in result and 'search_results' in result:
+                        # DeepSearch返回的结构化错误
+                        answer = result.get('answer', '')
+                        if '答案生成失败' in answer or 'timed out' in answer:
+                            return f"工具执行失败: {answer}"
+                        elif result.get('search_results'):
+                            # 检查搜索结果中的错误
+                            search_results = result.get('search_results', [])
+                            for search_result in search_results:
+                                content = search_result.get('content', '')
+                                if '搜索失败' in content or 'timed out' in content:
+                                    return f"工具执行失败: {content}"
+                    
                     return f"工具执行失败: {error_msg}"
             else:
                 return str(result)
@@ -443,3 +465,30 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             'search': 'research'  # Fixed: use 'research' for search tool
         }
         return action_mapping.get(tool_name, tool_name)
+    
+    def _extract_search_query(self, content: str) -> str:
+        """从browser_use内容中提取真实的搜索查询"""
+        import re
+        
+        # 移除常见的搜索前缀
+        content = content.strip()
+        
+        # 匹配模式: "search google for ...", "search for ...", "google search ..."
+        patterns = [
+            r'^search\s+google\s+for\s+["\']?(.+?)["\']?$',
+            r'^search\s+for\s+["\']?(.+?)["\']?$', 
+            r'^google\s+search\s+["\']?(.+?)["\']?$',
+            r'^search\s+["\']?(.+?)["\']?$',
+            r'^google\s+["\']?(.+?)["\']?$'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                query = match.group(1).strip()
+                logger.info(f"📝 提取搜索查询: '{query}' 从 '{content}'")
+                return query
+        
+        # 如果没有匹配到特殊模式，直接返回原内容
+        logger.info(f"📝 直接使用原内容作为查询: '{content}'")
+        return content
