@@ -154,6 +154,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if isinstance(result, dict):
                 if result.get('success', True):
                     output = result.get('data', result.get('output', result.get('result', str(result))))
+                    
+                    # If the tool was microsandbox and the output is a dictionary with 'stdout',
+                    # extract just the stdout value for cleaner training data.
+                    if service_name == 'microsandbox' and isinstance(output, dict) and 'stdout' in output:
+                        logger.info("Extracting 'stdout' from microsandbox result for clean output.")
+                        return str(output['stdout']).strip()
+
                     return str(output)
                 else:
                     error_msg = result.get('error_message', result.get('error', 'Unknown error'))
@@ -176,36 +183,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 处理可能发生的异常，确保返回字符串列表
         return [str(res) if not isinstance(res, Exception) else f"Error: {res}" for res in results]
-
-    async def _execute_sequential(self, actions: list) -> list:
-        """串行执行多个动作，并处理结果占位符。"""
-        step_results = {}
-        final_results = []
-
-        for i, action in enumerate(actions):
-            step_number = i + 1
-            
-            # 替换输入中的占位符
-            action['input'] = self._replace_placeholders(action['input'], step_results)
-
-            # 执行动作
-            result = await self._execute_tool(action)
-            
-            step_results[step_number] = result
-            final_results.append(result)
-            
-        return final_results
-
-    def _replace_placeholders(self, input_str: str, results: dict) -> str:
-        """用之前步骤的结果替换占位符 $result_of_step_N。"""
-        import re
-        
-        # 这个正则表达式查找 $result_of_step_1, $result_of_step_2 等
-        def replacer(match):
-            step_num = int(match.group(1))
-            return str(results.get(step_num, ''))
-
-        return re.sub(r"\$result_of_step_(\d+)", replacer, input_str)
     
     @property
     def runtime_id(self) -> str:
@@ -270,26 +247,38 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.info(f"--- Starting Step {step + 1}/{max_steps} ---")
             
             # 1. 调用LLM，设置动态停止序列
-            response_text = await self.client._call_api(
-                history,
-                stop_sequences=["<execute_tools />", "Final Answer:"]
-            )
+            stop_sequences = ["<execute_tools />", "<execute_tools></execute_tools>", "</answer>"]
+            response_text = await self.client._call_api(history, stop_sequences=stop_sequences)
+            
             history.append({"role": "assistant", "content": response_text})
             full_trajectory.append({"role": "assistant", "content": response_text})
 
-            # 2. 检查是否是最终答案
-            if "Final Answer:" in response_text:
+            if "</answer>" in response_text:
                 logger.info("✅ Final Answer detected. Task complete.")
                 break
 
-            # 3. 解析执行块
             execution_block = self._parse_execution_block(response_text)
             actions = execution_block.get("actions", [])
             
+            # 检查是否是仅包含思考的最终答案
+            if not actions and "<think>" in response_text and not "<execute_tools />" in response_text:
+                logger.info("✅ Detected a thought-only response, considering it the final answer.")
+                # 提取思考内容作为最终答案
+                try:
+                    import re
+                    match = re.search(r"<think>(.*)</think>", response_text, re.DOTALL)
+                    if match:
+                        final_thought = match.group(1).strip()
+                        history.append({"role": "assistant", "content": f"<answer>{final_thought}</answer>"})
+                        full_trajectory.append({"role": "assistant", "content": f"<answer>{final_thought}</answer>"})
+                except Exception:
+                    pass # 如果解析失败，则正常继续
+                break
+
+            # 检查是否没有工具调用
             if not actions:
                 logger.warning("No executable actions found in LLM response. Continuing.")
-                # 注入一个空结果以避免LLM卡住
-                result_xml = self._format_result(["No action was performed."])
+                result_xml = self._format_result("No action was performed.")
                 history.append({"role": "assistant", "content": result_xml})
                 full_trajectory.append({"role": "assistant", "content": result_xml})
                 continue
@@ -297,20 +286,25 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             # 4. 根据类型分发执行
             results = []
             block_type = execution_block.get("type")
+
+            # 对于串行块，我们只执行第一个动作。LLM将在下一轮根据结果决定后续步骤。
             if block_type == "sequential":
-                logger.info(f"Executing sequential block with {len(actions)} actions.")
-                results = await self._execute_sequential(actions)
+                logger.info(f"Executing first action of sequential block.")
+                if actions:
+                    results = [await self._execute_tool(actions[0])]
             elif block_type == "parallel":
                 logger.info(f"Executing parallel block with {len(actions)} actions.")
                 results = await self._execute_parallel(actions)
             else: # single
-                logger.info(f"Executing single action.")
-                results = [await self._execute_tool(actions[0])]
+                if actions:
+                    logger.info(f"Executing single action.")
+                    results = [await self._execute_tool(actions[0])]
 
-            # 5. 格式化并注入结果
-            result_xml = self._format_result(results)
-            history.append({"role": "assistant", "content": result_xml})
-            full_trajectory.append({"role": "assistant", "content": result_xml})
+            # 5. 格式化并为每个结果注入单独的<result>标签
+            for res in results:
+                result_xml = self._format_result(res)
+                history.append({"role": "assistant", "content": result_xml})
+                full_trajectory.append({"role": "assistant", "content": result_xml})
 
         else:
             logger.warning(f"Max steps ({max_steps}) reached. Terminating task.")
@@ -344,15 +338,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             metadata={'full_trajectory': full_trajectory}
         )
 
-    def _format_result(self, results: list) -> str:
-        """将工具执行结果列表格式化为单个 <result> XML块。"""
-        if not results:
+    def _format_result(self, result: str) -> str:
+        """Formats a single tool result into a <result> XML block."""
+        if not result:
             return "<result>No action was performed or no result was returned.</result>"
-        
-        # 如果有多个结果，将它们组合在一起
-        result_content = "\n".join(str(res) for res in results)
-        
-        return f"<result>{result_content}</result>"
+        return f"<result>{result}</result>"
     
     async def _execute_standard(self, task: TaskSpec) -> TrajectoryResult:
         """标准执行模式 (作为备用)"""

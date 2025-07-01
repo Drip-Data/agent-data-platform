@@ -73,7 +73,8 @@ class TaskLoader:
                             continue
 
                         try:
-                            task_data = json.loads(line)
+                            sanitized_line = self._sanitize_json_string(line)
+                            task_data = json.loads(sanitized_line)
                             task = TaskSpec.from_dict(task_data)
                             
                             if task.task_id in self.processed_tasks:
@@ -112,3 +113,24 @@ class TaskLoader:
             except Exception as e:
                 logger.error(f"任务加载过程中出错: {e}")
                 await asyncio.sleep(5) # 错误时等待更长时间
+
+    def _sanitize_json_string(self, line: str) -> str:
+        """
+        Cleans a JSON string by escaping unescaped backslashes using a simple,
+        non-regex method to avoid regex parsing errors.
+        """
+        # This is a known-safe placeholder that is unlikely to appear in the text.
+        placeholder = "___PLACEHOLDER___"
+        
+        # 1. Protect any valid, already-escaped backslashes and quotes
+        line = line.replace(r'\\', placeholder)
+        line = line.replace(r'\"', r'__QUOTE_PLACEHOLDER__')
+
+        # 2. Escape all remaining single backslashes that are now unambiguous
+        line = line.replace('\\', r'\\\\')
+        
+        # 3. Restore the protected sequences
+        line = line.replace(placeholder, r'\\\\')
+        line = line.replace(r'__QUOTE_PLACEHOLDER__', r'\"')
+        
+        return line
