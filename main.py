@@ -472,7 +472,7 @@ async def main_async():
     service_manager.register_service(
         name="mcp_servers",
         initialize_fn=lambda config: mcp_server_launcher.initialize(
-            config_manager, unified_tool_manager
+            config_manager, service_manager, unified_tool_manager
         ),
         start_fn=mcp_server_launcher.start,
         stop_fn=mcp_server_launcher.stop,

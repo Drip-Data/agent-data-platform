@@ -9,6 +9,7 @@ import json
 import socket # 导入socket模块
 from core.config_manager import ConfigManager
 from core.toolscore.service_container import MCPServiceContainer
+from core.toolscore.mcp_auto_registration import get_auto_registrar
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,13 @@ def find_available_port(start_port: int, end_port: int) -> Optional[int]:
                 continue
     return None
 
-def initialize(config_manager: ConfigManager, service_container: 'MCPServiceContainer' = None):
+def initialize(config_manager: ConfigManager, service_manager: 'ServiceManager', service_container: 'MCPServiceContainer' = None):
     """初始化MCP服务器启动器"""
-    global mcp_servers, _config_manager, _service_container
+    global mcp_servers, _config_manager, _service_container, _service_manager
     
     _config_manager = config_manager
     _service_container = service_container
+    _service_manager = service_manager
     
     logger.info("正在初始化MCP服务器启动器...")
     
@@ -345,6 +347,44 @@ async def _start_server(server_name: str):
         logger.error(f"启动MCP服务器时出错: {server_name} - {str(e)}")
         server_statuses[server_name] = {'status': 'error', 'message': str(e)}
 
+async def _check_registration_readiness(server_name: str) -> bool:
+    """检查服务器是否已在ToolScore中注册"""
+    global _service_manager
+    if not _service_manager:
+        logger.debug(f"Service manager not available, cannot check registration status for {server_name}")
+        return False
+
+    try:
+        toolscore_service = _service_manager.get_service('toolscore')
+        if not toolscore_service:
+            logger.debug(f"ToolScore service not available, cannot check registration status for {server_name}")
+            return False
+
+        tool_library = toolscore_service.get_tool_library()
+        if not tool_library:
+            logger.debug(f"Unable to get tool library from ToolScore service, skipping registration check for {server_name}")
+            return False
+
+        auto_registrar = get_auto_registrar()
+        service_id = auto_registrar.builtin_servers.get(server_name, {}).get('service_id')
+
+        if not service_id:
+            logger.warning(f"Could not determine service_id for {server_name}, skipping registration check")
+            return False
+
+        tool_spec = await tool_library.get_tool_by_id(service_id)
+        
+        if tool_spec:
+            logger.info(f"✅ {server_name} (ID: {service_id}) is registered in ToolScore")
+            return True
+        else:
+            logger.debug(f"⏳ {server_name} (ID: {service_id}) is not yet registered in ToolScore")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"Error checking registration status for {server_name}: {e}")
+        return False
+
 async def _wait_for_server_ready(server_name: str, process: subprocess.Popen, timeout: int = 30) -> bool:
     """智能等待MCP服务器就绪"""
     start_time = time.time()
@@ -361,22 +401,27 @@ async def _wait_for_server_ready(server_name: str, process: subprocess.Popen, ti
             return False
         
         try:
+            # 🔍 最终检查：确认在ToolScore中注册
+            if await _check_registration_readiness(server_name):
+                logger.info(f"✅ {server_name} 已在ToolScore中注册，确认就绪")
+                return True
+
             # 🔍 基于服务器类型的特定就绪检查
             if await _check_server_specific_readiness(server_name):
                 logger.debug(f"✅ {server_name} 特定就绪检查通过")
-                return True
-            
+                # return True # 特定检查通过后，仍需等待注册
+
             # 🔍 通用端口就绪检查
             if await _check_port_readiness(server_name):
                 logger.debug(f"✅ {server_name} 端口就绪检查通过")
                 # 端口就绪后额外等待一点时间确保服务完全初始化
-                await asyncio.sleep(1)
-                return True
+                # await asyncio.sleep(1)
+                # return True # 端口就绪不代表完全就绪
             
             # 📋 日志输出分析（检查成功启动的标志）
             if _check_startup_logs(server_name, process):
                 logger.debug(f"✅ {server_name} 启动日志检查通过")
-                return True
+                # return True # 日志显示启动不代表完全就绪
             
         except Exception as e:
             logger.debug(f"⚠️ {server_name} 就绪检查异常: {e}")
