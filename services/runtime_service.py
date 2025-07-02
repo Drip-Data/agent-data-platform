@@ -10,7 +10,9 @@ logger = logging.getLogger(__name__)
 # 全局变量
 runtime_instances = []
 
-def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, trajectory_storage_mode: str = "daily_grouped"):
+from core.unified_tool_manager import UnifiedToolManager
+
+def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, tool_manager: UnifiedToolManager = None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, trajectory_storage_mode: str = "daily_grouped"):
     """初始化推理运行时服务"""
     global runtime_instances
     
@@ -20,8 +22,8 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
     logger.info("正在初始化推理运行时服务...")
     
     # 如果没有传入依赖，尝试从全局或者延迟到运行时创建
-    if not all([config_manager, llm_client, toolscore_client]):
-        logger.warning("运行时服务未收到必要的依赖，将延迟到启动时创建运行时实例")
+    if not all([config_manager, llm_client, toolscore_client, tool_manager]):
+        logger.error("运行时服务初始化失败：缺少必要的依赖（config_manager, llm_client, toolscore_client, tool_manager）")
         return
     
     # 清空现有实例列表
@@ -38,7 +40,8 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
         runtime = EnhancedReasoningRuntime(
             config_manager=config_manager, 
             llm_client=llm_client, 
-            toolscore_client=toolscore_client, 
+            toolscore_client=toolscore_client,
+            tool_manager=tool_manager,
             redis_manager=redis_manager, 
             toolscore_websocket_endpoint=toolscore_websocket_endpoint, 
             xml_streaming_mode=True,  # 默认启用XML streaming

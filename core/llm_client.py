@@ -45,10 +45,12 @@ class LLMProvider(Enum):
     GEMINI = "gemini"
     DEEPSEEK = "deepseek"
 
+from core.unified_tool_manager import UnifiedToolManager
+
 class LLMClient:
     """统一的LLM客户端"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], tool_manager: UnifiedToolManager):
         self.config = config
         self.provider_instance: Optional[ILLMProvider] = None # 初始化为None
         
@@ -59,7 +61,7 @@ class LLMClient:
         streaming_mode = config.get('streaming_mode', True)  # 默认启用XML流式模式
         self.code_prompt_builder: IPromptBuilder = CodePromptBuilder()
         self.web_prompt_builder: IPromptBuilder = WebPromptBuilder()
-        self.reasoning_prompt_builder: IPromptBuilder = ReasoningPromptBuilder(streaming_mode=streaming_mode)
+        self.reasoning_prompt_builder: IPromptBuilder = ReasoningPromptBuilder(tool_manager=tool_manager, streaming_mode=streaming_mode)
         self.summary_prompt_builder: IPromptBuilder = SummaryPromptBuilder()
         self.completion_check_prompt_builder: IPromptBuilder = CompletionCheckPromptBuilder()
         self.task_analysis_prompt_builder: IPromptBuilder = TaskAnalysisPromptBuilder()

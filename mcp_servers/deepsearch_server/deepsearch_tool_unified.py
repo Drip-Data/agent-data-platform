@@ -18,17 +18,22 @@ from .request_optimizer import OptimizedSearchMixin
 
 logger = logging.getLogger(__name__)
 
+from core.unified_tool_manager import UnifiedToolManager
+
 class DeepSearchToolUnified(OptimizedSearchMixin):
     """专业级深度搜索工具，使用统一LLM客户端"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, tool_manager: Optional[UnifiedToolManager] = None):
         """初始化深度搜索工具"""
         # 使用系统统一的LLM配置
         self.config = config or {}
         
+        if not tool_manager:
+            raise ValueError("DeepSearchToolUnified requires a UnifiedToolManager instance.")
+
         # 初始化统一LLM客户端
         try:
-            self.llm_client = LLMClient(self.config)
+            self.llm_client = LLMClient(self.config, tool_manager=tool_manager)
             logger.info("DeepSearch tool initialized with unified LLM client")
         except Exception as e:
             logger.error(f"Failed to initialize LLM client: {e}")

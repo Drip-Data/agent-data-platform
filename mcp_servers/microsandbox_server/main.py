@@ -283,13 +283,16 @@ class MicroSandboxServerManager:
             await self.server_process.wait()
             self.server_process = None
 
+from core.unified_tool_manager import UnifiedToolManager
+
 class MicroSandboxMCPServer:
     """MicroSandbox代码执行MCP服务器（增强版生产模式）"""
     
-    def __init__(self, config_manager: ConfigManager):
+    def __init__(self, config_manager: ConfigManager, tool_manager: UnifiedToolManager):
         self.server_name = "microsandbox_server"
         self.server_id = "microsandbox"
         self.config_manager = config_manager
+        self.tool_manager = tool_manager
         self.config = MicroSandboxConfig
         
         # MicroSandbox服务器管理器
@@ -331,6 +334,20 @@ class MicroSandboxMCPServer:
         self._listen_port = microsandbox_port
         
         self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
+
+        # 动作分发映射
+        self._action_handlers = {
+            "microsandbox_execute": self._execute_code,
+            "microsandbox_install_package": self._install_package,
+            "microsandbox_list_sessions": self._list_sessions,
+            "microsandbox_close_session": self._close_session,
+            "microsandbox_cleanup_expired": self._cleanup_expired_sessions,
+            "microsandbox_get_performance_stats": self._get_performance_stats,
+            "microsandbox_get_health_status": self._get_health_status,
+            "microsandbox_get_token_status": self._get_token_status,
+            "microsandbox_refresh_token": self._refresh_token,
+        }
+        self._validate_actions()
         
         logger.info(f"MicroSandboxMCPServer initialized (Production Mode):")
         logger.info(f"  Server Name: {self.server_name}")
@@ -342,171 +359,73 @@ class MicroSandboxMCPServer:
         logger.info(f"  Listen Port: {self._listen_port}")
         logger.info(f"  Public Endpoint: {self.endpoint}")
         logger.info(f"  ToolScore Endpoint: {self.toolscore_endpoint}")
+
+    def _validate_actions(self):
+        """验证所有在配置中声明的动作都有对应的处理函数。"""
+        try:
+            declared_actions = set(self.tool_manager.get_tool_actions(self.server_name))
+            implemented_actions = set(self._action_handlers.keys())
+
+            missing = declared_actions - implemented_actions
+            if missing:
+                raise NotImplementedError(f"服务器 {self.server_name} 在配置中声明了动作 {missing}，但没有实现对应的处理函数！")
+
+            extra = implemented_actions - declared_actions
+            if extra:
+                logging.warning(f"服务器 {self.server_name} 实现了多余的动作 {extra}，这些动作未在配置中声明。")
+            
+            logger.info(f"✅ {self.server_name} 的所有动作已验证。")
+        except Exception as e:
+            logger.error(f"动作验证失败: {e}", exc_info=True)
+            raise
         
     def get_capabilities(self) -> List[ToolCapability]:
         """获取MicroSandbox工具的所有能力"""
-        return [
-            ToolCapability(
-                name="microsandbox_execute",
-                description="在MicroSandbox安全环境中执行Python代码",
-                parameters={
-                    "code": {
-                        "type": "string",
-                        "description": "要执行的Python代码",
-                        "required": True
-                    },
-                    "session_id": {
-                        "type": "string",
-                        "description": "会话ID，用于多轮执行和状态保持",
-                        "required": False
-                    },
-                    "timeout": {
-                        "type": "integer", 
-                        "description": f"执行超时时间（秒），默认{self.default_execution_timeout}秒，最大{self.max_execution_timeout}秒。注意：MicroSandbox内部有自己的超时机制，此参数主要用于文档说明",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {"code": "print('Hello from MicroSandbox!')"},
-                    {"code": "import math\\nresult = math.sqrt(16)\\nprint(f'平方根: {result}')", "timeout": 10},
-                    {"code": "x = 42", "session_id": "my-session"},
-                    {"code": "print(f'x = {x}')", "session_id": "my-session"}
-                ]
-            ),
-            ToolCapability(
-                name="microsandbox_install_package",
-                description="在MicroSandbox环境中安装Python包",
-                parameters={
-                    "package_name": {
-                        "type": "string",
-                        "description": "要安装的包名",
-                        "required": True
-                    },
-                    "version": {
-                        "type": "string",
-                        "description": "指定版本号",
-                        "required": False
-                    },
-                    "session_id": {
-                        "type": "string",
-                        "description": "会话ID",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {"package_name": "requests"},
-                    {"package_name": "numpy", "version": "1.21.0"},
-                    {"package_name": "pandas", "session_id": "data-analysis"}
-                ]
-            ),
-            ToolCapability(
-                name="microsandbox_list_sessions",
-                description="列出当前活跃的沙箱会话",
-                parameters={},
-                examples=[{}]
-            ),
-            ToolCapability(
-                name="microsandbox_close_session",
-                description="关闭指定的沙箱会话",
-                parameters={
-                    "session_id": {
-                        "type": "string",
-                        "description": "要关闭的会话ID",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"session_id": "my-session"}
-                ]
-            ),
-            ToolCapability(
-                name="microsandbox_cleanup_expired",
-                description="清理过期的沙箱会话",
-                parameters={
-                    "max_age": {
-                        "type": "integer",
-                        "description": "最大会话年龄（秒），默认为配置的超时时间",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {},
-                    {"max_age": 1800}
-                ]
-            ),
-            ToolCapability(
-                name="microsandbox_get_performance_stats",
-                description="获取服务器性能统计信息",
-                parameters={},
-                examples=[{}]
-            ),
-            ToolCapability(
-                name="microsandbox_get_health_status",
-                description="获取服务器健康状态",
-                parameters={},
-                examples=[{}]
-            )
-        ]
+        tool_info = self.tool_manager.get_tool_info(self.server_name)
+        capabilities = []
+        for action_name, action_def in tool_info.get('actions', {}).items():
+            capabilities.append(ToolCapability(
+                name=action_name,
+                description=action_def.get('description', ''),
+                parameters=action_def.get('parameters', {}),
+                examples=action_def.get('examples', [])
+            ))
+        return capabilities
     
     async def handle_tool_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """处理工具动作执行"""
-        try:
-            logger.info(f"Executing MicroSandbox action: {action} with params: {parameters}")
-            
-            if action == "microsandbox_execute":
-                return await self._execute_code(parameters)
+        """处理工具动作执行（使用分发映射）"""
+        logger.info(f"Executing MicroSandbox action: {action} with params: {parameters}")
+        handler = self._action_handlers.get(action)
+        
+        if handler:
+            try:
+                return await handler(parameters)
+            except Exception as e:
+                import traceback
+                error_details = f"MicroSandbox tool execution failed for {action}: {e}"
+                traceback_str = traceback.format_exc()
+                logger.error(f"{error_details}\n{traceback_str}")
                 
-            elif action == "microsandbox_install_package":
-                return await self._install_package(parameters)
-                
-            elif action == "microsandbox_list_sessions":
-                return await self._list_sessions()
-                
-            elif action == "microsandbox_close_session":
-                return await self._close_session(parameters)
-                
-            elif action == "microsandbox_cleanup_expired":
-                return await self._cleanup_expired_sessions(parameters)
-                
-            elif action == "microsandbox_get_performance_stats":
-                return await self._get_performance_stats()
-                
-            elif action == "microsandbox_get_health_status":
-                return await self._get_health_status()
-                
-            elif action == "microsandbox_get_token_status":
-                return await self._get_token_status()
-                
-            elif action == "microsandbox_refresh_token":
-                return await self._refresh_token()
-                
-            else:
                 return {
                     "success": False,
                     "data": None,
-                    "error_message": f"Unsupported action: {action}",
-                    "error_type": "UnsupportedAction"
+                    "error_message": f"{str(e)} (详细错误请查看日志)",
+                    "error_type": "MicroSandboxError",
+                    "debug_info": {
+                        "action": action,
+                        "parameters_received": parameters,
+                        "exception_type": type(e).__name__,
+                        "traceback_preview": traceback_str[:500] + "..." if len(traceback_str) > 500 else traceback_str
+                    }
                 }
-                
-        except Exception as e:
-            # 记录详细错误信息
-            import traceback
-            error_details = f"MicroSandbox tool execution failed for {action}: {e}"
-            traceback_str = traceback.format_exc()
-            logger.error(f"{error_details}\n{traceback_str}")
-            
+        else:
             return {
                 "success": False,
                 "data": None,
-                "error_message": f"{str(e)} (详细错误请查看日志)",
-                "error_type": "MicroSandboxError",
-                "debug_info": {
-                    "action": action,
-                    "parameters_received": parameters,
-                    "exception_type": type(e).__name__,
-                    "traceback_preview": traceback_str[:500] + "..." if len(traceback_str) > 500 else traceback_str
-                }
+                "error_message": f"Unsupported action: {action}",
+                "error_type": "UnsupportedAction"
             }
+
     
     async def _execute_code(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """执行Python代码（增强版）"""
@@ -1478,11 +1397,13 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # 初始化ConfigManager
+    # 初始化ConfigManager和UnifiedToolManager
     from core.config_manager import ConfigManager
+    from core.unified_tool_manager import UnifiedToolManager
     config_manager = ConfigManager()
+    tool_manager = UnifiedToolManager()
     
-    server = MicroSandboxMCPServer(config_manager)
+    server = MicroSandboxMCPServer(config_manager, tool_manager)
     
     try:
         # 🔧 使用带自动重启的启动方法

@@ -18,6 +18,8 @@ mcp_processes: Dict[str, subprocess.Popen] = {}
 server_statuses: Dict[str, Dict[str, Any]] = {}
 _config_manager: Optional[ConfigManager] = None
 _service_container: Optional['MCPServiceContainer'] = None
+_is_shutting_down = False
+_restart_timers: Dict[str, threading.Timer] = {}
 
 def find_available_port(start_port: int, end_port: int) -> Optional[int]:
     """
@@ -663,6 +665,12 @@ def _monitor_server(server_name, process):
     
     # 进程结束
     exit_code = process.wait()
+
+    # 如果正在关闭系统，则不执行重启逻辑
+    if _is_shutting_down:
+        logger.info(f"MCP服务器在系统关闭期间退出: {server_name} (退出码: {exit_code})")
+        server_statuses[server_name] = {'status': 'stopped_on_shutdown', 'exit_code': exit_code}
+        return
     
     if exit_code != 0:
         logger.warning(f"❌ MCP服务器异常退出: {server_name} (退出码: {exit_code})")
@@ -691,6 +699,7 @@ def _monitor_server(server_name, process):
             restart_timer = threading.Timer(restart_delay, _auto_restart_server, args=(server_name,))
             restart_timer.daemon = True
             restart_timer.start()
+            _restart_timers[server_name] = restart_timer
         else:
             logger.error(f"❌ {server_name} 已达最大重启次数 ({max_restart_attempts})，停止自动重启")
             server_statuses[server_name]['status'] = 'failed'
@@ -767,6 +776,14 @@ def _check_port_health(port: int) -> bool:
 
 def _auto_restart_server(server_name: str):
     """自动重启服务器"""
+    if _is_shutting_down:
+        logger.info(f"自动重启 {server_name} 已取消，因为系统正在关闭。")
+        return
+
+    # 从定时器字典中移除
+    if server_name in _restart_timers:
+        del _restart_timers[server_name]
+        
     try:
         logger.info(f"🔄 开始自动重启 MCP 服务器: {server_name}")
         
@@ -798,9 +815,16 @@ def _auto_restart_server(server_name: str):
 
 def stop():
     """停止所有MCP服务器"""
-    global mcp_processes, server_statuses
+    global mcp_processes, server_statuses, _is_shutting_down, _restart_timers
     
+    _is_shutting_down = True
     logger.info("正在停止MCP服务器...")
+
+    # 取消所有计划中的重启任务
+    for server, timer in list(_restart_timers.items()):
+        timer.cancel()
+        logger.info(f"已取消计划中的重启任务: {server}")
+    _restart_timers.clear()
     
     for server_name, process in list(mcp_processes.items()):
         logger.info(f"停止MCP服务器: {server_name}")

@@ -89,13 +89,15 @@ class TrajectoryHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"❌ 发送处理命令失败: {e}")
 
+from ..unified_tool_manager import UnifiedToolManager
+
 class SynthesisService:
     """简单任务合成器 - 基于JSON文件存储"""
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, tool_manager: UnifiedToolManager):
         self.config = config
         self.redis = async_redis.from_url(config["redis_url"])  # 使用异步redis客户端
-        self.llm_client = LLMClient(config)
+        self.llm_client = LLMClient(config, tool_manager=tool_manager)
         self.enabled = config.get("synthesis_enabled", False)
         self.tool_library = UnifiedToolLibrary() # 初始化UnifiedToolLibrary
           # 使用统一的路径管理

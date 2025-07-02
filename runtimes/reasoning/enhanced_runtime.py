@@ -31,21 +31,26 @@ class TrajectoryStorageMode(Enum):
     MONTHLY_GROUPED = "monthly_grouped"
 
 
+from core.unified_tool_manager import UnifiedToolManager
+
+from core.unified_tool_manager import UnifiedToolManager
+
 class EnhancedReasoningRuntime(RuntimeInterface):
     """
     增强的推理运行时 - 专注核心功能, 并集成高级模块
     """
     
-    def __init__(self, config_manager, llm_client, toolscore_client, redis_manager=None, 
+    def __init__(self, config_manager, llm_client, toolscore_client, tool_manager: UnifiedToolManager, redis_manager=None, 
                  toolscore_websocket_endpoint=None, xml_streaming_mode: bool = False, 
                  trajectory_storage_mode: str = "daily_grouped"):
         self._runtime_id = f"enhanced-reasoning-{uuid.uuid4()}"
         self.config_manager = config_manager
         self.client = llm_client
         self.toolscore_client = toolscore_client
+        self.tool_manager = tool_manager
         self.xml_streaming_mode = xml_streaming_mode
         self.trajectory_storage_mode = TrajectoryStorageMode(trajectory_storage_mode)
-        self.prompt_builder = ReasoningPromptBuilder(streaming_mode=xml_streaming_mode)
+        self.prompt_builder = ReasoningPromptBuilder(tool_manager=self.tool_manager, streaming_mode=xml_streaming_mode)
         self.is_initialized = False
 
         # 初始化高级模块

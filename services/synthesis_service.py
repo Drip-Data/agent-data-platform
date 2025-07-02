@@ -21,7 +21,9 @@ synthesis_thread = None
 monitor_task = None
 running = False
 
-def initialize(config: Optional[Dict] = None):
+from core.unified_tool_manager import UnifiedToolManager
+
+def initialize(config: Optional[Dict] = None, tool_manager: Optional[UnifiedToolManager] = None):
     """初始化合成服务"""
     global synthesis_instance, trajectory_monitor
     
@@ -30,6 +32,10 @@ def initialize(config: Optional[Dict] = None):
     
     logger.info("正在初始化合成服务...")
     
+    # 如果没有传入依赖，这是一个致命错误
+    if not tool_manager:
+        raise ValueError("SynthesisService初始化失败：必须提供UnifiedToolManager实例。")
+
     # 从环境变量或配置中获取轨迹目录
     trajectories_dir = os.getenv('TRAJECTORIES_DIR', 
                                config.get('TRAJECTORIES_DIR', 'output/trajectories'))
@@ -44,17 +50,13 @@ def initialize(config: Optional[Dict] = None):
     redis_url = config.get('redis_url', os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
     config['redis_url'] = redis_url
     
-    # 创建SynthesisService实例（保持向后兼容）
-    synthesis_instance = SynthesisService(config=config)
+    # 创建SynthesisService实例，并传入tool_manager
+    synthesis_instance = SynthesisService(config=config, tool_manager=tool_manager)
     
     # 初始化完整的TrajectoryMonitor v2.0
     try:
-        from core.llm_client import LLMClient
-        from core.toolscore.mcp_client import MCPToolClient
-        from core.synthesiscore.trajectory_monitor import TrajectoryMonitor
-        
         # 创建LLM和MCP客户端
-        llm_client = LLMClient(config)
+        llm_client = LLMClient(config, tool_manager=tool_manager)
         mcp_client = MCPToolClient("ws://localhost:8089/websocket")
         
         # 创建完整的TrajectoryMonitor v2.0

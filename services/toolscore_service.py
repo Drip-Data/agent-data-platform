@@ -190,21 +190,21 @@ def stop():
     
     logger.info("正在停止ToolScore服务...")
     
-    # 1. 首先尝试优雅关闭WebSocket服务器
+    # 1. 优雅地关闭WebSocket服务器
     if toolscore_server:
         try:
-            if hasattr(toolscore_server, 'websocket_server') and toolscore_server.websocket_server:
-                toolscore_server.websocket_server.close()
-                logger.info("WebSocket服务器已关闭")
+            # 创建一个新的事件循环来运行异步的stop方法
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(toolscore_server.stop())
+                logger.info("ToolScore MCP服务器已通过异步stop方法成功停止")
+            except Exception as e:
+                logger.warning(f"调用ToolScore MCP服务器的异步stop方法时出错: {e}", exc_info=True)
+            finally:
+                loop.close()
         except Exception as e:
-            logger.warning(f"关闭WebSocket服务器时出错: {e}")
-        
-        # 尝试停止server的内部循环
-        try:
-            if hasattr(toolscore_server, '_is_running'):
-                toolscore_server._is_running = False
-        except Exception as e:
-            logger.warning(f"停止server内部循环时出错: {e}")
+            logger.error(f"停止ToolScore MCP服务器时发生意外错误: {e}", exc_info=True)
             
         logger.info("ToolScore MCP服务器已停止")
     

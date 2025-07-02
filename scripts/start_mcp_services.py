@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import logging
+import os
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
@@ -24,9 +25,14 @@ def start_service(service_name: str, port: int):
     try:
         logger.info(f"🚀 启动 {service_name} 服务 (端口{port})")
         
+        # 设置Python路径以便服务能找到core模块
+        env = os.environ.copy()
+        env['PYTHONPATH'] = str(project_root)
+        
         process = subprocess.Popen(
             [sys.executable, str(service_path)],
             cwd=project_root,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
