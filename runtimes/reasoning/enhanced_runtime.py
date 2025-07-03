@@ -9,7 +9,7 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from enum import Enum
 
 from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, TaskExecutionConstants, ErrorMessageConstants
@@ -591,8 +591,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             history.append({"role": "assistant", "content": response_text})
             full_trajectory.append({"role": "assistant", "content": response_text})
 
-            answer_end_tag = f"</{TaskExecutionConstants.XML_TAGS['ANSWER']}>"
-            if answer_end_tag in response_text:
+            # 🔧 修复：更智能的答案检测逻辑
+            answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
+            answer_start_tag = f"<{answer_tag}>"
+            answer_end_tag = f"</{answer_tag}>"
+            
+            # 检测答案标签（开始标签或结束标签）
+            has_answer_start = answer_start_tag in response_text
+            has_answer_end = answer_end_tag in response_text
+            has_boxed_content = "\\boxed{" in response_text
+            
+            if has_answer_end or (has_answer_start and has_boxed_content):
                 logger.info("✅ Final Answer detected. Task complete.")
                 # 🔍 记录解析结果（包含答案的情况）
                 parsing_start_time = time.time()
@@ -654,7 +663,23 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
             # 🔧 根本修复：智能判断是否需要注入"无动作"消息
             if not actions:
-                if self._should_inject_no_action_message(response_text):
+                # 🔧 新增：计划检测逻辑 - 解决计划-执行脱节问题
+                plan_content = self._extract_detailed_plan(response_text)
+                if plan_content and self._has_executable_plan(plan_content):
+                    logger.info("🎯 检测到详细计划但缺少执行动作，引导LLM开始执行")
+                    execution_guidance = (
+                        "You have created a detailed plan. Now please start executing the first step of your plan. "
+                        "Use the appropriate tool call with the exact XML format and end with <execute_tools />. "
+                        "Remember: plans are not answers - execution is required."
+                    )
+                    result_xml = self._format_result(execution_guidance)
+                    history.append({"role": "assistant", "content": result_xml})
+                    full_trajectory.append({"role": "assistant", "content": result_xml})
+                    # 🔍 完成步骤记录
+                    self.step_logger.finish_step("plan_execution_guidance_injected")
+                    continue
+                
+                elif self._should_inject_no_action_message(response_text):
                     logger.warning("No executable actions found in LLM response. Injecting guidance.")
                     result_xml = self._format_result("No executable action detected in this step.")
                     history.append({"role": "assistant", "content": result_xml})
@@ -708,8 +733,21 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 🔧 根本修复：区分步数限制和真正失败
         max_steps_reached = len(full_trajectory) >= max_steps
         
-        # 🔧 根本修复：智能判定任务成功状态
+        # 🔧 根本修复：智能判定任务成功状态，考虑步数限制因素
         success = self._determine_task_success(final_trajectory_str, full_trajectory)
+        
+        # 🔧 新增：如果达到最大步数但没有明确的答案，降低成功判定标准
+        if max_steps_reached:
+            answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
+            has_explicit_answer = f"<{answer_tag}>" in final_trajectory_str
+            has_boxed_content = "\\boxed{" in final_trajectory_str
+            
+            if not has_explicit_answer and not has_boxed_content:
+                # 达到最大步数且没有明确答案，标记为部分成功但需要说明
+                logger.warning(f"任务达到最大步数({max_steps})但没有明确答案标记")
+                # 根据是否有工具执行结果来判定
+                tool_success_rate = self._calculate_tool_success_rate()
+                success = tool_success_rate > 0.5  # 至少50%的工具执行成功才认为部分成功
         
         # 🔧 根本修复：动态提取真实的最终结果，考虑步数限制情况
         if max_steps_reached:
@@ -733,12 +771,15 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         await self._save_xml_output(xml_output)
 
+        # 🔧 修复：从step_logger获取实际的执行步骤
+        actual_steps = await self.step_logger.get_execution_steps()
+        
         return TrajectoryResult(
             task_name=task.task_id,
             task_id=task.task_id, 
             task_description=task.description,
             runtime_id=self._runtime_id,
-            steps=[],  
+            steps=actual_steps,  # 🔧 使用实际步骤而不是空数组
             success=success,
             final_result=final_result,  # 🔧 使用动态提取的结果
             total_duration=total_duration,
@@ -851,10 +892,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 🔧 智能综合判定逻辑：基于多维度评估
         success = False
         
-        # 场景1：有工具执行且成功 + 有答案 = 明确成功
-        if has_successful_tools and has_answer and not has_critical_errors:
+        # 场景1：有工具执行且成功 + 有答案 + 有意义结果 = 明确成功
+        if has_successful_tools and has_answer and not has_critical_errors and self._has_meaningful_tool_results(final_trajectory_str):
             success = True
-            logger.info("🎯 判定成功：工具执行成功 + 完整答案")
+            logger.info("🎯 判定成功：工具执行成功 + 完整答案 + 有意义结果")
         
         # 场景2：有工具执行且成功 + 有结果输出 = 潜在成功
         elif has_successful_tools and has_tool_results and not has_critical_errors:
@@ -951,15 +992,24 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         """
         import re
         
-        # 🔧 第一优先级：提取answer标签内容
+        # 🔧 第一优先级：提取answer标签内容，优先提取\boxed{}格式
         answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
         answer_pattern = f'<{answer_tag}>(.*?)</{answer_tag}>'
         answer_match = re.search(answer_pattern, final_trajectory_str, re.DOTALL)
         if answer_match:
             answer_content = answer_match.group(1).strip()
             if answer_content and len(answer_content) > 0:
-                logger.info(f"✅ 从<answer>标签提取最终结果: {answer_content[:100]}...")
-                return answer_content
+                # 🔧 新增：优先提取\boxed{}内的清洁内容
+                boxed_pattern = r'\\boxed\{(.*?)\}'
+                boxed_match = re.search(boxed_pattern, answer_content, re.DOTALL)
+                if boxed_match:
+                    clean_answer = boxed_match.group(1).strip()
+                    logger.info(f"✅ 从\\boxed{{}}提取清洁最终结果: {clean_answer[:100]}...")
+                    return clean_answer
+                else:
+                    # 如果没有\boxed{}格式，返回原始answer内容
+                    logger.info(f"✅ 从<answer>标签提取最终结果: {answer_content[:100]}...")
+                    return answer_content
         
         # 🔧 第二优先级：提取最后的有效工具执行结果（非"No action"）
         result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
@@ -995,9 +1045,13 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         for pattern in calculation_patterns:
             matches = re.findall(pattern, final_trajectory_str, re.IGNORECASE)
             if matches:
-                calculation_result = matches[-1].strip()  # 取最后一个匹配
-                logger.info(f"🧮 从计算结果提取最终答案: {calculation_result}")
-                return f"计算结果: {calculation_result}"
+                # 🔧 添加上下文验证 - 确保结果来自实际的工具执行
+                calculation_result = matches[-1].strip()
+                if self._validate_calculation_context(final_trajectory_str, calculation_result):
+                    logger.info(f"🧮 从计算结果提取最终答案: {calculation_result}")
+                    return f"计算结果: {calculation_result}"
+                else:
+                    logger.warning(f"⚠️ 计算结果 {calculation_result} 未通过上下文验证，跳过")
         
         # 🔧 第四优先级：提取搜索答案（针对问答类任务）
         # 查找IORA等专有名词的解释
@@ -1161,6 +1215,185 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 默认情况：不注入无动作消息（更保守的策略）
         logger.info("🎯 响应包含内容，无需注入无动作消息")
         return False
+    
+    def _extract_detailed_plan(self, response_text: str) -> Optional[str]:
+        """🔧 新增：从响应中提取详细计划内容"""
+        import re
+        
+        # 检查think标签中的内容
+        think_tag = TaskExecutionConstants.XML_TAGS['THINK']
+        think_pattern = f'<{think_tag}>(.*?)</{think_tag}>'
+        think_match = re.search(think_pattern, response_text, re.DOTALL)
+        
+        if think_match:
+            think_content = think_match.group(1).strip()
+            return think_content
+        
+        # 如果没有think标签，检查是否有其他形式的计划内容
+        # 寻找包含步骤、计划关键词的内容
+        plan_indicators = [
+            'step', 'phase', 'first', 'next', 'then', 'need to', 'will',
+            '步骤', '阶段', '首先', '然后', '接下来', '需要', '将会'
+        ]
+        
+        lines = response_text.split('\n')
+        plan_lines = []
+        
+        for line in lines:
+            line_lower = line.lower()
+            if any(indicator in line_lower for indicator in plan_indicators):
+                plan_lines.append(line.strip())
+        
+        if plan_lines and len('\n'.join(plan_lines)) > 50:  # 确保有足够的计划内容
+            return '\n'.join(plan_lines)
+        
+        return None
+    
+    def _has_executable_plan(self, plan_content: str) -> bool:
+        """🔧 新增：判断计划内容是否包含可执行的具体步骤"""
+        if not plan_content or len(plan_content) < 30:
+            return False
+        
+        plan_lower = plan_content.lower()
+        
+        # 检查是否包含工具相关的执行意图
+        tool_indicators = [
+            'search', 'execute', 'run', 'call', 'use', 'browser', 'python', 'code',
+            '搜索', '执行', '运行', '调用', '使用', '浏览器', '代码', '工具'
+        ]
+        
+        # 检查是否包含明确的执行步骤
+        execution_indicators = [
+            'step 1', 'first step', 'start by', 'begin with', 'initially',
+            '第一步', '首先', '开始', '先', '第1步'
+        ]
+        
+        # 检查工具服务器名称
+        service_indicators = [
+            'microsandbox', 'deepsearch', 'browser_use', 'search_tool'
+        ]
+        
+        has_tools = any(indicator in plan_lower for indicator in tool_indicators)
+        has_execution_steps = any(indicator in plan_lower for indicator in execution_indicators)
+        has_services = any(indicator in plan_lower for indicator in service_indicators)
+        
+        # 检查是否包含多个步骤（表示这是一个详细计划）
+        step_count = (
+            plan_lower.count('step') + plan_lower.count('步骤') + 
+            plan_lower.count('first') + plan_lower.count('then') + 
+            plan_lower.count('next') + plan_lower.count('首先') + 
+            plan_lower.count('然后') + plan_lower.count('接下来')
+        )
+        
+        has_multiple_steps = step_count >= 2
+        
+        # 如果有工具意图、执行步骤、或多步计划，认为这是可执行计划
+        is_executable = (has_tools and has_execution_steps) or has_services or has_multiple_steps
+        
+        logger.debug(f"🔍 计划分析: 工具={has_tools}, 执行步骤={has_execution_steps}, "
+                    f"服务={has_services}, 多步骤={has_multiple_steps}, 可执行={is_executable}")
+        
+        return is_executable
+    
+    def _validate_calculation_context(self, trajectory_str: str, calculation_result: str) -> bool:
+        """🔧 新增：验证计算结果是否来自真实的工具执行上下文"""
+        import re
+        
+        # 1. 检查结果是否出现在工具执行结果标签内
+        result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
+        result_pattern = f'<{result_tag}>(.*?)</{result_tag}>'
+        result_blocks = re.findall(result_pattern, trajectory_str, re.DOTALL)
+        
+        # 检查计算结果是否在任何result块中
+        for result_block in result_blocks:
+            if calculation_result in result_block:
+                logger.debug("✅ 计算结果在工具执行结果中找到")
+                return True
+        
+        # 2. 检查结果是否在工具执行的上下文中（附近有工具调用）
+        # 查找结果在轨迹中的位置
+        result_index = trajectory_str.find(calculation_result)
+        if result_index == -1:
+            logger.debug("❌ 未找到计算结果在轨迹中的位置")
+            return False
+        
+        # 检查结果前后500字符内是否有工具执行标记
+        context_start = max(0, result_index - 500)
+        context_end = min(len(trajectory_str), result_index + len(calculation_result) + 500)
+        context = trajectory_str[context_start:context_end]
+        
+        tool_execution_indicators = [
+            '<execute_tools', '</execute_tools>', '<result>', '</result>',
+            'microsandbox', 'deepsearch', 'browser_use', 'search_tool',
+            '代码执行', '执行结果', '工具执行', '计算完成'
+        ]
+        
+        has_tool_context = any(indicator in context for indicator in tool_execution_indicators)
+        if has_tool_context:
+            logger.debug("✅ 计算结果在工具执行上下文中")
+            return True
+        
+        # 3. 检查是否是纯思考过程中的虚假计算
+        think_tag = TaskExecutionConstants.XML_TAGS['THINK']
+        think_pattern = f'<{think_tag}>(.*?)</{think_tag}>'
+        think_blocks = re.findall(think_pattern, trajectory_str, re.DOTALL)
+        
+        for think_block in think_blocks:
+            if calculation_result in think_block:
+                # 如果结果只在思考过程中，且没有对应的工具执行，则认为是虚假的
+                logger.debug("⚠️ 计算结果只在思考过程中发现，可能是虚假结果")
+                return False
+        
+        # 4. 检查结果是否有合理的数值格式和单位
+        # 如果是纯字母（如"e"），很可能是虚假结果
+        if re.match(r'^[a-zA-Z]$', calculation_result.strip()):
+            logger.debug("❌ 计算结果是单个字母，可能是虚假结果")
+            return False
+        
+        # 5. 默认情况：如果结果看起来合理且没有明显问题，允许通过
+        logger.debug("🔧 计算结果通过基本验证")
+        return True
+    
+    def _has_meaningful_tool_results(self, trajectory_str: str) -> bool:
+        """🔧 新增：检查工具执行是否产生了有意义的结果"""
+        import re
+        
+        result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
+        result_pattern = f'<{result_tag}>(.*?)</{result_tag}>'
+        result_blocks = re.findall(result_pattern, trajectory_str, re.DOTALL)
+        
+        meaningful_results = 0
+        for result_block in result_blocks:
+            result_clean = result_block.strip()
+            
+            # 排除无意义的结果
+            if (len(result_clean) > 20 and  # 有足够的内容
+                TaskExecutionConstants.NO_ACTION_PERFORMED not in result_clean and
+                "No executable action detected" not in result_clean and
+                "Error:" not in result_clean and
+                "failed" not in result_clean.lower()):
+                
+                # 检查是否包含有价值的信息
+                has_data = any(indicator in result_clean.lower() for indicator in [
+                    'result', 'found', 'success', 'completed', '结果', '成功', '完成',
+                    'http', 'www', 'search', 'execute', 'calculation', 'answer'
+                ])
+                
+                # 检查是否包含数值、代码执行结果或搜索结果
+                has_numerical = re.search(r'\d+', result_clean)
+                has_technical_content = any(keyword in result_clean.lower() for keyword in [
+                    'python', 'code', 'execute', 'import', 'def', 'return',
+                    'search results', '搜索结果', 'photocurrent', 'iora'
+                ])
+                
+                if has_data or has_numerical or has_technical_content:
+                    meaningful_results += 1
+        
+        # 如果有至少一个有意义的工具结果，认为工具执行有意义
+        has_meaningful = meaningful_results > 0
+        logger.debug(f"🔍 工具结果分析: 总结果块={len(result_blocks)}, 有意义结果={meaningful_results}, 判定={has_meaningful}")
+        
+        return has_meaningful
         
     def _detect_success(self, response: str) -> bool:
         """检测XML响应是否成功 - 保留向后兼容性"""

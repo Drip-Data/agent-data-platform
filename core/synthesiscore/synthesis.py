@@ -733,13 +733,45 @@ class SynthesisService:
             
             processed_count = 0
             
-            # 获取所有轨迹文件并处理其中未处理的轨迹
-            for filename in os.listdir(trajectories_dir):
-                if filename.endswith('.json'):
-                    trajectory_path = os.path.join(trajectories_dir, filename)
-                    # 处理文件中所有未处理的轨迹
-                    file_processed_count = await self._process_unprocessed_in_file(trajectory_path)
+            # 🔧 修复：获取所有轨迹文件（包括分组目录下的JSONL文件）
+            from pathlib import Path
+            trajectories_path = Path(trajectories_dir)
+            
+            logger.info(f"🔍 扫描轨迹目录: {trajectories_path}")
+            
+            # 扫描根目录下的JSON文件（兼容旧格式）
+            json_files = list(trajectories_path.glob("*.json"))
+            if json_files:
+                logger.info(f"📁 找到 {len(json_files)} 个旧格式JSON文件")
+                for json_file in json_files:
+                    file_processed_count = await self._process_unprocessed_in_file(str(json_file))
                     processed_count += file_processed_count
+            
+            # 🔧 新增：扫描分组目录下的JSONL文件（新格式）
+            jsonl_files = list(trajectories_path.glob("grouped/**/trajectories_*.jsonl"))
+            if jsonl_files:
+                logger.info(f"📁 找到 {len(jsonl_files)} 个新格式JSONL文件")
+                for jsonl_file in jsonl_files:
+                    logger.info(f"🔍 发现新格式轨迹文件: {jsonl_file}")
+                    file_processed_count = await self._process_unprocessed_in_file(str(jsonl_file))
+                    processed_count += file_processed_count
+            else:
+                logger.warning("⚠️ 没有找到新格式的JSONL轨迹文件")
+                # 详细输出目录结构用于调试
+                logger.info(f"📂 轨迹目录内容:")
+                for item in trajectories_path.iterdir():
+                    if item.is_dir():
+                        logger.info(f"  📁 {item.name}/")
+                        for subitem in item.iterdir():
+                            if subitem.is_dir():
+                                logger.info(f"    📁 {subitem.name}/")
+                                for file in subitem.iterdir():
+                                    if file.is_file():
+                                        logger.info(f"      📄 {file.name} ({file.stat().st_size} bytes)")
+                            else:
+                                logger.info(f"    📄 {subitem.name} ({subitem.stat().st_size} bytes)")
+                    else:
+                        logger.info(f"  📄 {item.name} ({item.stat().st_size} bytes)")
             
             logger.info(f"🎯 Unprocessed trajectories completed: {processed_count} new trajectories processed")
             
@@ -754,12 +786,35 @@ class SynthesisService:
                 logger.info(f"📝 Trajectory file is empty or does not exist: {trajectory_path}")
                 return 0
             
+            # 🔧 修复：支持JSONL格式文件读取
+            trajectory_data = []
             with open(trajectory_path, 'r', encoding='utf-8') as f:
-                try:
-                    trajectory_data = json.load(f)
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ Error decoding JSON from {trajectory_path}: {e}")
-                    return 0 #无法解析文件，返回0
+                if trajectory_path.endswith('.jsonl'):
+                    # JSONL格式：每行一个JSON对象
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            trajectory_obj = json.loads(line)
+                            trajectory_data.append(trajectory_obj)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"❌ Error decoding JSONL line {line_num} from {trajectory_path}: {e}")
+                            continue
+                else:
+                    # JSON格式：单个JSON对象或数组
+                    try:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            trajectory_data = data
+                        elif isinstance(data, dict):
+                            # 如果是包含trajectories键的对象
+                            trajectory_data = data.get('trajectories', [data])
+                        else:
+                            trajectory_data = [data]
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ Error decoding JSON from {trajectory_path}: {e}")
+                        return 0
             
             processed_count = 0
             new_seed_tasks = []  # 收集新生成的种子任务

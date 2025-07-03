@@ -36,7 +36,9 @@ class TrajectoryFileHandler(FileSystemEventHandler):
         if event.is_directory:
             return
             
-        if event.src_path.endswith('trajectories_collection.json'):
+        # 🔧 修复：适配新的按日期分组的轨迹文件格式
+        if (event.src_path.endswith('trajectories_collection.json') or 
+            'trajectories_' in event.src_path and event.src_path.endswith('.jsonl')):
             # 避免频繁触发，设置最小间隔
             current_time = time.time()
             last_time = self.last_processed.get(event.src_path, 0)
@@ -164,8 +166,26 @@ class TrajectoryMonitor:
         """处理现有轨迹"""
         logger.info("🔄 检查并处理现有轨迹...")
         
+        # 🔧 修复：检查新格式的按日期分组轨迹文件
+        trajectory_files_found = []
+        
+        # 首先检查旧格式文件
         if os.path.exists(self.trajectories_collection_file):
-            await self.process_trajectory_changes(self.trajectories_collection_file)
+            trajectory_files_found.append(self.trajectories_collection_file)
+        
+        # 然后检查新格式的分组轨迹文件
+        trajectories_dir = Path(self.trajectories_dir)
+        if trajectories_dir.exists():
+            # 查找所有按日期分组的轨迹文件
+            for grouped_dir in trajectories_dir.glob("grouped/*/"):
+                for trajectory_file in grouped_dir.glob("trajectories_*.jsonl"):
+                    trajectory_files_found.append(str(trajectory_file))
+        
+        if trajectory_files_found:
+            logger.info(f"📁 找到 {len(trajectory_files_found)} 个轨迹文件")
+            for file_path in trajectory_files_found:
+                logger.info(f"  - {file_path}")
+                await self.process_trajectory_changes(file_path)
         else:
             logger.info("📝 没有现有轨迹文件")
     
@@ -234,24 +254,44 @@ class TrajectoryMonitor:
             logger.error(f"❌ 处理轨迹变化失败: {e}")
     
     def _load_trajectories_from_file(self, file_path: str) -> List[TrajectoryResult]:
-        """从文件加载轨迹"""
+        """从文件加载轨迹 - 🔧 修复：支持JSONL格式"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
             trajectories = []
-            trajectory_list = data.get('trajectories', []) if isinstance(data, dict) else data
             
-            for traj_data in trajectory_list:
-                try:
-                    trajectory = self._convert_to_trajectory_result(traj_data)
-                    if trajectory:
-                        trajectories.append(trajectory)
-                except Exception as e:
-                    logger.error(f"❌ 转换轨迹数据失败: {e}")
-                    continue
+            with open(file_path, 'r', encoding='utf-8') as f:
+                # 🔧 修复：检查文件格式并相应处理
+                if file_path.endswith('.jsonl'):
+                    # JSONL格式：每行一个JSON对象
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            traj_data = json.loads(line)
+                            trajectory = self._convert_to_trajectory_result(traj_data)
+                            if trajectory:
+                                trajectories.append(trajectory)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"❌ 解析JSONL第{line_num}行失败: {e}")
+                            continue
+                        except Exception as e:
+                            logger.error(f"❌ 转换轨迹数据失败 第{line_num}行: {e}")
+                            continue
+                else:
+                    # JSON格式：单个JSON对象
+                    data = json.load(f)
+                    trajectory_list = data.get('trajectories', []) if isinstance(data, dict) else data
+                    
+                    for traj_data in trajectory_list:
+                        try:
+                            trajectory = self._convert_to_trajectory_result(traj_data)
+                            if trajectory:
+                                trajectories.append(trajectory)
+                        except Exception as e:
+                            logger.error(f"❌ 转换轨迹数据失败: {e}")
+                            continue
             
-            logger.info(f"📋 从文件加载 {len(trajectories)} 个轨迹")
+            logger.info(f"📋 从文件加载 {len(trajectories)} 个轨迹: {file_path}")
             return trajectories
             
         except Exception as e:

@@ -84,6 +84,13 @@ def clean_json_string(json_str: str) -> str:
     
     for i, line in enumerate(lines):
         stripped = line.strip()
+        # 🔧 新增：更强的孤立逗号检测
+        # 检测形如 "},\n," 或 "\",\n," 的模式
+        if stripped == ',' or (stripped.startswith(',') and not re.search(r'"[^"]+"\s*:', stripped)):
+            # 这是一个孤立的逗号，跳过它
+            logger.debug(f"🔧 跳过孤立逗号在第{i+1}行")
+            continue
+            
         # 如果行以逗号开头，且包含其他字段，可能是缺失content_identifier
         if stripped.startswith(',') and ('"confidence"' in stripped or '"relationship"' in stripped):
             # 在前一行添加content_identifier字段
@@ -100,6 +107,11 @@ def clean_json_string(json_str: str) -> str:
         fixed_lines.append(line)
     
     json_str = '\n'.join(fixed_lines)
+    
+    # 🔧 5.5. 新增：处理对象内部的孤立逗号
+    # 修复模式 "field": "value",, 或 "field": "value", }
+    json_str = re.sub(r',\s*,', ',', json_str)  # 连续逗号
+    json_str = re.sub(r',\s*([}\]])', r'\1', json_str)  # 对象/数组结尾的多余逗号
     
     # 🔧 6. 修复对象末尾多余逗号的问题
     json_str = re.sub(r',\s*\}', '}', json_str)
@@ -215,11 +227,10 @@ class ConclusionExtractor:
             return []
     
     def _emergency_json_fix(self, json_content: str) -> str:
-        """紧急JSON修复策略"""
+        """🔧 增强紧急JSON修复策略 - 处理缺失字段和逗号错误"""
         import re
         
-        # 策略1: 尝试修复最常见的"Expecting property name enclosed in double quotes"错误
-        # 这通常是因为key没有引号
+        # 策略1: 修复没有引号的key
         lines = json_content.split('\n')
         fixed_lines = []
         
@@ -232,13 +243,57 @@ class ConclusionExtractor:
         
         fixed_json = '\n'.join(fixed_lines)
         
-        # 策略2: 如果仍然有问题，尝试创建一个最小可用的JSON
+        # 策略2: 🔧 新增 - 修复缺失字段导致的孤立逗号问题
+        # 查找模式：",\s*,\s*" 或 ",\s*}" 或 ",\s*]"
+        fixed_json = re.sub(r',\s*,', ',', fixed_json)  # 连续逗号
+        fixed_json = re.sub(r',\s*([}\]])', r'\1', fixed_json)  # 结尾多余逗号
+        
+        # 策略3: 🔧 新增 - 修复缺失的必需字段
+        # 如果发现conclusion对象缺少必需字段，尝试补充
+        try:
+            # 先尝试解析看看具体缺什么
+            test_data = json.loads(fixed_json)
+            if 'conclusions' in test_data:
+                for i, conclusion in enumerate(test_data['conclusions']):
+                    if not isinstance(conclusion, dict):
+                        continue
+                    
+                    # 补充缺失的必需字段
+                    if 'content_identifier' not in conclusion:
+                        conclusion['content_identifier'] = f"content_{i}"
+                    if 'relationship' not in conclusion:
+                        conclusion['relationship'] = "提取关系"
+                    if 'confidence' not in conclusion:
+                        conclusion['confidence'] = 0.8
+                
+                # 返回修复后的JSON
+                return json.dumps(test_data, ensure_ascii=False, indent=2)
+            else:
+                return fixed_json
+                
+        except Exception as e:
+            logger.warning(f"⚠️ 策略3修复失败: {e}")
+        
+        # 策略4: 如果所有策略都失败，尝试解析部分内容
         try:
             json.loads(fixed_json)
             return fixed_json
-        except:
-            # 如果还是失败，创建一个基本的空结构
-            return '{"conclusions": []}'
+        except Exception as parse_error:
+            logger.warning(f"⚠️ JSON修复仍然失败: {parse_error}")
+            # 尝试提取可能的conclusion内容
+            conclusions = []
+            conclusion_matches = re.findall(r'"conclusion":\s*"([^"]+)"', json_content)
+            for i, conclusion_text in enumerate(conclusion_matches):
+                conclusions.append({
+                    "conclusion": conclusion_text,
+                    "relationship": "提取关系",
+                    "content_identifier": f"extracted_{i}",
+                    "confidence": 0.7
+                })
+            
+            fallback_result = {"conclusions": conclusions}
+            logger.info(f"🔧 使用回退策略，提取到 {len(conclusions)} 个结论")
+            return json.dumps(fallback_result, ensure_ascii=False)
     
     def _build_conclusion_extraction_prompt(self, corpus_content: CorpusContent) -> str:
         """构建结论提取提示词"""

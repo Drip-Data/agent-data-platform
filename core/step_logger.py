@@ -180,6 +180,45 @@ class StepDiagnosticLogger:
         
         # 重置任务数据
         self.current_task_data = None
+    
+    async def get_execution_steps(self) -> List[Dict]:
+        """🔧 新增：获取当前任务的执行步骤列表
+        
+        Returns:
+            List[Dict]: 包含步骤信息的列表，兼容TrajectoryResult.steps格式
+        """
+        if not self.current_task_data or not self.current_task_data.get("steps"):
+            return []
+        
+        # 转换内部步骤格式为ExecutionStep兼容格式
+        execution_steps = []
+        for step in self.current_task_data["steps"]:
+            # 创建ExecutionStep兼容的字典
+            execution_step = {
+                "step_id": f"step_{step.get('step_index', 0)}",
+                "thinking": step.get("parsing_stage", {}).get("think_content", ""),
+                "action_type": "tool_call" if step.get("tool_executions") else "reasoning",
+                "action_params": {},
+                "observation": "",
+                "success": True,
+                "duration": step.get("step_duration_seconds", 0.0)
+            }
+            
+            # 提取工具调用信息
+            tool_executions = step.get("tool_executions", [])
+            if tool_executions:
+                # 使用第一个工具调用的信息
+                first_tool = tool_executions[0]
+                execution_step["action_params"] = {
+                    "tool_id": first_tool.get("tool_id", "unknown"),
+                    "input": first_tool.get("input_data", {}),
+                }
+                execution_step["observation"] = str(first_tool.get("output_data", ""))
+                execution_step["success"] = first_tool.get("success", True)
+            
+            execution_steps.append(execution_step)
+        
+        return execution_steps
         
     async def _save_log_file(self):
         """保存日志文件到按日期分组的目录"""

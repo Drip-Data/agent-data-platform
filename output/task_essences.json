@@ -576,5 +576,70 @@
     },
     "extracted_at": "2025-06-29T20:56:07.536670",
     "source_trajectory_id": "f205608b-6afb-4603-9722-16ae580e965d"
+  },
+  {
+    "essence_id": "essence_1751559627_cd205c20-cfd2-423c-9968-51df20bedcb5",
+    "task_type": "reasoning",
+    "domain": "web_automation",
+    "query": "深入研究Python asyncio库的基本概念、核心用法和实际应用场景，旨在全面理解和掌握异步编程技术，为后续开发打下坚实基础。",
+    "complexity_level": "simple",
+    "success_pattern": {
+      "duration": 0.0,
+      "steps_count": 0,
+      "key_features": [
+        "Python asyncio",
+        "异步编程",
+        "概念理解",
+        "用法学习",
+        "知识获取"
+      ],
+      "confidence": 0.9,
+      "tools_used": []
+    },
+    "extracted_at": "2025-07-04T00:20:27.986400",
+    "source_trajectory_id": "cd205c20-cfd2-423c-9968-51df20bedcb5"
+  },
+  {
+    "essence_id": "essence_1751559628_complex_data_analysis",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "使用Python进行全面的股票数据分析，包括获取最新苹果股价、模拟历史数据、数据清洗与分析（移动平均线、RSI计算），并生成可视化图表以提供投资建议。",
+    "complexity_level": "complex",
+    "success_pattern": {
+      "duration": 0.0,
+      "steps_count": 0,
+      "key_features": [
+        "多步骤数据处理与分析",
+        "结合网络搜索与本地数据处理",
+        "金融指标计算与可视化",
+        "基于分析结果的决策支持"
+      ],
+      "confidence": 0.95,
+      "tools_used": []
+    },
+    "extracted_at": "2025-07-04T00:20:28.906932",
+    "source_trajectory_id": "complex_data_analysis"
+  },
+  {
+    "essence_id": "essence_1751559630_web_research_synthesis",
+    "task_type": "reasoning",
+    "domain": "algorithm",
+    "query": "从至少5个不同来源收集关于量子计算在机器学习中应用的最新研究论文，提取关键信息，并生成包含引用链接的markdown报告和技术术语词汇表，预测未来发展趋势。",
+    "complexity_level": "medium",
+    "success_pattern": {
+      "duration": 0.0,
+      "steps_count": 0,
+      "key_features": [
+        "信息检索与聚合",
+        "多来源数据提取",
+        "结构化报告生成",
+        "技术术语整理",
+        "趋势预测"
+      ],
+      "confidence": 0.95,
+      "tools_used": []
+    },
+    "extracted_at": "2025-07-04T00:20:30.265573",
+    "source_trajectory_id": "web_research_synthesis"
   }
 ]
