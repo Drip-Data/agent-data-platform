@@ -705,11 +705,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         final_trajectory_str = "\n".join(item["content"] for item in full_trajectory)
         total_duration = time.time() - start_time
         
+        # 🔧 根本修复：区分步数限制和真正失败
+        max_steps_reached = len(full_trajectory) >= max_steps
+        
         # 🔧 根本修复：智能判定任务成功状态
         success = self._determine_task_success(final_trajectory_str, full_trajectory)
         
-        # 🔧 根本修复：动态提取真实的最终结果
-        final_result = self._extract_final_result(final_trajectory_str)
+        # 🔧 根本修复：动态提取真实的最终结果，考虑步数限制情况
+        if max_steps_reached:
+            final_result = f"已达最大步骤({max_steps})，任务被中止。当前进展：{self._extract_final_result(final_trajectory_str)}"
+        else:
+            final_result = self._extract_final_result(final_trajectory_str)
 
         # 🔍 完成任务步骤日志记录
         final_status = "success" if success else "failure"
