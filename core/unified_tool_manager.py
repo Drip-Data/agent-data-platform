@@ -82,21 +82,19 @@ class UnifiedToolManager:
             self._standard_ids = set(tool_id_config.get('canonical_tool_ids', []))
             self._legacy_mapping = tool_id_config.get('tool_aliases', {})
             
-            # 加载动作和参数定义
+            # 🔧 加载动作和参数定义 - 直接从MCP服务器定义加载
             self._tool_definitions = {}
             action_mappings = self.config.get('action_mappings', {})
-            validation_rules = self.config.get('validation_rules', {}).get('required_combinations', [])
+            
+            # 🔧 加载完整的工具参数定义
+            tool_parameters = self.config.get('tool_parameters', {})
 
             for tool_id, mapping_info in action_mappings.items():
                 if tool_id in self._standard_ids:
                     actions = {}
                     for action_name in mapping_info.get('canonical_actions', []):
-                        # 查找此动作的验证规则
-                        params = {}
-                        for rule in validation_rules:
-                            if rule.get('tool_id') == tool_id and rule.get('action') == action_name:
-                                for param_name in rule.get('required_params', []):
-                                    params[param_name] = {'required': True}
+                        # 🔧 从tool_parameters获取详细参数定义
+                        params = tool_parameters.get(tool_id, {}).get(action_name, {})
                         actions[action_name] = {'parameters': params}
                     
                     self._tool_definitions[tool_id] = {

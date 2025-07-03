@@ -6,6 +6,113 @@ import time
 import json
 import uuid
 
+
+class TaskExecutionConstants:
+    """🔧 根本修复：任务执行相关常量 - 消除硬编码"""
+    
+    # 状态消息常量
+    NO_ACTION_PERFORMED = "No action was performed or no result was returned."
+    TASK_COMPLETED_NO_ANSWER = "任务执行完成，但未找到明确的最终答案"
+    EXECUTION_FAILED = "执行失败"
+    TOOL_EXECUTION_FAILED = "工具执行失败"
+    THOUGHT_ONLY_RESPONSE = "思考过程"
+    EXECUTION_RESULT_PREFIX = "执行结果"
+    
+    # 成功指示词 - 用于智能判定
+    SUCCESS_INDICATORS = [
+        "任务已", "任务完成", "已完成", "成功完成", "完成", 
+        "successful", "completed", "done", "结果正确", "计算正确", 
+        "执行成功", "验证通过", "满足要求", "答案是", "结果为"
+    ]
+    
+    # 失败指示词 - 用于智能判定  
+    FAILURE_INDICATORS = [
+        "失败", "错误", "未完成", "incomplete", "failed", 
+        "error", "问题", "无法", "timeout", "超时", "exception",
+        "traceback", "cannot", "unable to", "failed to execute"
+    ]
+    
+    # XML标签常量
+    XML_TAGS = {
+        'RESULT': 'result',
+        'ANSWER': 'answer', 
+        'THINK': 'think',
+        'EXECUTE_TOOLS': 'execute_tools',
+        'OBSERVATION': 'observation',
+        'CONCLUSION': 'conclusion'
+    }
+    
+    # 🔧 新增：工具结果格式化常量
+    TOOL_RESULT_LIMITS = {
+        'MAX_SEARCH_RESULTS': 5,           # 搜索结果最大显示数量
+        'MAX_FILE_RESULTS': 10,            # 文件搜索结果最大显示数量
+        'MAX_SNIPPET_LENGTH': 200,         # 文本片段最大长度
+        'MAX_CONTENT_LENGTH': 300,         # 内容最大显示长度
+        'MIN_MEANINGFUL_CONTENT': 10       # 有意义内容最小长度
+    }
+    
+    # 工具结果格式化前缀
+    TOOL_FORMAT_PREFIXES = {
+        'SEARCH_QUERY': '搜索查询',
+        'SEARCH_SUMMARY': '搜索摘要', 
+        'SEARCH_RESULTS': '找到 {} 个相关结果',
+        'FILE_SEARCH': '文件搜索',
+        'FILE_RESULTS': '找到 {} 个匹配文件',
+        'BROWSER_ACTION': '浏览器操作',
+        'PAGE_URL': '页面地址',
+        'PAGE_CONTENT': '页面内容',
+        'OPERATION_RESULT': '操作结果',
+        'ERROR_INFO': '错误信息',
+        'CODE_EXECUTION': '代码执行完成，无输出内容'
+    }
+    
+    # 错误类型消息模板
+    ERROR_TEMPLATES = {
+        'network_error': "网络连接失败: {details}",
+        'timeout_error': "操作超时: {timeout}秒",
+        'parameter_error': "参数错误: {parameter_name}",
+        'tool_not_found': "工具未找到: {tool_id}",
+        'execution_timeout': "执行超时: {duration}秒",
+        'invalid_response': "无效的响应格式: {format_error}"
+    }
+
+
+class ErrorMessageConstants:
+    """🔧 根本修复：错误消息常量 - 提供结构化错误处理"""
+    
+    # 网络相关错误
+    NETWORK_CONNECTION_FAILED = "网络连接失败"
+    NETWORK_TIMEOUT = "网络请求超时"
+    NETWORK_UNREACHABLE = "网络不可达"
+    
+    # 工具执行错误
+    TOOL_NOT_AVAILABLE = "工具不可用"
+    TOOL_EXECUTION_TIMEOUT = "工具执行超时"
+    TOOL_PARAMETER_ERROR = "工具参数错误"
+    TOOL_RESPONSE_ERROR = "工具响应错误"
+    
+    # 系统错误
+    SYSTEM_RESOURCE_EXHAUSTED = "系统资源耗尽"
+    SYSTEM_CONFIGURATION_ERROR = "系统配置错误"
+    SYSTEM_SERVICE_UNAVAILABLE = "系统服务不可用"
+    
+    # LLM相关错误
+    LLM_RESPONSE_INVALID = "LLM响应格式无效"
+    LLM_TOKEN_LIMIT_EXCEEDED = "LLM令牌限制超出"
+    LLM_API_ERROR = "LLM API错误"
+    
+    @classmethod
+    def format_error_message(cls, error_type: str, **kwargs) -> str:
+        """格式化错误消息"""
+        template = TaskExecutionConstants.ERROR_TEMPLATES.get(
+            error_type, 
+            f"未知错误类型: {error_type}"
+        )
+        try:
+            return template.format(**kwargs)
+        except KeyError as e:
+            return f"{error_type}: 消息格式化失败，缺少参数 {e}"
+
 class TaskType(Enum):
     CODE = "code"
     WEB = "web"

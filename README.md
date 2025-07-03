@@ -10,7 +10,7 @@ python3 main.py
 
 #注入任务
 cd agent-data-platform
-python3 scripts/batch_test_tasks.py --tasks-file data/test_tasks.jsonl
+python3 scripts/batch_test_tasks.py --tasks-file tasks.jsonl
 
 ## 📖 项目概述
 

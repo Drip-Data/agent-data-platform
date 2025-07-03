@@ -67,7 +67,7 @@ action_mappings:
       thorough_research: comprehensive_research
       full_research: comprehensive_research
 
-  # MicroSandbox工具动作
+  # MicroSandbox工具动作 - 完整映射
   microsandbox:
     canonical_actions:
       - microsandbox_execute
@@ -75,6 +75,8 @@ action_mappings:
       - microsandbox_list_sessions
       - microsandbox_close_session
       - microsandbox_cleanup_expired
+      - microsandbox_get_performance_stats
+      - microsandbox_get_health_status
     
     action_aliases:
       # 执行相关别名
@@ -105,19 +107,62 @@ action_mappings:
       cleanup: microsandbox_cleanup_expired
       clean: microsandbox_cleanup_expired
       purge: microsandbox_cleanup_expired
+      
+      # 监控诊断别名
+      get_stats: microsandbox_get_performance_stats
+      performance: microsandbox_get_performance_stats
+      stats: microsandbox_get_performance_stats
+      
+      health: microsandbox_get_health_status
+      status: microsandbox_get_health_status
+      check_health: microsandbox_get_health_status
 
-  # Browser工具动作  
+  # Browser工具动作 - 完整映射（26个工具）
   browser_use:
     canonical_actions:
+      # 🧭 导航控制
       - browser_navigate
-      - browser_extract_content
+      - browser_go_back
+      - browser_open_tab
+      - browser_close_tab
+      - browser_switch_tab
+      
+      # 🖱️ 页面交互
       - browser_click_element
       - browser_input_text
+      - browser_send_keys
+      - browser_drag_drop
+      
+      # 📄 内容操作
+      - browser_extract_content
       - browser_search_google
+      - browser_screenshot
+      - browser_save_pdf
+      
+      # 📋 表单处理
+      - browser_get_dropdown_options
+      - browser_select_dropdown_option
+      
+      # 🔍 页面分析
+      - browser_get_ax_tree
+      - browser_get_page_info
+      - browser_get_current_url
+      
+      # 📜 滚动操作
+      - browser_scroll_down
+      - browser_scroll_up
+      - browser_scroll_to_text
+      
+      # ⏱️ 流程控制
+      - browser_wait
+      - browser_done
+      - browser_close_session
+      
+      # 🤖 AI任务执行
       - browser_use_execute_task
     
     action_aliases:
-      # 导航相关别名（已弃用的映射）
+      # 🧭 导航控制别名
       navigate_to_url: browser_navigate
       navigate: browser_navigate
       goto: browser_navigate
@@ -125,21 +170,27 @@ action_mappings:
       open: browser_navigate
       browse: browser_navigate
       
-      # 内容提取别名
-      get_page_content: browser_extract_content
-      extract_content: browser_extract_content
-      get_content: browser_extract_content
-      read_page: browser_extract_content
-      scrape: browser_extract_content
-      extract: browser_extract_content
+      back: browser_go_back
+      previous: browser_go_back
+      return: browser_go_back
       
-      # 点击相关别名
+      new_tab: browser_open_tab
+      open_new_tab: browser_open_tab
+      create_tab: browser_open_tab
+      
+      close_tab: browser_close_tab
+      end_tab: browser_close_tab
+      
+      switch_tab: browser_switch_tab
+      change_tab: browser_switch_tab
+      select_tab: browser_switch_tab
+      
+      # 🖱️ 页面交互别名
       click_element: browser_click_element
       click: browser_click_element
       tap: browser_click_element
       select: browser_click_element
       
-      # 输入相关别名
       input_text: browser_input_text
       type_text: browser_input_text
       type: browser_input_text
@@ -147,15 +198,85 @@ action_mappings:
       fill: browser_input_text
       enter_text: browser_input_text
       
-      # 搜索相关别名
+      send_keys: browser_send_keys
+      press_keys: browser_send_keys
+      key_press: browser_send_keys
+      
+      drag_drop: browser_drag_drop
+      drag_and_drop: browser_drag_drop
+      move_element: browser_drag_drop
+      
+      # 📄 内容操作别名
+      get_page_content: browser_extract_content
+      extract_content: browser_extract_content
+      get_content: browser_extract_content
+      read_page: browser_extract_content
+      scrape: browser_extract_content
+      extract: browser_extract_content
+      
       search_google: browser_search_google
       google_search: browser_search_google
       search: browser_search_google
       
-      # 执行任务别名
+      screenshot: browser_screenshot
+      capture: browser_screenshot
+      take_screenshot: browser_screenshot
+      
+      save_pdf: browser_save_pdf
+      export_pdf: browser_save_pdf
+      print_pdf: browser_save_pdf
+      
+      # 📋 表单处理别名
+      get_dropdown: browser_get_dropdown_options
+      list_options: browser_get_dropdown_options
+      
+      select_option: browser_select_dropdown_option
+      choose_option: browser_select_dropdown_option
+      pick_option: browser_select_dropdown_option
+      
+      # 🔍 页面分析别名
+      get_tree: browser_get_ax_tree
+      accessibility_tree: browser_get_ax_tree
+      ax_tree: browser_get_ax_tree
+      
+      page_info: browser_get_page_info
+      get_info: browser_get_page_info
+      
+      current_url: browser_get_current_url
+      get_url: browser_get_current_url
+      url: browser_get_current_url
+      
+      # 📜 滚动操作别名
+      scroll_down: browser_scroll_down
+      page_down: browser_scroll_down
+      down: browser_scroll_down
+      
+      scroll_up: browser_scroll_up
+      page_up: browser_scroll_up
+      up: browser_scroll_up
+      
+      scroll_to: browser_scroll_to_text
+      find_text: browser_scroll_to_text
+      locate_text: browser_scroll_to_text
+      
+      # ⏱️ 流程控制别名
+      wait: browser_wait
+      pause: browser_wait
+      sleep: browser_wait
+      
+      done: browser_done
+      finish: browser_done
+      complete: browser_done
+      
+      close_session: browser_close_session
+      end_session: browser_close_session
+      quit: browser_close_session
+      
+      # 🤖 AI任务执行别名
       execute_task: browser_use_execute_task
       run_task: browser_use_execute_task
       perform_task: browser_use_execute_task
+      ai_task: browser_use_execute_task
 
   # Search工具动作
   mcp-search-tool:
@@ -350,10 +471,310 @@ validation_rules:
       replacement:
         action: browser_click_element
 
+# 🔧 工具参数定义 - 与MCP服务器service.json完全对应
+tool_parameters:
+  # MicroSandbox工具参数定义
+  microsandbox:
+    microsandbox_execute:
+      code:
+        type: string
+        description: "要执行的Python代码"
+        required: true
+      session_id:
+        type: string
+        description: "会话标识符"
+        required: false
+      timeout:
+        type: integer
+        description: "超时时间（秒）"
+        required: false
+    
+    microsandbox_install_package:
+      package_name:
+        type: string
+        description: "包名称"
+        required: true
+      version:
+        type: string
+        description: "包版本"
+        required: false
+      session_id:
+        type: string
+        description: "会话标识符"
+        required: false
+    
+    microsandbox_list_sessions: {}
+    
+    microsandbox_close_session:
+      session_id:
+        type: string
+        description: "要关闭的会话标识符"
+        required: true
+    
+    microsandbox_cleanup_expired:
+      max_age:
+        type: integer
+        description: "最大年龄秒数"
+        required: false
+    
+    microsandbox_get_performance_stats: {}
+    
+    microsandbox_get_health_status: {}
+
+  # Browser Use工具参数定义
+  browser_use:
+    browser_navigate:
+      url:
+        type: string
+        description: "要访问的URL地址"
+        required: true
+    
+    browser_search_google:
+      query:
+        type: string
+        description: "搜索查询词"
+        required: true
+    
+    browser_go_back: {}
+    
+    browser_click_element:
+      index:
+        type: integer
+        description: "要点击的元素索引"
+        required: true
+    
+    browser_input_text:
+      index:
+        type: integer
+        description: "要输入文本的元素索引"
+        required: true
+      text:
+        type: string
+        description: "要输入的文本"
+        required: true
+    
+    browser_send_keys:
+      keys:
+        type: string
+        description: "要发送的键，如Enter、Escape、Control+c等"
+        required: true
+    
+    browser_scroll_down:
+      amount:
+        type: integer
+        description: "滚动像素数，不指定则滚动一页"
+        required: false
+    
+    browser_scroll_up:
+      amount:
+        type: integer
+        description: "滚动像素数，不指定则滚动一页"
+        required: false
+    
+    browser_scroll_to_text:
+      text:
+        type: string
+        description: "要滚动到的文本内容"
+        required: true
+    
+    browser_switch_tab:
+      page_id:
+        type: integer
+        description: "要切换到的标签ID"
+        required: true
+    
+    browser_open_tab:
+      url:
+        type: string
+        description: "要在新标签中打开的URL"
+        required: true
+    
+    browser_close_tab:
+      page_id:
+        type: integer
+        description: "要关闭的标签ID"
+        required: true
+    
+    browser_extract_content:
+      goal:
+        type: string
+        description: "提取目标描述"
+        required: true
+      include_links:
+        type: boolean
+        description: "是否包含链接，默认false"
+        required: false
+    
+    browser_get_ax_tree:
+      number_of_elements:
+        type: integer
+        description: "返回的元素数量"
+        required: true
+    
+    browser_get_dropdown_options:
+      index:
+        type: integer
+        description: "下拉菜单元素的索引"
+        required: true
+    
+    browser_select_dropdown_option:
+      index:
+        type: integer
+        description: "下拉菜单元素的索引"
+        required: true
+      text:
+        type: string
+        description: "要选择的选项文本"
+        required: true
+    
+    browser_drag_drop:
+      element_source:
+        type: string
+        description: "源元素选择器"
+        required: false
+      element_target:
+        type: string
+        description: "目标元素选择器"
+        required: false
+      coord_source_x:
+        type: integer
+        description: "源坐标X"
+        required: false
+      coord_source_y:
+        type: integer
+        description: "源坐标Y"
+        required: false
+      coord_target_x:
+        type: integer
+        description: "目标坐标X"
+        required: false
+      coord_target_y:
+        type: integer
+        description: "目标坐标Y"
+        required: false
+      steps:
+        type: integer
+        description: "拖拽步骤数，默认10"
+        required: false
+    
+    browser_save_pdf: {}
+    
+    browser_screenshot:
+      filename:
+        type: string
+        description: "截图文件名，可选"
+        required: false
+    
+    browser_wait:
+      seconds:
+        type: number
+        description: "等待的秒数，默认3"
+        required: false
+    
+    browser_done:
+      text:
+        type: string
+        description: "完成描述"
+        required: true
+      success:
+        type: boolean
+        description: "是否成功完成"
+        required: true
+    
+    browser_get_page_info: {}
+    
+    browser_get_current_url: {}
+    
+    browser_close_session: {}
+    
+    browser_use_execute_task:
+      task:
+        type: string
+        description: "要执行的任务描述，使用自然语言"
+        required: true
+      max_steps:
+        type: integer
+        description: "最大执行步骤数，默认50"
+        required: false
+      use_vision:
+        type: boolean
+        description: "是否使用视觉理解，默认true"
+        required: false
+
+  # DeepSearch工具参数定义
+  deepsearch:
+    research:
+      question:
+        type: string
+        description: "研究问题"
+        required: true
+      initial_queries:
+        type: array
+        description: "初始查询列表"
+        required: false
+      max_loops:
+        type: integer
+        description: "最大循环次数"
+        required: false
+    
+    quick_research:
+      question:
+        type: string
+        description: "快速研究问题"
+        required: true
+    
+    comprehensive_research:
+      question:
+        type: string
+        description: "综合研究问题"
+        required: true
+      topic_focus:
+        type: string
+        description: "主题聚焦"
+        required: false
+
+  # Search Tool工具参数定义
+  mcp-search-tool:
+    search_file_content:
+      file_path:
+        type: string
+        description: "文件路径"
+        required: true
+      regex_pattern:
+        type: string
+        description: "正则表达式模式"
+        required: true
+    
+    list_code_definitions:
+      file_path:
+        type: string
+        description: "文件路径"
+        required: false
+      directory_path:
+        type: string
+        description: "目录路径"
+        required: false
+    
+    analyze_tool_needs:
+      task_description:
+        type: string
+        description: "任务描述"
+        required: true
+    
+    search_and_install_tools:
+      task_description:
+        type: string
+        description: "任务描述"
+        required: true
+      reason:
+        type: string
+        description: "安装原因"
+        required: false
+
 # 配置元数据
 metadata:
-  version: "1.0.0"
-  last_updated: "2025-01-24"
-  schema_hash: "unified_v1_20250124"
-  description: "统一的工具ID和动作映射配置 - 系统的单一真实来源"
+  version: "1.1.0"
+  last_updated: "2025-07-03"
+  schema_hash: "unified_v1_1_20250703"
+  description: "统一的工具ID和动作映射配置 - 系统的单一真实来源，包含完整参数定义"
   maintainer: "Agent Data Platform"

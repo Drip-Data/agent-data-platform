@@ -191,7 +191,7 @@ class BatchTaskTester:
         """处理单个任务的完整流程"""
         submit_time = datetime.now()
         description = task.get("input", "")
-        original_task_id = task.get("original_task_id")
+        original_task_id = task.get("context", {}).get("original_task_id") if task.get("context") else None
         
         logger.info(f"🚀 提交任务: {description[:50]}...")
         
@@ -249,7 +249,7 @@ class BatchTaskTester:
                     # 创建错误结果
                     error_result = TaskResult(
                         task_id="",
-                        original_task_id=tasks[i].get("original_task_id"),
+                        original_task_id=tasks[i].get("context", {}).get("original_task_id") if tasks[i].get("context") else None,
                         description=tasks[i].get("input", ""),
                         status="error",
                         success=False,

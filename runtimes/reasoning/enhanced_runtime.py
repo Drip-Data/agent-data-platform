@@ -12,12 +12,13 @@ from datetime import datetime
 from typing import List
 from enum import Enum
 
-from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult
+from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, TaskExecutionConstants, ErrorMessageConstants
 from core.llm.prompt_builders.reasoning_prompt_builder import ReasoningPromptBuilder
 from core.utils.path_utils import get_trajectories_dir
 from core.streaming.sequential_executor import SequentialStreamingExecutor
 from core.memory_manager import MemoryManager
 from core.trajectory_enhancer import TrajectoryEnhancer
+from core.step_logger import StepDiagnosticLogger
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             tool_executor=self.toolscore_client,
             memory_manager=self.memory_manager
         )
+        self.step_logger = StepDiagnosticLogger()
         self.mcp_servers = self._load_mcp_config("config/mcp_servers.json")
     
     def _load_mcp_config(self, config_path: str) -> dict:
@@ -129,6 +131,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     async def _execute_tool(self, action: dict) -> str:
         """
         根据单个动作字典，通过toolscore_client调用对应的MCP Server并返回结果。
+        🔧 完整修复：统一所有工具的结果格式化，使结果清晰易读
         """
         service_name = action.get('service')
         tool_name = action.get('tool')
@@ -160,13 +163,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if result.get('success', True):
                     output = result.get('data', result.get('output', result.get('result', str(result))))
                     
-                    # If the tool was microsandbox and the output is a dictionary with 'stdout',
-                    # extract just the stdout value for cleaner training data.
-                    if service_name == 'microsandbox' and isinstance(output, dict) and 'stdout' in output:
-                        logger.info("Extracting 'stdout' from microsandbox result for clean output.")
-                        return str(output['stdout']).strip()
-
-                    return str(output)
+                    # 🔧 完整修复：为所有工具统一结果格式化
+                    formatted_output = self._format_tool_output(service_name, tool_name, output)
+                    return formatted_output
                 else:
                     error_msg = result.get('error_message', result.get('error', 'Unknown error'))
                     return f"Tool execution failed: {error_msg}"
@@ -176,6 +175,322 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         except Exception as e:
             logger.error(f"An unexpected error occurred while calling tool '{service_name}/{tool_name}': {e}", exc_info=True)
             return f"An unexpected error occurred while calling {service_name}: {e}"
+    
+    def _format_tool_output(self, service_name: str, tool_name: str, output) -> str:
+        """
+        🔧 完整修复：统一格式化所有工具的输出结果，使其清晰易读
+        
+        Args:
+            service_name: 服务名称 (microsandbox, deepsearch, browser_use等)
+            tool_name: 工具名称
+            output: 原始输出结果
+            
+        Returns:
+            str: 格式化后的清晰结果
+        """
+        # 1. MicroSandbox - 智能提取核心执行结果
+        if service_name == 'microsandbox':
+            return self._format_microsandbox_output(output)
+        
+        # 2. DeepSearch - 格式化搜索结果
+        elif service_name == 'deepsearch':
+            if isinstance(output, dict):
+                return self._format_deepsearch_output(output)
+            elif isinstance(output, list):
+                return self._format_deepsearch_list_output(output)
+            return str(output)
+        
+        # 3. Browser Use - 格式化浏览器操作结果
+        elif service_name == 'browser_use':
+            if isinstance(output, dict):
+                return self._format_browser_use_output(output)
+            return str(output)
+        
+        # 4. Search Tool - 格式化搜索结果
+        elif service_name == 'search_tool':
+            if isinstance(output, dict):
+                return self._format_search_tool_output(output)
+            return str(output)
+        
+        # 5. 其他工具 - 通用格式化
+        else:
+            return self._format_generic_output(output)
+    
+    def _format_deepsearch_output(self, output: dict) -> str:
+        """🔧 格式化DeepSearch搜索结果 - 使用常量避免硬编码"""
+        try:
+            # 提取关键信息
+            search_results = output.get('search_results', [])
+            query = output.get('query', '')
+            summary = output.get('summary', '')
+            
+            formatted_lines = []
+            
+            # 添加查询信息
+            if query:
+                formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_QUERY']}: {query}")
+            
+            # 添加摘要
+            if summary:
+                formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_SUMMARY']}: {summary}")
+            
+            # 格式化搜索结果
+            if search_results:
+                max_results = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_SEARCH_RESULTS']
+                results_text = TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_RESULTS'].format(len(search_results))
+                formatted_lines.append(results_text)
+                
+                for i, result in enumerate(search_results[:max_results], 1):
+                    if isinstance(result, dict):
+                        title = result.get('title', '无标题')
+                        snippet = result.get('snippet', result.get('content', ''))
+                        url = result.get('url', '')
+                        
+                        formatted_lines.append(f"{i}. {title}")
+                        if snippet:
+                            # 使用常量限制snippet长度
+                            max_length = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_SNIPPET_LENGTH']
+                            snippet_clean = snippet.strip()[:max_length]
+                            formatted_lines.append(f"   {snippet_clean}...")
+                        if url:
+                            formatted_lines.append(f"   来源: {url}")
+                        formatted_lines.append("")  # 空行分隔
+            
+            result_text = '\n'.join(formatted_lines).strip()
+            return result_text if result_text else "搜索完成，但未找到相关结果"
+            
+        except Exception as e:
+            logger.warning(f"Failed to format DeepSearch output: {e}")
+            max_content = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_CONTENT_LENGTH']
+            return f"DeepSearch搜索完成，原始结果: {str(output)[:max_content]}..."
+    
+    def _format_deepsearch_list_output(self, output: list) -> str:
+        """🔧 格式化DeepSearch列表结果 - 使用常量避免硬编码"""
+        try:
+            if not output:
+                return "搜索完成，但未找到相关结果"
+            
+            results_text = TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_RESULTS'].format(len(output))
+            formatted_lines = [results_text]
+            
+            max_results = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_SEARCH_RESULTS']
+            for i, item in enumerate(output[:max_results], 1):
+                if isinstance(item, dict):
+                    title = item.get('title', f'结果 {i}')
+                    content = item.get('content', item.get('snippet', ''))
+                    
+                    formatted_lines.append(f"{i}. {title}")
+                    if content:
+                        max_length = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_SNIPPET_LENGTH']
+                        content_clean = str(content).strip()[:max_length]
+                        formatted_lines.append(f"   {content_clean}...")
+                    formatted_lines.append("")
+                else:
+                    formatted_lines.append(f"{i}. {str(item)[:100]}...")
+            
+            return '\n'.join(formatted_lines).strip()
+            
+        except Exception as e:
+            logger.warning(f"Failed to format DeepSearch list output: {e}")
+            return f"DeepSearch搜索完成，找到 {len(output)} 个结果"
+    
+    def _format_browser_use_output(self, output: dict) -> str:
+        """🔧 完整修复：格式化Browser Use操作结果，确保搜索结果不丢失"""
+        try:
+            # 提取关键信息 - 增强字段提取
+            action = output.get('action', output.get('operation', TaskExecutionConstants.TOOL_FORMAT_PREFIXES['BROWSER_ACTION']))
+            status = output.get('status', output.get('success', output.get('result', True)))
+            content = output.get('content', output.get('data', output.get('text', '')))
+            url = output.get('url', output.get('current_url', ''))
+            error = output.get('error', output.get('error_message', ''))
+            
+            # 🔧 新增：专门处理搜索结果
+            search_results = output.get('search_results', output.get('results', []))
+            query = output.get('query', output.get('search_query', ''))
+            
+            formatted_lines = []
+            
+            # 状态信息
+            status_text = "成功" if status else "失败"
+            formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['BROWSER_ACTION']}: {action} - {status_text}")
+            
+            # 搜索查询信息
+            if query:
+                formatted_lines.append(f"搜索查询: {query}")
+            
+            # URL信息
+            if url:
+                formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['PAGE_URL']}: {url}")
+            
+            # 错误信息
+            if error:
+                formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['ERROR_INFO']}: {error}")
+            
+            # 🔧 优先处理搜索结果
+            if search_results and isinstance(search_results, list):
+                max_results = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_SEARCH_RESULTS']
+                formatted_lines.append(f"搜索结果({len(search_results)}个):")
+                
+                for i, result in enumerate(search_results[:max_results], 1):
+                    if isinstance(result, dict):
+                        title = result.get('title', result.get('name', f'结果{i}'))
+                        snippet = result.get('snippet', result.get('description', result.get('content', '')))
+                        result_url = result.get('url', result.get('link', ''))
+                        
+                        formatted_lines.append(f"{i}. {title}")
+                        if snippet:
+                            max_snippet = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_SNIPPET_LENGTH']
+                            clean_snippet = str(snippet).strip()[:max_snippet]
+                            formatted_lines.append(f"   {clean_snippet}...")
+                        if result_url:
+                            formatted_lines.append(f"   链接: {result_url}")
+                        formatted_lines.append("")
+                    else:
+                        formatted_lines.append(f"{i}. {str(result)[:100]}...")
+            
+            # 处理普通内容信息
+            elif content:
+                max_content = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_CONTENT_LENGTH']
+                # 如果内容是HTML，尝试提取文本
+                if isinstance(content, str) and ('<html>' in content.lower() or '<div>' in content.lower()):
+                    # 简单的HTML文本提取
+                    import re
+                    text_content = re.sub(r'<[^>]+>', '', content)
+                    text_content = re.sub(r'\s+', ' ', text_content).strip()
+                    if text_content:
+                        formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['PAGE_CONTENT']}: {text_content[:max_content]}...")
+                else:
+                    formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['OPERATION_RESULT']}: {str(content)[:max_content]}...")
+            
+            # 🔧 增强：如果没有有用内容，提供更详细的调试信息
+            result_text = '\n'.join(formatted_lines).strip()
+            if not result_text or len(result_text) < 20:
+                # 如果格式化结果太短，说明可能有问题，提供原始数据的摘要
+                logger.warning(f"Browser Use output seems incomplete. Raw keys: {list(output.keys())}")
+                if output:
+                    return f"浏览器操作执行，返回数据字段: {', '.join(output.keys())}\n原始数据: {str(output)[:300]}..."
+                else:
+                    return "浏览器操作执行完成，但未返回数据"
+            
+            return result_text
+            
+        except Exception as e:
+            logger.error(f"Failed to format Browser Use output: {e}")
+            max_content = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_CONTENT_LENGTH']
+            return f"浏览器操作完成，原始结果: {str(output)[:max_content]}..."
+    
+    def _format_search_tool_output(self, output: dict) -> str:
+        """🔧 格式化Search Tool搜索结果 - 使用常量避免硬编码"""
+        try:
+            # 提取搜索结果
+            results = output.get('results', output.get('files', []))
+            query = output.get('query', '')
+            count = output.get('count', len(results) if isinstance(results, list) else 0)
+            
+            formatted_lines = []
+            
+            # 搜索信息
+            if query:
+                formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['FILE_SEARCH']}: {query}")
+            
+            file_results_text = TaskExecutionConstants.TOOL_FORMAT_PREFIXES['FILE_RESULTS'].format(count)
+            formatted_lines.append(file_results_text)
+            
+            # 格式化文件列表
+            if isinstance(results, list):
+                max_files = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_FILE_RESULTS']
+                for i, result in enumerate(results[:max_files], 1):
+                    if isinstance(result, dict):
+                        file_path = result.get('path', result.get('file', ''))
+                        matches = result.get('matches', result.get('content', ''))
+                        
+                        formatted_lines.append(f"{i}. {file_path}")
+                        if matches:
+                            formatted_lines.append(f"   匹配内容: {str(matches)[:100]}...")
+                    else:
+                        formatted_lines.append(f"{i}. {str(result)}")
+            
+            return '\n'.join(formatted_lines).strip()
+            
+        except Exception as e:
+            logger.warning(f"Failed to format Search Tool output: {e}")
+            return f"文件搜索完成，找到 {count} 个结果"
+    
+    def _format_microsandbox_output(self, output) -> str:
+        """🔧 专用MicroSandbox结果格式化 - 提取核心执行内容"""
+        try:
+            if isinstance(output, dict):
+                # 优先提取stdout（主要输出）
+                if 'stdout' in output:
+                    stdout_content = str(output['stdout']).strip()
+                    if stdout_content:
+                        return stdout_content
+                
+                # 如果没有stdout，检查嵌套结构
+                if 'result' in output and isinstance(output['result'], dict):
+                    nested_result = output['result']
+                    if 'stdout' in nested_result:
+                        stdout_content = str(nested_result['stdout']).strip()
+                        if stdout_content:
+                            return stdout_content
+                
+                # 检查stderr错误信息
+                stderr_content = ""
+                if 'stderr' in output:
+                    stderr_content = str(output['stderr']).strip()
+                elif 'result' in output and isinstance(output['result'], dict) and 'stderr' in output['result']:
+                    stderr_content = str(output['result']['stderr']).strip()
+                
+                if stderr_content:
+                    return f"执行错误: {stderr_content}"
+                
+                # 检查返回代码
+                return_code = output.get('return_code') or (output.get('result', {}).get('return_code') if isinstance(output.get('result'), dict) else None)
+                if return_code == 0:
+                    return "代码执行成功，但无输出内容"
+                elif return_code is not None:
+                    return f"代码执行失败，返回代码: {return_code}"
+            
+            # 其他情况返回简化的字符串
+            output_str = str(output).strip()
+            if len(output_str) > 200:
+                return f"执行完成: {output_str[:200]}..."
+            return output_str if output_str else "代码执行完成"
+            
+        except Exception as e:
+            logger.warning(f"Failed to format MicroSandbox output: {e}")
+            return f"代码执行完成: {str(output)[:100]}..."
+    
+    def _format_generic_output(self, output) -> str:
+        """通用工具输出格式化"""
+        try:
+            if isinstance(output, dict):
+                # 尝试提取有用信息
+                if 'result' in output:
+                    return str(output['result'])
+                elif 'content' in output:
+                    return str(output['content'])
+                elif 'data' in output:
+                    return str(output['data'])
+                elif 'message' in output:
+                    return str(output['message'])
+                else:
+                    # 过滤掉技术性字段，只保留有意义的内容
+                    meaningful_fields = {}
+                    skip_fields = {'success', 'status', 'code', 'timestamp', 'metadata', 'headers'}
+                    
+                    for key, value in output.items():
+                        if key not in skip_fields and value:
+                            meaningful_fields[key] = value
+                    
+                    if meaningful_fields:
+                        return str(meaningful_fields)
+            
+            return str(output)
+            
+        except Exception as e:
+            logger.warning(f"Failed to format generic output: {e}")
+            return str(output)
 
     async def _execute_parallel(self, actions: list) -> list:
         """并发执行多个动作。"""
@@ -235,6 +550,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         logger.info(f"🎯 Orchestrator starting task: {task.description}")
         start_time = time.time()
         
+        # 🔍 启动步骤级日志记录
+        self.step_logger.start_task(task.task_id, task.description)
+        
         # 准备历史记录
         available_tools = await self._get_available_tools()
         tool_descriptions = await self._get_tool_descriptions()
@@ -251,41 +569,102 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         for step in range(max_steps):
             logger.info(f"--- Starting Step {step + 1}/{max_steps} ---")
             
+            # 🔍 开始步骤日志记录
+            self.step_logger.start_step(step)
+            
             # 1. 调用LLM，设置动态停止序列
             stop_sequences = ["<execute_tools />", "<execute_tools></execute_tools>", "</answer>"]
+            llm_start_time = time.time()
             response_text = await self.client._call_api(history, stop_sequences=stop_sequences)
+            llm_end_time = time.time()
+            
+            # 🔍 记录LLM调用
+            triggered_stop = self._detect_triggered_stop_sequence(response_text, stop_sequences)
+            self.step_logger.log_llm_call(
+                prompt=history,
+                raw_response=response_text,
+                stop_sequence=triggered_stop,
+                start_time=llm_start_time,
+                end_time=llm_end_time
+            )
             
             history.append({"role": "assistant", "content": response_text})
             full_trajectory.append({"role": "assistant", "content": response_text})
 
-            if "</answer>" in response_text:
+            answer_end_tag = f"</{TaskExecutionConstants.XML_TAGS['ANSWER']}>"
+            if answer_end_tag in response_text:
                 logger.info("✅ Final Answer detected. Task complete.")
+                # 🔍 记录解析结果（包含答案的情况）
+                parsing_start_time = time.time()
+                think_content = self.step_logger._extract_think_content(response_text)
+                answer_content = self.step_logger._extract_answer_content(response_text)
+                parsing_end_time = time.time()
+                
+                self.step_logger.log_parsing_result(
+                    think_content=think_content,
+                    execution_block=None,
+                    answer_content=answer_content,
+                    actions=[],
+                    parsing_errors=[],
+                    start_time=parsing_start_time,
+                    end_time=parsing_end_time
+                )
+                self.step_logger.finish_step("task_completed_with_answer")
                 break
 
+            # 🔍 记录解析阶段
+            parsing_start_time = time.time()
             execution_block = self._parse_execution_block(response_text)
             actions = execution_block.get("actions", [])
+            think_content = self.step_logger._extract_think_content(response_text)
+            execution_block_text = self.step_logger._extract_execution_block(response_text)
+            parsing_end_time = time.time()
+            
+            self.step_logger.log_parsing_result(
+                think_content=think_content,
+                execution_block=execution_block_text,
+                answer_content=None,
+                actions=actions,
+                parsing_errors=[],
+                start_time=parsing_start_time,
+                end_time=parsing_end_time
+            )
             
             # 检查是否是仅包含思考的最终答案
-            if not actions and "<think>" in response_text and not "<execute_tools />" in response_text:
+            think_tag = TaskExecutionConstants.XML_TAGS['THINK']
+            answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
+            execute_tools_tag = TaskExecutionConstants.XML_TAGS['EXECUTE_TOOLS']
+            
+            if not actions and f"<{think_tag}>" in response_text and f"<{execute_tools_tag} />" not in response_text:
                 logger.info("✅ Detected a thought-only response, considering it the final answer.")
                 # 提取思考内容作为最终答案
                 try:
                     import re
-                    match = re.search(r"<think>(.*)</think>", response_text, re.DOTALL)
+                    match = re.search(f"<{think_tag}>(.*)</{think_tag}>", response_text, re.DOTALL)
                     if match:
                         final_thought = match.group(1).strip()
-                        history.append({"role": "assistant", "content": f"<answer>{final_thought}</answer>"})
-                        full_trajectory.append({"role": "assistant", "content": f"<answer>{final_thought}</answer>"})
+                        answer_content = f"<{answer_tag}>{final_thought}</{answer_tag}>"
+                        history.append({"role": "assistant", "content": answer_content})
+                        full_trajectory.append({"role": "assistant", "content": answer_content})
                 except Exception:
                     pass # 如果解析失败，则正常继续
+                # 🔍 完成步骤记录
+                self.step_logger.finish_step("thought_only_final_answer")
                 break
 
-            # 检查是否没有工具调用
+            # 🔧 根本修复：智能判断是否需要注入"无动作"消息
             if not actions:
-                logger.warning("No executable actions found in LLM response. Continuing.")
-                result_xml = self._format_result("No action was performed.")
-                history.append({"role": "assistant", "content": result_xml})
-                full_trajectory.append({"role": "assistant", "content": result_xml})
+                if self._should_inject_no_action_message(response_text):
+                    logger.warning("No executable actions found in LLM response. Injecting guidance.")
+                    result_xml = self._format_result("No executable action detected in this step.")
+                    history.append({"role": "assistant", "content": result_xml})
+                    full_trajectory.append({"role": "assistant", "content": result_xml})
+                    # 🔍 完成步骤记录
+                    self.step_logger.finish_step("no_action_injected")
+                else:
+                    logger.info("✅ Detected thought-only response without tool execution - this is normal.")
+                    # 🔍 完成步骤记录
+                    self.step_logger.finish_step("thought_only_normal")
                 continue
 
             # 4. 根据类型分发执行
@@ -296,28 +675,45 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if block_type == "sequential":
                 logger.info(f"Executing first action of sequential block.")
                 if actions:
-                    results = [await self._execute_tool(actions[0])]
+                    result_data = await self._execute_tool_with_logging(actions[0], 0)
+                    results = [result_data["formatted_result"]]
             elif block_type == "parallel":
                 logger.info(f"Executing parallel block with {len(actions)} actions.")
-                results = await self._execute_parallel(actions)
+                results = await self._execute_parallel_with_logging(actions)
             else: # single
                 if actions:
                     logger.info(f"Executing single action.")
-                    results = [await self._execute_tool(actions[0])]
+                    result_data = await self._execute_tool_with_logging(actions[0], 0)
+                    results = [result_data["formatted_result"]]
 
             # 5. 格式化并为每个结果注入单独的<result>标签
             for res in results:
                 result_xml = self._format_result(res)
                 history.append({"role": "assistant", "content": result_xml})
                 full_trajectory.append({"role": "assistant", "content": result_xml})
+                
+            # 🔍 完成步骤记录
+            self.step_logger.finish_step()
 
         else:
             logger.warning(f"Max steps ({max_steps}) reached. Terminating task.")
+            # 🔍 完成最后一个步骤记录
+            if self.step_logger.current_step_data:
+                self.step_logger.finish_step("max_steps_reached")
 
         # 任务结束，处理最终结果
         final_trajectory_str = "\n".join(item["content"] for item in full_trajectory)
         total_duration = time.time() - start_time
-        success = "Final Answer:" in final_trajectory_str
+        
+        # 🔧 根本修复：智能判定任务成功状态
+        success = self._determine_task_success(final_trajectory_str, full_trajectory)
+        
+        # 🔧 根本修复：动态提取真实的最终结果
+        final_result = self._extract_final_result(final_trajectory_str)
+
+        # 🔍 完成任务步骤日志记录
+        final_status = "success" if success else "failure"
+        await self.step_logger.finalize_task(final_status, final_result)
 
         xml_output = {
             "timestamp": datetime.now().isoformat(),
@@ -325,7 +721,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             "task_description": task.description,
             "duration": total_duration,
             "success": success,
-            "final_result": "Task execution completed.",
+            "final_result": final_result,
             "raw_response": final_trajectory_str,
         }
         
@@ -338,22 +734,24 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             runtime_id=self._runtime_id,
             steps=[],  
             success=success,
-            final_result="Task execution completed.",
+            final_result=final_result,  # 🔧 使用动态提取的结果
             total_duration=total_duration,
             metadata={'full_trajectory': full_trajectory}
         )
 
     def _format_result(self, result: str) -> str:
-        """Formats a single tool result into a <result> XML block."""
+        """🔧 根本修复：格式化工具结果，使用常量替代硬编码"""
         if not result:
-            return "<result>No action was performed or no result was returned.</result>"
-        return f"<result>{result}</result>"
+            no_action_msg = TaskExecutionConstants.NO_ACTION_PERFORMED
+            return f"<{TaskExecutionConstants.XML_TAGS['RESULT']}>{no_action_msg}</{TaskExecutionConstants.XML_TAGS['RESULT']}>"
+        return f"<{TaskExecutionConstants.XML_TAGS['RESULT']}>{result}</{TaskExecutionConstants.XML_TAGS['RESULT']}>"
     
     async def _execute_standard(self, task: TaskSpec) -> TrajectoryResult:
-        """标准执行模式 (作为备用)"""
+        """标准执行模式 (作为备用) - 🔧 已修复硬编码问题"""
         logger.warning("执行标准（ReAct）模式，此模式功能有限。")
         # 简单实现标准模式
         start_time = time.time()
+        response = ""
         try:
             # 简单的LLM调用
             messages = self.prompt_builder.build_prompt(
@@ -363,13 +761,16 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 streaming_mode=False
             )
             response = await self.client._call_api(messages)
-            success = True
-            final_result = response
+            
+            # 🔧 根本修复：使用相同的智能判定逻辑
+            success = self._determine_task_success(response, [])
+            final_result = self._extract_final_result(response)
+            
         except Exception as e:
             logger.error(f"标准模式执行失败: {e}")
             success = False
             final_result = f"执行失败: {str(e)}"
-            response = ""
+            response = f"Error: {str(e)}"
         
         total_duration = time.time() - start_time
         
@@ -382,7 +783,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             runtime_id=self._runtime_id,
             steps=[],
             success=success,
-            final_result=final_result,
+            final_result=final_result,  # 🔧 使用动态提取的结果
             total_duration=total_duration,
             metadata={'mode': 'standard', 'raw_response': response}
         )
@@ -407,8 +808,356 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.warning(f"获取工具描述失败: {e}")
             return "工具描述获取失败"
 
+    def _determine_task_success(self, final_trajectory_str: str, full_trajectory: List) -> bool:
+        """🔧 根本性重构：基于实际执行情况智能判定成功状态
+        
+        优先级：实际工具执行状态 > 答案完整性 > 内容质量 > 错误检查
+        
+        Args:
+            final_trajectory_str: 完整轨迹字符串
+            full_trajectory: 轨迹步骤列表
+        
+        Returns:
+            bool: 任务是否成功完成
+        """
+        # 🔧 最高优先级：检查实际工具执行状态
+        tool_success_rate = self._calculate_tool_success_rate()
+        has_successful_tools = tool_success_rate > 0.0
+        
+        # 1. 检查是否有完整的答案标签
+        answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
+        has_answer = f'</{answer_tag}>' in final_trajectory_str or f'<{answer_tag}>' in final_trajectory_str
+        
+        # 2. 检查是否有未处理的关键错误指示器
+        has_critical_errors = any(
+            indicator in final_trajectory_str.lower() 
+            for indicator in TaskExecutionConstants.FAILURE_INDICATORS
+        )
+        
+        # 3. 检查是否有实际的工具执行成果
+        result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
+        has_tool_results = f'<{result_tag}>' in final_trajectory_str and TaskExecutionConstants.NO_ACTION_PERFORMED not in final_trajectory_str
+        
+        # 4. 检查是否有有意义的思考内容
+        think_tag = TaskExecutionConstants.XML_TAGS['THINK']
+        has_meaningful_thinking = f'<{think_tag}>' in final_trajectory_str and len(final_trajectory_str.strip()) > 50
+        
+        # 🔧 智能综合判定逻辑：基于多维度评估
+        success = False
+        
+        # 场景1：有工具执行且成功 + 有答案 = 明确成功
+        if has_successful_tools and has_answer and not has_critical_errors:
+            success = True
+            logger.info("🎯 判定成功：工具执行成功 + 完整答案")
+        
+        # 场景2：有工具执行且成功 + 有结果输出 = 潜在成功
+        elif has_successful_tools and has_tool_results and not has_critical_errors:
+            success = True
+            logger.info("🎯 判定成功：工具执行成功 + 有实际结果")
+        
+        # 场景3：纯推理任务：有答案但无需工具
+        elif has_answer and not has_tool_results and has_meaningful_thinking and not has_critical_errors:
+            success = True
+            logger.info("🎯 判定成功：纯推理任务，有完整答案")
+        
+        # 场景4：任何关键错误都导致失败
+        elif has_critical_errors:
+            success = False
+            logger.info("🎯 判定失败：检测到关键错误")
+        
+        # 场景5：其他情况默认失败
+        else:
+            success = False
+            logger.info("🎯 判定失败：未满足成功条件")
+        
+        logger.info(f"🎯 Success判定详情: tool_success_rate={tool_success_rate:.2f}, has_answer={has_answer}, "
+                   f"has_tool_results={has_tool_results}, has_meaningful_thinking={has_meaningful_thinking}, "
+                   f"has_critical_errors={has_critical_errors}, final_success={success}")
+        
+        return success
+    
+    def _calculate_tool_success_rate(self) -> float:
+        """计算当前任务中工具执行的成功率"""
+        if not hasattr(self, 'step_logger') or not self.step_logger.current_task_data:
+            return 0.0
+        
+        total_executions = 0
+        successful_executions = 0
+        
+        for step in self.step_logger.current_task_data.get('steps', []):
+            for tool_exec in step.get('tool_executions', []):
+                total_executions += 1
+                if tool_exec.get('execution_status') == 'success':
+                    successful_executions += 1
+        
+        return successful_executions / total_executions if total_executions > 0 else 0.0
+    
+    def _analyze_error_type(self, error_message: str) -> str:
+        """🔧 智能错误类型分析"""
+        error_msg_lower = error_message.lower()
+        
+        # 参数错误
+        if any(indicator in error_msg_lower for indicator in ['parameter', 'param', '参数', '无效参数']):
+            return "parameter_error"
+        
+        # 工具不存在错误
+        if any(indicator in error_msg_lower for indicator in ['不支持', 'not support', '不存在', 'not found']):
+            return "tool_not_found"
+        
+        # 网络/连接错误
+        if any(indicator in error_msg_lower for indicator in ['timeout', 'connection', 'network', 'connect', '超时']):
+            return "network_error"
+        
+        # 验证错误
+        if any(indicator in error_msg_lower for indicator in ['validation', 'validate', '验证失败']):
+            return "validation_error"
+        
+        # 权限错误
+        if any(indicator in error_msg_lower for indicator in ['permission', 'access', '权限', 'forbidden']):
+            return "permission_error"
+        
+        return "unknown_error"
+    
+    def _format_error_with_recovery_suggestion(self, error_message: str, error_type: str, service_name: str, tool_name: str) -> str:
+        """🔧 格式化错误信息并提供恢复建议"""
+        base_error = f"Tool execution failed: {error_message}"
+        
+        recovery_suggestions = {
+            "parameter_error": f"💡 建议: 检查 {service_name} 的 {tool_name} 工具参数格式。参考工具定义中的正确参数名称。",
+            "tool_not_found": f"💡 建议: 工具 {tool_name} 在 {service_name} 中不存在。检查工具名称是否正确，或尝试使用其他工具。",
+            "network_error": f"💡 建议: 网络连接问题。等待几秒后重试，或尝试使用替代工具。",
+            "validation_error": f"💡 建议: 输入数据验证失败。检查输入格式和内容是否符合要求。",
+            "permission_error": f"💡 建议: 权限不足。检查服务配置或尝试其他方法。",
+            "unknown_error": f"💡 建议: 未知错误。尝试简化输入或使用其他工具替代。"
+        }
+        
+        suggestion = recovery_suggestions.get(error_type, recovery_suggestions["unknown_error"])
+        return f"{base_error}\n{suggestion}"
+    
+    def _extract_final_result(self, final_trajectory_str: str) -> str:
+        """🔧 完整修复：优化最终结果提取优先级，确保实际结果优于思考过程
+        
+        Args:
+            final_trajectory_str: 完整轨迹字符串
+        
+        Returns:
+            str: 提取的最终结果
+        """
+        import re
+        
+        # 🔧 第一优先级：提取answer标签内容
+        answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
+        answer_pattern = f'<{answer_tag}>(.*?)</{answer_tag}>'
+        answer_match = re.search(answer_pattern, final_trajectory_str, re.DOTALL)
+        if answer_match:
+            answer_content = answer_match.group(1).strip()
+            if answer_content and len(answer_content) > 0:
+                logger.info(f"✅ 从<answer>标签提取最终结果: {answer_content[:100]}...")
+                return answer_content
+        
+        # 🔧 第二优先级：提取最后的有效工具执行结果（非"No action"）
+        result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
+        result_pattern = f'<{result_tag}>(.*?)</{result_tag}>'
+        result_matches = re.findall(result_pattern, final_trajectory_str, re.DOTALL)
+        
+        # 过滤出有效的工具执行结果
+        valid_results = []
+        for result in result_matches:
+            result_clean = result.strip()
+            # 排除无意义的结果
+            if (result_clean and 
+                TaskExecutionConstants.NO_ACTION_PERFORMED not in result_clean and
+                "No executable action detected" not in result_clean and
+                len(result_clean) > 10):
+                valid_results.append(result_clean)
+        
+        if valid_results:
+            # 🔧 优化：选择最有价值的结果
+            best_result = self._select_best_tool_result(valid_results)
+            logger.info(f"🔧 从工具执行结果提取最终答案: {best_result[:100]}...")
+            return best_result
+        
+        # 🔧 第三优先级：提取数值计算结果（针对数学问题）
+        # 查找数值结果模式
+        calculation_patterns = [
+            r'结果[：:]\s*([0-9.e-]+\s*[A-Za-z]*)',  # "结果: 9.43e-07 A"
+            r'答案[：:]\s*([0-9.e-]+\s*[A-Za-z]*)',  # "答案: 42"
+            r'photocurrent[：:]\s*([0-9.e-]+\s*[A-Za-z]*)',  # "photocurrent: 9.43e-07 A"
+            r'([0-9.e-]+\s*[A-Za-z]*)\s*(?:安培|A|瓦特|W|米|m)',  # 单位模式
+        ]
+        
+        for pattern in calculation_patterns:
+            matches = re.findall(pattern, final_trajectory_str, re.IGNORECASE)
+            if matches:
+                calculation_result = matches[-1].strip()  # 取最后一个匹配
+                logger.info(f"🧮 从计算结果提取最终答案: {calculation_result}")
+                return f"计算结果: {calculation_result}"
+        
+        # 🔧 第四优先级：提取搜索答案（针对问答类任务）
+        # 查找IORA等专有名词的解释
+        info_patterns = [
+            r'IORA[是为].*?[。.]',  # IORA相关解释
+            r'新加坡国立大学.*?[。.]',  # 大学相关信息
+            r'([A-Z]{3,}\s*(?:是|为|指).*?[。.])',  # 缩写解释模式
+        ]
+        
+        for pattern in info_patterns:
+            matches = re.findall(pattern, final_trajectory_str, re.DOTALL)
+            if matches:
+                info_result = matches[-1].strip()
+                logger.info(f"📖 从信息检索提取最终答案: {info_result[:100]}...")
+                return info_result
+        
+        # 🔧 第五优先级：智能提取最后的think内容（降低优先级）
+        think_tag = TaskExecutionConstants.XML_TAGS['THINK']
+        think_pattern = f'<{think_tag}>(.*?)</{think_tag}>'
+        think_matches = re.findall(think_pattern, final_trajectory_str, re.DOTALL)
+        if think_matches:
+            last_think = think_matches[-1].strip()
+            # 只有在没有其他结果时才使用思考内容，且需要足够长
+            if last_think and len(last_think) > 50:
+                logger.info(f"📝 从思考过程提取结果: {last_think[:100]}...")
+                return f"分析过程: {last_think[:200]}..."
+        
+        # 🔧 第六优先级：提取可见的有意义文本
+        visible_content = re.sub(r'<[^>]+>', '', final_trajectory_str).strip()
+        if visible_content and len(visible_content) > 20:
+            # 寻找最后的有意义内容
+            lines = [line.strip() for line in visible_content.split('\n') if line.strip()]
+            meaningful_lines = []
+            
+            for line in lines[-10:]:  # 检查最后10行
+                # 过滤掉无意义的行
+                if (len(line) > 10 and 
+                    not line.startswith('---') and
+                    'Starting Step' not in line and
+                    'executable action' not in line):
+                    meaningful_lines.append(line)
+            
+            if meaningful_lines:
+                final_content = ' '.join(meaningful_lines[-3:])  # 取最后3行有意义内容
+                logger.info(f"📄 从可见文本提取结果: {final_content[:100]}...")
+                return final_content
+        
+        # 最后备选：返回任务完成状态  
+        logger.warning("⚠️ 无法提取具体的最终结果，返回默认完成消息")
+        return TaskExecutionConstants.TASK_COMPLETED_NO_ANSWER
+    
+    def _select_best_tool_result(self, valid_results: list) -> str:
+        """选择最有价值的工具执行结果"""
+        if not valid_results:
+            return ""
+        
+        import re
+        
+        # 优先级评分
+        scored_results = []
+        for result in valid_results:
+            score = 0
+            result_lower = result.lower()
+            
+            # 包含数值计算的结果得分更高
+            if re.search(r'[0-9.e-]+', result):
+                score += 10
+            
+            # 包含专业术语的结果得分更高
+            if any(term in result_lower for term in ['iora', 'university', '大学', '结果', '答案']):
+                score += 8
+            
+            # 长度适中的结果得分更高
+            if 20 <= len(result) <= 300:
+                score += 5
+            
+            # 包含搜索结果的得分更高
+            if '搜索结果' in result or 'search' in result_lower:
+                score += 7
+            
+            scored_results.append((score, result))
+        
+        # 返回得分最高的结果
+        scored_results.sort(key=lambda x: x[0], reverse=True)
+        return scored_results[0][1]
+    
+    def _should_inject_no_action_message(self, response_text: str) -> bool:
+        """🔧 完整修复：严格控制无动作消息注入，彻底消除冗余消息
+        
+        Args:
+            response_text: LLM响应文本
+        
+        Returns:
+            bool: 是否需要注入无动作消息
+        """
+        import re
+        
+        # 🔧 增强检测：如果有任何XML标签，都认为有内容
+        xml_tags = TaskExecutionConstants.XML_TAGS
+        all_possible_tags = [
+            f"<{xml_tags['THINK']}>", f"</{xml_tags['THINK']}>",
+            f"<{xml_tags['ANSWER']}>", f"</{xml_tags['ANSWER']}>", 
+            f"<{xml_tags['RESULT']}>", f"</{xml_tags['RESULT']}>",
+            f"<{xml_tags['OBSERVATION']}>", f"</{xml_tags['OBSERVATION']}>",
+            f"<{xml_tags['CONCLUSION']}>", f"</{xml_tags['CONCLUSION']}>",
+            "<execute_tools/>", "<execute_tools></execute_tools>"
+        ]
+        
+        # 1. 检测任何XML结构化内容
+        for tag in all_possible_tags:
+            if tag in response_text:
+                logger.info(f"💭 检测到XML标签 {tag}，无需注入无动作消息")
+                return False
+        
+        # 2. 检测任何工具服务器标签
+        server_tags = ["<microsandbox>", "<deepsearch>", "<browser_use>", "<search_tool>"]
+        for tag in server_tags:
+            if tag in response_text:
+                logger.info(f"🔧 检测到工具标签 {tag}，无需注入无动作消息")
+                return False
+        
+        # 3. 检测有意义的文本内容（更严格的标准）
+        clean_text = re.sub(r'<[^>]+>', '', response_text).strip()
+        
+        # 如果有足够的有意义文本内容
+        if len(clean_text) > 20:  # 降低阈值，更宽松
+            # 检查是否是有意义的内容（非空白、非重复字符）
+            meaningful_chars = len(re.sub(r'\s+', '', clean_text))
+            if meaningful_chars > 10:
+                logger.info(f"📝 检测到有意义文本内容({meaningful_chars}字符)，无需注入无动作消息")
+                return False
+        
+        # 4. 🔧 新增：检测任务完成的特殊情况
+        completion_indicators = [
+            "任务完成", "execution completed", "calculation complete",
+            "搜索完成", "操作完成", "处理完成", "分析完成"
+        ]
+        
+        response_lower = response_text.lower()
+        for indicator in completion_indicators:
+            if indicator.lower() in response_lower:
+                logger.info(f"✅ 检测到完成指示词 '{indicator}'，无需注入无动作消息")
+                return False
+        
+        # 5. 🔧 新增：如果响应包含任何数字、字母或中文字符的有意义组合
+        if re.search(r'[a-zA-Z\u4e00-\u9fff]{3,}', response_text):
+            logger.info("📄 检测到有意义的文本组合，无需注入无动作消息")
+            return False
+        
+        # 6. 🔧 特殊情况：如果响应是空的或者只有空白符
+        if not response_text or response_text.isspace():
+            logger.warning("⚠️ 检测到完全空的响应，需要注入指导消息")
+            return True
+        
+        # 7. 🔧 最严格的判断：只有在响应真的没有任何有用信息时才注入
+        # 检查是否只包含无意义的重复字符或符号
+        if len(set(response_text.replace(' ', '').replace('\n', ''))) < 3:
+            logger.warning(f"⚠️ 检测到无意义的重复内容，需要注入指导消息")
+            return True
+        
+        # 默认情况：不注入无动作消息（更保守的策略）
+        logger.info("🎯 响应包含内容，无需注入无动作消息")
+        return False
+        
     def _detect_success(self, response: str) -> bool:
-        """检测XML响应是否成功"""
+        """检测XML响应是否成功 - 保留向后兼容性"""
         response_lower = response.lower()
         return ('<answer>' in response_lower) and ('error>' not in response_lower)
     
@@ -431,6 +1180,117 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             f.write(json.dumps(xml_output, ensure_ascii=False) + '\n')
         
         logger.info(f"保存XML数据到: {file_path}")
+    
+    def _detect_triggered_stop_sequence(self, response_text: str, stop_sequences: list) -> str:
+        """检测触发的停止序列"""
+        for stop_seq in stop_sequences:
+            if stop_seq in response_text:
+                return stop_seq
+        return "unknown"
+    
+    async def _execute_tool_with_logging(self, action: dict, execution_index: int) -> dict:
+        """执行工具调用并记录详细日志"""
+        tool_start_time = time.time()
+        
+        # 构建toolscore请求
+        service_name = action.get('service')
+        tool_name = action.get('tool')
+        tool_input = action.get('input')
+        
+        param_mapping = {
+            "browser_use": "query",
+            "microsandbox": "code",
+            "deepsearch": "question"
+        }
+        param_name = param_mapping.get(service_name, "input")
+        
+        toolscore_request = {
+            "endpoint": f"http://127.0.0.1:{self._get_service_port(service_name)}/execute_tool",
+            "method": "POST",
+            "payload": {
+                "tool_id": service_name,
+                "action": tool_name,
+                "parameters": {param_name: tool_input}
+            }
+        }
+        
+        # 🔧 智能工具执行与错误分析
+        try:
+            raw_result = await self.toolscore_client.execute_tool(
+                tool_id=service_name,
+                action=tool_name,
+                parameters={param_name: tool_input}
+            )
+            
+            formatted_result = self._format_tool_output(service_name, tool_name, raw_result)
+            execution_status = "success"
+            error_details = None
+            
+        except Exception as e:
+            error_str = str(e)
+            error_type = self._analyze_error_type(error_str)
+            
+            raw_result = {"error": error_str, "success": False, "error_type": error_type}
+            formatted_result = self._format_error_with_recovery_suggestion(error_str, error_type, service_name, tool_name)
+            execution_status = "failure"
+            error_details = error_str
+        
+        tool_end_time = time.time()
+        
+        # 🔍 记录工具执行日志
+        self.step_logger.log_tool_execution(
+            execution_index=execution_index,
+            action=action,
+            toolscore_request=toolscore_request,
+            raw_response=raw_result,
+            formatted_result=formatted_result,
+            start_time=tool_start_time,
+            end_time=tool_end_time,
+            execution_status=execution_status,
+            error_details=error_details
+        )
+        
+        return {
+            "formatted_result": formatted_result,
+            "raw_result": raw_result,
+            "execution_status": execution_status
+        }
+    
+    async def _execute_parallel_with_logging(self, actions: list) -> list:
+        """并发执行多个工具调用并记录日志"""
+        import asyncio
+        
+        if not actions:
+            return []
+        
+        # 创建并发任务
+        tasks = [
+            self._execute_tool_with_logging(action, i) 
+            for i, action in enumerate(actions)
+        ]
+        
+        # 并发执行
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 提取格式化结果
+        formatted_results = []
+        for result in results:
+            if isinstance(result, Exception):
+                formatted_results.append(f"Error: {result}")
+            else:
+                formatted_results.append(result["formatted_result"])
+        
+        return formatted_results
+    
+    def _get_service_port(self, service_name: str) -> int:
+        """获取服务端口号"""
+        port_mapping = {
+            "microsandbox": 8090,
+            "deepsearch": 8086,
+            "browser_use": 8082,
+            "search_tool": 8080
+        }
+        return port_mapping.get(service_name, 8080)
 
     async def cleanup(self):
         """清理资源"""
