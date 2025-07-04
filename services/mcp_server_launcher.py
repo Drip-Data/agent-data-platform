@@ -199,12 +199,7 @@ async def _start_server(server_name: str):
     try:
         env = os.environ.copy() # 将env初始化移到try块的开头
 
-        # 为microsandbox_server设置一个特定的环境变量
-        if server_name == 'microsandbox_server':
-            agent_runtime_dir = os.path.join(project_root, 'agent_runtime')
-            os.makedirs(agent_runtime_dir, exist_ok=True)
-            env['AGENT_RUNTIME_DIR'] = agent_runtime_dir
-            logger.info(f"[MCP启动器] 为microsandbox_server设置AGENT_RUNTIME_DIR: {agent_runtime_dir}")
+        # microsandbox_server无需特殊环境变量配置
 
         # Determine the project root to add to PYTHONPATH
         project_root_for_pythonpath = os.path.abspath(os.path.join(server_dir_absolute, '..', '..'))

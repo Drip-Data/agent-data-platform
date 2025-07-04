@@ -51,6 +51,28 @@ class TaskExecutionConstants:
         'MIN_MEANINGFUL_CONTENT': 10       # 有意义内容最小长度
     }
     
+    # 🔧 新增：LLM响应处理常量 - 解决输出截断问题
+    RESPONSE_HANDLING = {
+        'DEFAULT_MAX_TOKENS': 32768,       # 默认最大token数 
+        'COMPLEX_TASK_MAX_TOKENS': 65536,  # 复杂任务最大token数
+        'RETRY_MAX_TOKENS': 98304,         # 重试时最大token数 (3x default)
+        'MIN_COMPLETE_RESPONSE': 100,      # 最小完整响应长度
+        'TRUNCATION_INDICATORS': [         # 截断指示符
+            'test_multiply',
+            '```python\ndef',
+            '<answer',
+            'Final Answer',
+            'def test_'
+        ],
+        'COMPLEX_TASK_KEYWORDS': [         # 需要更高token限制的任务类型
+            'automated_testing_pipeline',
+            'complex_analysis',
+            'code_generation', 
+            'detailed_report',
+            'comprehensive_solution'
+        ]
+    }
+    
     # 工具结果格式化前缀
     TOOL_FORMAT_PREFIXES = {
         'SEARCH_QUERY': '搜索查询',
@@ -64,6 +86,25 @@ class TaskExecutionConstants:
         'OPERATION_RESULT': '操作结果',
         'ERROR_INFO': '错误信息',
         'CODE_EXECUTION': '代码执行完成，无输出内容'
+    }
+    
+    # 🔧 Priority 4 新增：多工具协同常量
+    MULTI_TOOL_COORDINATION = {
+        'TOOL_DEPENDENCIES': {
+            'search_then_analyze': ['deepsearch', 'microsandbox'],
+            'browse_then_extract': ['browser_use', 'search_tool'],
+            'code_with_search': ['microsandbox', 'deepsearch']
+        },
+        'COORDINATION_TIMEOUTS': {
+            'sequential_execution': 300,  # 5分钟
+            'parallel_analysis': 180,     # 3分钟
+            'data_integration': 120       # 2分钟
+        },
+        'RESULT_INTEGRATION': {
+            'min_meaningful_tools': 2,
+            'max_tool_failures': 1,
+            'quality_threshold': 0.7
+        }
     }
     
     # 错误类型消息模板

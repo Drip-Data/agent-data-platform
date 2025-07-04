@@ -105,9 +105,9 @@ class RedisManager:
         self.memory_queues: Dict[str, asyncio.Queue] = {} # 实际未使用，因为lpush/rpop直接操作memory_storage
         self.memory_pubsub: Dict[str, list] = {}
         
-        # 数据持久化路径
+        # 数据持久化路径 - 使用logs目录避免在output根目录创建cache
         from core.utils.path_utils import get_output_dir
-        self.data_dir = get_output_dir("cache")
+        self.data_dir = get_output_dir("logs") / "redis_fallback"
         self.data_dir.mkdir(exist_ok=True)
         self.backup_file = self.data_dir / "redis_backup.json"
     

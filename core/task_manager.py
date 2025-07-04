@@ -333,9 +333,10 @@ async def start_runtime_service(runtime, redis_manager=None):
                         
                         # 从Redis Stream信息中获取实际的delivery count
                         try:
-                            pending_info = await r.xpending(queue_name, group, msg_id, msg_id, 1)
+                            # 🔧 修复Redis xpending命令参数错误：使用xpending_range获取详细信息
+                            pending_info = await r.xpending_range(queue_name, group, min=msg_id, max=msg_id, count=1)
                             if pending_info:
-                                delivery_count = pending_info[0][3]  # delivery_count是第4个字段
+                                delivery_count = pending_info[0]['times_delivered']  # 使用正确的字段名
                         except Exception as e:
                             logger.debug(f"无法获取消息delivery count: {e}")
                         

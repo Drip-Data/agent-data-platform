@@ -29,7 +29,7 @@ class ReasoningResponseParser(IResponseParser):
         # 正则表达式，用于查找<think>块和紧随其后的第一个工具或答案标签。
         # 这确保我们捕获与即将执行的动作直接相关的思考过程。
         pattern = re.compile(
-            r"(<think>.*?</think>)?\s*(<(microsandbox|deepsearch|browser_use|search_tool|answer)>(.*?)</\2>)",
+            r"(<think>.*?</think>)?\s*(<(microsandbox|deepsearch|browser_use|search_tool|answer)>(.*?)</\3>)",
             re.DOTALL
         )
 

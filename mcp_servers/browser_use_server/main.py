@@ -637,7 +637,10 @@ class BrowserUseMCPServer:
             "browser_get_current_url": self._get_current_url,
             "browser_close_session": self._close_session,
         }
-        self._validate_actions()
+        try:
+            self._validate_actions()
+        except Exception as e:
+            logger.warning(f"Action validation failed: {e}, continuing with startup")
         
         logger.info(f"BrowserUseMCPServer initialized:")
         logger.info(f"  Server Name: {self.server_name}")
@@ -690,11 +693,49 @@ class BrowserUseMCPServer:
         return await self._execute_action("drag_drop", drag_params)
     
     async def _get_content_wrapper(self, parameters):
-        # This is a placeholder. The actual implementation of get_content is complex
-        # and would likely involve interacting with the browser context.
-        # For now, we'll return a simulated success.
-        selector = parameters.get("selector", "entire page")
-        return {"success": True, "data": {"content": f"Simulated content from selector: '{selector}'"}}
+        """获取页面内容，支持通过CSS选择器获取特定内容"""
+        try:
+            selector = parameters.get("selector", "")
+            
+            # 获取当前页面
+            if not self.browser_context:
+                return {"success": False, "error_message": "浏览器上下文不可用"}
+            
+            page = await self.browser_context.get_current_page()
+            if not page:
+                return {"success": False, "error_message": "当前没有活动页面"}
+            
+            # 根据选择器获取内容
+            if not selector or selector == "entire page":
+                # 获取整个页面的HTML内容
+                content = await page.content()
+            else:
+                # 使用CSS选择器获取特定元素的内容
+                try:
+                    element = await page.query_selector(selector)
+                    if element:
+                        # 获取元素的文本内容
+                        content = await element.text_content()
+                        if not content:
+                            # 如果没有文本内容，尝试获取innerHTML
+                            content = await element.inner_html()
+                    else:
+                        return {"success": False, "error_message": f"未找到匹配选择器 '{selector}' 的元素"}
+                except Exception as e:
+                    return {"success": False, "error_message": f"选择器 '{selector}' 无效: {str(e)}"}
+            
+            return {
+                "success": True, 
+                "data": {
+                    "content": content or "",
+                    "selector": selector,
+                    "url": page.url if hasattr(page, 'url') else "未知"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"获取页面内容失败: {e}")
+            return {"success": False, "error_message": f"获取内容时发生错误: {str(e)}"}
 
     async def _handle_google_search(self, query: str):
         try:

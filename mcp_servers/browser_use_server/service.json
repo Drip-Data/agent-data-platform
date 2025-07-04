@@ -6,7 +6,7 @@
   "version": "1.0.0",
   "entry_point": "main.py",
   "host": "localhost",
-  "port": 8084,
+  "port": 8082,
   "capabilities": [
     {
       "name": "browser_use_execute_task",
@@ -469,6 +469,26 @@
       "description": "关闭浏览器会话",
       "parameters": {},
       "examples": [
+        {}
+      ]
+    },
+    {
+      "name": "browser_get_content",
+      "description": "获取页面内容",
+      "parameters": {
+        "selector": {
+          "type": "string",
+          "description": "CSS选择器，空则获取全部内容",
+          "required": false
+        }
+      },
+      "examples": [
+        {
+          "selector": "body"
+        },
+        {
+          "selector": ".content"
+        },
         {}
       ]
     }

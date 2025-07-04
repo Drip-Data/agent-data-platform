@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+Synthesis Service - 基于SynthesisEngine的任务合成服务
+使用真正的LLM驱动的TaskCraft算法进行智能任务生成
+"""
+
 import logging
 import os
 import threading
@@ -6,274 +12,302 @@ import asyncio
 from typing import Dict, Optional
 from pathlib import Path
 
-# 导入synthesis相关模块
-from core.synthesiscore.synthesis import SynthesisService
-from core.synthesiscore.trajectory_monitor import TrajectoryMonitor
+# 导入新的synthesis核心组件
+from core.synthesiscore.trajectory_monitor import SimpleTrajectoryMonitor
+from core.synthesiscore.synthesis_engine import SynthesisEngine
 from core.llm_client import LLMClient
 from core.toolscore.mcp_client import MCPToolClient
 
 logger = logging.getLogger(__name__)
 
 # 全局变量
-synthesis_instance = None
+synthesis_engine = None
 trajectory_monitor = None
 synthesis_thread = None
 monitor_task = None
 running = False
 
 from core.unified_tool_manager import UnifiedToolManager
+from core.utils.path_utils import get_synthesis_task_dir, get_trajectories_dir, get_output_dir
 
 def initialize(config: Optional[Dict] = None, tool_manager: Optional[UnifiedToolManager] = None):
-    """初始化合成服务"""
-    global synthesis_instance, trajectory_monitor
+    """初始化合成服务 - 使用SynthesisEngine"""
+    global synthesis_engine, trajectory_monitor
     
     if config is None:
         config = {}
     
-    logger.info("正在初始化合成服务...")
+    logger.info("🚀 初始化基于SynthesisEngine的合成服务...")
     
-    # 如果没有传入依赖，这是一个致命错误
+    # 检查必要的依赖
     if not tool_manager:
-        raise ValueError("SynthesisService初始化失败：必须提供UnifiedToolManager实例。")
-
-    # 从环境变量或配置中获取轨迹目录
-    trajectories_dir = os.getenv('TRAJECTORIES_DIR', 
-                               config.get('TRAJECTORIES_DIR', 'output/trajectories'))
+        logger.warning("⚠️ 未提供UnifiedToolManager，将使用基础配置")
     
-    # 确保目录存在
-    Path(trajectories_dir).mkdir(parents=True, exist_ok=True)
-    
-    # 将轨迹目录设置到配置中
-    config['TRAJECTORIES_DIR'] = trajectories_dir
-
-    # 添加redis_url配置，确保SynthesisService初始化时有redis_url
-    redis_url = config.get('redis_url', os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
-    config['redis_url'] = redis_url
-    
-    # 创建SynthesisService实例，并传入tool_manager
-    synthesis_instance = SynthesisService(config=config, tool_manager=tool_manager)
-    
-    # 初始化完整的TrajectoryMonitor v2.0
     try:
-        # 创建LLM和MCP客户端
-        llm_client = LLMClient(config, tool_manager=tool_manager)
-        mcp_client = MCPToolClient("ws://localhost:8089/websocket")
+        # 使用统一的路径管理工具获取目录
+        trajectories_dir = get_trajectories_dir()
+        seed_tasks_file = str(get_output_dir() / 'seed_tasks.jsonl')
         
-        # 创建完整的TrajectoryMonitor v2.0
-        trajectory_monitor = TrajectoryMonitor(
+        # 目录已由path_utils自动创建，无需手动创建
+        
+        # 初始化LLM客户端
+        llm_client = _initialize_llm_client(config, tool_manager)
+        if not llm_client:
+            logger.error("❌ LLM客户端初始化失败")
+            return False
+        
+        # 创建SynthesisEngine，使用专门的SynthesisTask目录
+        synthesis_engine = SynthesisEngine(
             llm_client=llm_client,
-            mcp_client=mcp_client,
+            mcp_client=getattr(tool_manager, 'mcp_client', None) if tool_manager else None,
+            storage_dir=get_synthesis_task_dir()
+        )
+        
+        # 创建轨迹监控器
+        trajectory_monitor = SimpleTrajectoryMonitor(
             trajectories_dir=trajectories_dir,
-            seed_tasks_file=os.path.join(trajectories_dir, "..", "seed_tasks.jsonl")
+            seed_tasks_file=seed_tasks_file
         )
         
-        logger.info("✅ TrajectoryMonitor v2.0 初始化完成")
+        logger.info("✅ SynthesisEngine和轨迹监控器初始化成功")
+        logger.info(f"📂 监控目录: {trajectories_dir}")
+        logger.info(f"📄 输出文件: {seed_tasks_file}")
+        
+        return True
         
     except Exception as e:
-        logger.error(f"❌ TrajectoryMonitor v2.0 初始化失败: {e}")
-        # 如果v2.0失败，继续使用v1.0
-        trajectory_monitor = None
-    
-    logger.info(f"合成服务初始化完成，轨迹目录: {trajectories_dir}")
+        logger.error(f"❌ 合成服务初始化失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-def start():
+def _initialize_llm_client(config: Dict, tool_manager: Optional[UnifiedToolManager] = None) -> Optional[LLMClient]:
+    """初始化LLM客户端"""
+    try:
+        import yaml
+        
+        # 优先使用传入的配置
+        if 'llm_config' in config:
+            llm_config = config['llm_config']
+        else:
+            # 尝试加载配置文件
+            config_path = os.path.join(os.path.dirname(__file__), "..", "config", "llm_config.yaml")
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = yaml.safe_load(f)
+                    
+                    # 使用统一的LLM配置格式
+                    default_provider = config_data.get('default_provider', 'gemini')
+                    provider_config = config_data.get('llm_providers', {}).get(default_provider, {})
+                    
+                    llm_config = {
+                        'provider': default_provider,
+                        'model': provider_config.get('model', 'gemini-2.5-flash-lite-preview-06-17'),
+                        'api_key': provider_config.get('api_key', ''),
+                        'temperature': provider_config.get('temperature', 0.2),
+                        'max_tokens': provider_config.get('max_tokens', 8192)
+                    }
+                    
+                    if default_provider == 'gemini' and provider_config.get('api_base'):
+                        llm_config['api_base'] = provider_config['api_base']
+            else:
+                # 使用默认配置
+                llm_config = {
+                    'provider': 'gemini',
+                    'model': 'gemini-2.5-flash-lite-preview-06-17',
+                    'temperature': 0.2
+                }
+        
+        # 如果没有tool_manager，创建一个基本的实例
+        if tool_manager is None:
+            tool_manager = UnifiedToolManager()
+        
+        client = LLMClient(config=llm_config, tool_manager=tool_manager)
+        logger.info(f"✅ LLM客户端初始化成功: {llm_config.get('provider', 'unknown')}")
+        return client
+        
+    except Exception as e:
+        logger.error(f"❌ LLM客户端初始化失败: {e}")
+        return None
+
+async def start():
     """启动合成服务"""
-    global synthesis_thread, monitor_task, running
+    global running, monitor_task
     
-    if synthesis_instance is None:
-        raise RuntimeError("合成服务未初始化，请先调用initialize()")
-    
-    logger.info("正在启动合成服务...")
-    
-    # 设置运行标志
-    running = True
-    
-    # 启动v1.0服务（保持向后兼容）
-    synthesis_thread = threading.Thread(
-        target=_synthesis_worker,
-        daemon=True
-    )
-    synthesis_thread.start()
-    
-    # 启动v2.0监控器（在单独线程中运行）
-    if trajectory_monitor:
-        monitor_thread = threading.Thread(
-            target=_v2_monitor_worker,
-            daemon=True
-        )
-        monitor_thread.start()
-        logger.info("🚀 启动SynthesisCore v2.0监控器")
-    
-    logger.info("合成服务已启动")
-
-def _synthesis_worker():
-    """合成服务工作线程"""
-    global running
-    
-    logger.info("合成服务工作线程已启动")
-    
-    # 轮询间隔（秒）
-    poll_interval = int(os.getenv('SYNTHESIS_POLL_INTERVAL', 300))  # 默认5分钟
-    
-    while running:
-        try:
-            # 执行合成处理
-            logger.info("开始处理轨迹数据...")
-            import asyncio
-            asyncio.run(synthesis_instance._process_unprocessed_trajectories())
-        except Exception as e:
-            logger.error(f"合成处理过程中出错: {e}", exc_info=True)
-        
-        # 等待下一次处理
-        logger.debug(f"等待 {poll_interval} 秒后再次处理...")
-        
-        # 使用小间隔检查running标志，以便能够及时响应停止请求
-        for _ in range(poll_interval):
-            if not running:
-                break
-            time.sleep(1)
-    
-    logger.info("合成服务工作线程已停止")
-
-def _v2_monitor_worker():
-    """v2.0监控器工作线程"""
-    global running
-    
-    logger.info("SynthesisCore v2.0监控器工作线程已启动")
+    if not synthesis_engine or not trajectory_monitor:
+        logger.error("❌ 服务未初始化，无法启动")
+        return False
     
     try:
-        # 创建新的事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        running = True
         
-        # 运行监控器
-        loop.run_until_complete(_start_v2_monitor())
-        
-    except Exception as e:
-        logger.error(f"❌ SynthesisCore v2.0监控器工作线程异常: {e}")
-    finally:
-        logger.info("SynthesisCore v2.0监控器工作线程已停止")
-
-async def _start_v2_monitor():
-    """启动简化监控器"""
-    try:
+        # 初始化轨迹监控器
         await trajectory_monitor.initialize()
+        
+        # 启动文件监控
         await trajectory_monitor.start_monitoring()
-        logger.info("✅ SynthesisCore v2.0监控器已启动")
         
-        # 保持监控运行
-        while running:
-            await asyncio.sleep(1)
-            
-        # 停止监控
-        await trajectory_monitor.stop_monitoring()
+        logger.info("🎉 合成服务启动成功")
+        logger.info("="*60)
+        logger.info("✅ SynthesisCore (TaskCraft) 组件已激活并正常运行！")
+        logger.info("🧠 关系驱动反向推理算法已就绪")
+        logger.info("📊 38个增强Prompt模板已加载")
+        logger.info("👁️ 轨迹自动监控已启动")
+        logger.info("📂 监控目录: output/trajectories/")
+        logger.info("📄 输出目录: output/SynthesisTask/")
+        logger.info("="*60)
+        return True
         
     except Exception as e:
-        logger.error(f"❌ SynthesisCore v2.0监控器启动失败: {e}")
+        logger.error("="*60)
+        logger.error("❌ SynthesisCore (TaskCraft) 组件启动失败！")
+        logger.error(f"错误详情: {e}")
+        logger.error("请检查以下可能的问题:")
+        logger.error("1. Redis服务是否正常运行")
+        logger.error("2. 轨迹目录是否可写: output/trajectories/")
+        logger.error("3. 输出目录是否可写: output/SynthesisTask/")
+        logger.error("="*60)
+        import traceback
+        traceback.print_exc()
+        running = False
+        return False
 
-def stop():
+async def stop():
     """停止合成服务"""
-    global synthesis_thread, monitor_task, running, synthesis_instance, trajectory_monitor
-    
-    logger.info("正在停止合成服务...")
-    
-    # 设置停止标志
-    running = False
-    
-    # 停止v2.0监控器
-    if trajectory_monitor:
-        try:
-            asyncio.create_task(trajectory_monitor.stop_monitoring())
-            logger.info("🛑 SynthesisCore v2.0监控器已停止")
-        except Exception as e:
-            logger.error(f"❌ 停止v2.0监控器失败: {e}")
-    
-    # 等待v1.0线程结束
-    if synthesis_thread and synthesis_thread.is_alive():
-        logger.info("等待合成服务线程结束...")
-        synthesis_thread.join(timeout=10)
-        if synthesis_thread.is_alive():
-            logger.warning("合成服务线程未能正常结束")
-    
-    # 清理资源
-    synthesis_instance = None
-    trajectory_monitor = None
-    synthesis_thread = None
-    monitor_task = None
-    
-    logger.info("合成服务已停止")
-
-def health_check():
-    """检查合成服务健康状态"""
-    if synthesis_instance is None:
-        return {'status': 'error', 'message': 'Synthesis service not initialized'}
-    
-    # v1.0状态检查
-    v1_status = {
-        'thread_alive': synthesis_thread.is_alive() if synthesis_thread else False,
-        'running_flag': running
-    }
-    
-    # v2.0状态检查
-    v2_status = {
-        'monitor_initialized': trajectory_monitor is not None,
-        'monitor_active': False
-    }
-    
-    if trajectory_monitor:
-        try:
-            v2_status['monitor_active'] = trajectory_monitor.observer.is_alive() if hasattr(trajectory_monitor, 'observer') else False
-        except:
-            pass
-    
-    # 获取处理统计信息
-    stats = synthesis_instance.get_stats() if hasattr(synthesis_instance, 'get_stats') else {}
-    
-    # 整体状态
-    overall_healthy = (v1_status['thread_alive'] or v2_status['monitor_initialized'])
-    
-    return {
-        'status': 'healthy' if overall_healthy else 'error',
-        'v1_synthesis': v1_status,
-        'v2_monitor': v2_status,
-        'stats': stats
-    }
-
-def force_process():
-    """强制立即处理轨迹"""
-    if synthesis_instance is None:
-        raise RuntimeError("合成服务未初始化，请先调用initialize()")
-    
-    logger.info("强制立即处理轨迹...")
-    
-    result = {'v1_synthesis': None, 'v2_monitor': None, 'success': False}
+    global running, monitor_task
     
     try:
-        # v1.0处理
-        v1_result = asyncio.run(synthesis_instance._process_unprocessed_trajectories())
-        result['v1_synthesis'] = v1_result
+        running = False
         
-        # v2.0处理（如果可用）
+        # 停止轨迹监控
         if trajectory_monitor:
-            v2_result = asyncio.run(trajectory_monitor.process_existing_trajectories())
-            result['v2_monitor'] = v2_result
+            await trajectory_monitor.stop_monitoring()
         
-        result['success'] = True
-        logger.info("✅ 强制处理完成")
+        # 取消异步任务
+        if monitor_task and not monitor_task.done():
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
+        
+        logger.info("🛑 合成服务已停止")
+        return True
         
     except Exception as e:
-        logger.error(f"❌ 强制处理失败: {e}")
-        result['error'] = str(e)
-    
-    return result
+        logger.error(f"❌ 停止合成服务失败: {e}")
+        return False
 
-def get_v2_statistics():
-    """获取v2.0监控器统计信息"""
-    if trajectory_monitor is None:
-        return {'error': 'TrajectoryMonitor v2.0 not initialized'}
-    
+def health_check() -> Dict:
+    """健康检查"""
     try:
-        return asyncio.run(trajectory_monitor.get_statistics())
+        status = {
+            "service": "synthesis_service",
+            "status": "healthy" if running else "stopped",
+            "components": {
+                "synthesis_engine": synthesis_engine is not None,
+                "trajectory_monitor": trajectory_monitor is not None,
+                "llm_client": synthesis_engine.llm_client is not None if synthesis_engine else False
+            },
+            "details": {
+                "running": running,
+                "algorithm": "TaskCraft_with_LLM",
+                "capabilities": [
+                    "atomic_task_generation",
+                    "depth_extension", 
+                    "width_extension",
+                    "intelligent_validation"
+                ]
+            }
+        }
+        
+        # 如果有轨迹监控器，添加统计信息
+        if trajectory_monitor:
+            try:
+                # 使用同步方式获取统计（如果可能）
+                stats = {
+                    "processed_trajectories": len(trajectory_monitor.processed_trajectories),
+                    "trajectories_dir": trajectory_monitor.trajectories_dir,
+                    "seed_tasks_file": trajectory_monitor.seed_tasks_file
+                }
+                status["statistics"] = stats
+            except Exception as e:
+                logger.debug(f"获取统计信息失败: {e}")
+        
+        return status
+        
     except Exception as e:
-        logger.error(f"❌ 获取v2.0统计信息失败: {e}")
-        return {'error': str(e)}
+        logger.error(f"❌ 健康检查失败: {e}")
+        return {
+            "service": "synthesis_service",
+            "status": "error",
+            "error": str(e)
+        }
+
+async def get_statistics() -> Dict:
+    """获取详细统计信息"""
+    try:
+        if not trajectory_monitor:
+            return {"error": "服务未初始化"}
+        
+        # 获取轨迹监控器统计
+        monitor_stats = await trajectory_monitor.get_statistics()
+        
+        # 获取SynthesisEngine统计（如果有）
+        engine_stats = {}
+        if synthesis_engine:
+            try:
+                engine_stats = await synthesis_engine.get_storage_statistics()
+            except Exception as e:
+                logger.debug(f"获取引擎统计失败: {e}")
+        
+        return {
+            "service": "synthesis_service",
+            "monitor_statistics": monitor_stats,
+            "engine_statistics": engine_stats,
+            "algorithm": "TaskCraft_with_LLM"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 获取统计信息失败: {e}")
+        return {"error": str(e)}
+
+async def process_trajectories_manually(trajectories_data: list) -> Dict:
+    """手动处理轨迹数据（用于API调用）"""
+    try:
+        if not synthesis_engine:
+            return {"error": "SynthesisEngine未初始化"}
+        
+        logger.info(f"🔄 手动处理 {len(trajectories_data)} 个轨迹")
+        
+        # 使用SynthesisEngine处理轨迹
+        result = await synthesis_engine.synthesize_from_trajectories(
+            trajectories_data=trajectories_data,
+            generate_depth_extensions=True,
+            generate_width_extensions=True,
+            max_atomic_tasks=20
+        )
+        
+        if result:
+            return {
+                "success": True,
+                "session_id": result.session_id,
+                "total_tasks_generated": result.total_tasks_generated,
+                "valid_tasks_count": result.valid_tasks_count,
+                "atomic_tasks": len(result.atomic_tasks),
+                "depth_extended_tasks": len(result.depth_extended_tasks),
+                "width_extended_tasks": len(result.width_extended_tasks),
+                "tool_required_count": result.tool_required_count,
+                "reasoning_only_count": result.reasoning_only_count
+            }
+        else:
+            return {"error": "任务合成失败"}
+            
+    except Exception as e:
+        logger.error(f"❌ 手动处理轨迹失败: {e}")
+        return {"error": str(e)}
+
+# 向后兼容的别名
+async def get_synthesis_statistics():
+    """向后兼容的统计信息获取"""
+    return await get_statistics()

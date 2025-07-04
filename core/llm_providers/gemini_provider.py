@@ -47,7 +47,7 @@ class GeminiProvider(ILLMProvider):
         messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.1, # Gemini的默认温度
-        max_tokens: int = 4096, # Gemini的默认max_tokens
+        max_tokens: int = 32768, # Increased default for complex tasks
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None, # Gemini的工具调用可能不同
         tool_choice: Optional[str] = None,

@@ -55,12 +55,11 @@ def get_data_dir() -> Path:
 
 
 def ensure_output_structure():
-    """确保输出目录结构完整"""
+    """确保输出目录结构完整 - 仅创建实际需要的目录"""
     base_dirs = [
-        "trajectories",
-        "python_execution", 
-        "screenshots",
-        "logs"
+        "trajectories",  # 轨迹存储 - 实际使用
+        "logs",         # 步骤日志 - 实际使用
+        "SynthesisTask" # 合成任务存储 - 实际使用
     ]
     
     for dirname in base_dirs:
@@ -73,11 +72,6 @@ def get_trajectories_dir() -> str:
     return str(get_output_dir("trajectories"))
 
 
-def get_python_execution_dir() -> str:
-    """获取Python执行结果目录"""
-    return str(get_output_dir("python_execution"))
-
-
-def get_screenshots_dir() -> Path:
-    """获取截图存储目录"""
-    return get_output_dir("screenshots")
+def get_synthesis_task_dir() -> str:
+    """获取合成任务存储目录"""
+    return str(get_output_dir("SynthesisTask"))

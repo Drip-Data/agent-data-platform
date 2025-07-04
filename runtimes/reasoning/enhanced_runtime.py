@@ -9,7 +9,7 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Tuple
 from enum import Enum
 
 from core.interfaces import RuntimeInterface, TaskSpec, TrajectoryResult, TaskExecutionConstants, ErrorMessageConstants
@@ -19,6 +19,7 @@ from core.streaming.sequential_executor import SequentialStreamingExecutor
 from core.memory_manager import MemoryManager
 from core.trajectory_enhancer import TrajectoryEnhancer
 from core.step_logger import StepDiagnosticLogger
+from core.intelligent_status_evaluator import IntelligentStatusEvaluator, intelligent_task_evaluation
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             memory_manager=self.memory_manager
         )
         self.step_logger = StepDiagnosticLogger()
+        self.intelligent_evaluator = IntelligentStatusEvaluator(self.client)
         self.mcp_servers = self._load_mcp_config("config/mcp_servers.json")
     
     def _load_mcp_config(self, config_path: str) -> dict:
@@ -125,8 +127,235 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     })
         except ET.ParseError as e:
             logger.error(f"XML Parse Error: {e}\nOriginal XML:\n{xml_string}")
+            # 尝试XML修复和容错解析
+            try:
+                fixed_actions = self._attempt_xml_repair(xml_string)
+                if fixed_actions:
+                    logger.info(f"✅ XML修复成功，解析出 {len(fixed_actions)} 个动作")
+                    return {"type": block_type, "actions": fixed_actions}
+            except Exception as repair_error:
+                logger.warning(f"⚠️ XML修复失败: {repair_error}")
         
         return {"type": block_type, "actions": actions}
+
+    def _attempt_xml_repair(self, xml_string: str) -> list:
+        """
+        尝试修复和解析损坏的XML，增强系统的容错能力
+        """
+        import re
+        from xml.etree import ElementTree as ET
+        
+        actions = []
+        
+        # 方法1: 正则表达式提取工具调用
+        try:
+            # 匹配单个工具调用模式
+            tool_pattern = r'<(\w+)>\s*<(\w+)>(.*?)</\2>\s*</\1>'
+            matches = re.findall(tool_pattern, xml_string, re.DOTALL)
+            
+            for service_name, tool_name, tool_input in matches:
+                actions.append({
+                    "service": service_name,
+                    "tool": tool_name,
+                    "input": tool_input.strip()
+                })
+            
+            if actions:
+                logger.info(f"🔧 正则表达式修复：提取到 {len(actions)} 个工具调用")
+                return actions
+                
+        except Exception as e:
+            logger.debug(f"正则表达式修复失败: {e}")
+        
+        # 方法2: 尝试自动闭合标签
+        try:
+            # 简单的标签自动闭合
+            fixed_xml = xml_string
+            
+            # 查找未闭合的标签
+            open_tags = re.findall(r'<([^/>\s]+)[^>]*>', fixed_xml)
+            close_tags = re.findall(r'</([^>\s]+)>', fixed_xml)
+            
+            # 为未闭合的标签添加闭合标签
+            for tag in open_tags:
+                if tag not in close_tags:
+                    fixed_xml += f'</{tag}>'
+            
+            # 包装为根元素并尝试解析
+            clean_xml = f"<root>{fixed_xml.strip()}</root>"
+            root = ET.fromstring(clean_xml)
+            
+            # 递归提取工具调用
+            def extract_tools(element):
+                tools = []
+                for child in element:
+                    if len(child) > 0:  # 有子元素
+                        for grandchild in child:
+                            if grandchild.tag and grandchild.text:
+                                tools.append({
+                                    "service": child.tag,
+                                    "tool": grandchild.tag,
+                                    "input": grandchild.text.strip()
+                                })
+                    tools.extend(extract_tools(child))
+                return tools
+            
+            extracted_tools = extract_tools(root)
+            if extracted_tools:
+                logger.info(f"🔧 标签闭合修复：提取到 {len(extracted_tools)} 个工具调用")
+                return extracted_tools
+                
+        except Exception as e:
+            logger.debug(f"标签闭合修复失败: {e}")
+        
+        # 方法3: 基于关键词的内容提取
+        try:
+            # 识别常见的服务名称和工具名称
+            service_keywords = ['microsandbox', 'browser_use', 'search', 'deepsearch']
+            tool_keywords = ['execute', 'search', 'navigate', 'click', 'type']
+            
+            # 按行分析，寻找可能的工具调用
+            lines = xml_string.split('\n')
+            current_service = None
+            current_tool = None
+            current_input = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # 检查是否是服务标签
+                for service in service_keywords:
+                    if f'<{service}>' in line.lower():
+                        current_service = service
+                        break
+                
+                # 检查是否是工具标签
+                for tool in tool_keywords:
+                    if f'<{tool}>' in line.lower():
+                        current_tool = tool
+                        current_input = []
+                        continue
+                
+                # 收集工具输入
+                if current_service and current_tool:
+                    if f'</{current_tool}>' in line.lower():
+                        # 工具调用结束
+                        if current_input:
+                            actions.append({
+                                "service": current_service,
+                                "tool": current_tool,
+                                "input": '\n'.join(current_input)
+                            })
+                        current_tool = None
+                        current_input = []
+                    else:
+                        current_input.append(line)
+            
+            if actions:
+                logger.info(f"🔧 关键词提取修复：提取到 {len(actions)} 个工具调用")
+                return actions
+                
+        except Exception as e:
+            logger.debug(f"关键词提取修复失败: {e}")
+        
+        return []
+
+    def _attempt_answer_extraction(self, final_trajectory_str: str) -> str:
+        """
+        尝试从损坏的XML中提取答案内容，增强答案解析的容错能力
+        """
+        import re
+        
+        # 方法1: 部分匹配answer标签（处理未闭合的情况）
+        try:
+            # 查找答案开始标签
+            answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
+            answer_start_pattern = f'<{answer_tag}>'
+            
+            if answer_start_pattern in final_trajectory_str:
+                # 找到开始位置
+                start_pos = final_trajectory_str.find(answer_start_pattern)
+                if start_pos != -1:
+                    content_start = start_pos + len(answer_start_pattern)
+                    
+                    # 查找结束标签
+                    answer_end_pattern = f'</{answer_tag}>'
+                    end_pos = final_trajectory_str.find(answer_end_pattern, content_start)
+                    
+                    if end_pos != -1:
+                        # 标准情况：有完整的开始和结束标签
+                        answer_content = final_trajectory_str[content_start:end_pos].strip()
+                        if answer_content:
+                            return answer_content
+                    else:
+                        # 容错情况：没有结束标签，取到文本末尾
+                        remaining_text = final_trajectory_str[content_start:].strip()
+                        if remaining_text:
+                            # 寻找下一个XML标签作为结束
+                            next_tag_match = re.search(r'<[^>]+>', remaining_text)
+                            if next_tag_match:
+                                answer_content = remaining_text[:next_tag_match.start()].strip()
+                            else:
+                                answer_content = remaining_text
+                            
+                            if answer_content:
+                                logger.info(f"🔧 部分匹配修复：提取到未闭合的answer内容")
+                                return answer_content
+                                
+        except Exception as e:
+            logger.debug(f"部分匹配修复失败: {e}")
+        
+        # 方法2: 基于关键词的智能识别
+        try:
+            # 查找最后的有意义段落
+            paragraphs = final_trajectory_str.split('\n\n')
+            
+            # 查找包含答案关键词的段落
+            answer_keywords = ['答案', '结果', '最终', '总结', '结论', 'answer', 'result', 'final', 'conclusion']
+            
+            for paragraph in reversed(paragraphs):
+                paragraph = paragraph.strip()
+                if len(paragraph) > 20:  # 足够长的段落
+                    # 检查是否包含答案关键词
+                    if any(keyword in paragraph.lower() for keyword in answer_keywords):
+                        # 移除XML标签
+                        clean_paragraph = re.sub(r'<[^>]*>', '', paragraph).strip()
+                        if clean_paragraph:
+                            logger.info(f"🔧 关键词识别修复：找到答案段落")
+                            return clean_paragraph[:500]  # 限制长度
+                            
+        except Exception as e:
+            logger.debug(f"关键词识别修复失败: {e}")
+        
+        # 方法3: 提取最后的有效内容
+        try:
+            # 移除所有XML标签，获取纯文本
+            clean_text = re.sub(r'<[^>]*>', '', final_trajectory_str).strip()
+            
+            if clean_text:
+                # 按行分割，寻找最后几行有意义的内容
+                lines = [line.strip() for line in clean_text.split('\n') if line.strip()]
+                
+                if lines:
+                    # 从最后开始寻找有意义的行
+                    meaningful_lines = []
+                    for line in reversed(lines[-10:]):  # 检查最后10行
+                        if len(line) > 15 and not line.startswith('Step') and not line.startswith('Time'):
+                            meaningful_lines.append(line)
+                            if len(meaningful_lines) >= 3:  # 最多取3行
+                                break
+                    
+                    if meaningful_lines:
+                        result = '\n'.join(reversed(meaningful_lines))
+                        logger.info(f"🔧 文本提取修复：从纯文本中提取答案")
+                        return result
+                        
+        except Exception as e:
+            logger.debug(f"文本提取修复失败: {e}")
+        
+        return ""
 
     async def _execute_tool(self, action: dict) -> str:
         """
@@ -663,15 +892,26 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
             # 🔧 根本修复：智能判断是否需要注入"无动作"消息
             if not actions:
-                # 🔧 新增：计划检测逻辑 - 解决计划-执行脱节问题
+                # 🔧 Priority 3 增强：计划-执行桥梁机制 - 彻底解决计划-执行脱节问题
                 plan_content = self._extract_detailed_plan(response_text)
                 if plan_content and self._has_executable_plan(plan_content):
                     logger.info("🎯 检测到详细计划但缺少执行动作，引导LLM开始执行")
-                    execution_guidance = (
-                        "You have created a detailed plan. Now please start executing the first step of your plan. "
-                        "Use the appropriate tool call with the exact XML format and end with <execute_tools />. "
-                        "Remember: plans are not answers - execution is required."
-                    )
+                    
+                    # 🔧 新增：分析计划中的第一步具体动作
+                    first_action = self._extract_first_executable_action(plan_content)
+                    if first_action:
+                        execution_guidance = (
+                            f"You have created a detailed plan. Now please start executing the first step: {first_action}. "
+                            "Use the appropriate tool call with the exact XML format and end with <execute_tools />. "
+                            "Remember: plans are not answers - execution is required."
+                        )
+                    else:
+                        execution_guidance = (
+                            "You have created a detailed plan. Now please start executing the first step of your plan. "
+                            "Use the appropriate tool call with the exact XML format and end with <execute_tools />. "
+                            "Remember: plans are not answers - execution is required."
+                        )
+                    
                     result_xml = self._format_result(execution_guidance)
                     history.append({"role": "assistant", "content": result_xml})
                     full_trajectory.append({"role": "assistant", "content": result_xml})
@@ -733,8 +973,22 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 🔧 根本修复：区分步数限制和真正失败
         max_steps_reached = len(full_trajectory) >= max_steps
         
-        # 🔧 根本修复：智能判定任务成功状态，考虑步数限制因素
-        success = self._determine_task_success(final_trajectory_str, full_trajectory)
+        # 🧠 新智能评估：使用语义理解和结果驱动的判定逻辑
+        final_result = self._extract_final_result(final_trajectory_str)
+        
+        try:
+            success, confidence_score, evaluation_reasoning = await self._intelligent_task_success_evaluation(
+                task_input=task.description,
+                final_trajectory_str=final_trajectory_str,
+                full_trajectory=full_trajectory,
+                final_output=final_result
+            )
+            logger.info(f"🧠 智能评估: 成功={success}, 置信度={confidence_score:.2f}, 理由={evaluation_reasoning}")
+        except Exception as e:
+            logger.error(f"❌ 智能评估失败，使用传统方法: {e}")
+            success = self._determine_task_success(final_trajectory_str, full_trajectory)
+            confidence_score = 0.5
+            evaluation_reasoning = "使用传统评估方法"
         
         # 🔧 新增：如果达到最大步数但没有明确的答案，降低成功判定标准
         if max_steps_reached:
@@ -774,6 +1028,15 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 🔧 修复：从step_logger获取实际的执行步骤
         actual_steps = await self.step_logger.get_execution_steps()
         
+        # 🧠 构建智能评估元数据
+        intelligent_evaluation = {
+            'confidence_score': confidence_score,
+            'evaluation_reasoning': evaluation_reasoning,
+            'evaluation_method': 'intelligent_semantic' if 'evaluation_reasoning' in locals() and 'LLM' in evaluation_reasoning else 'traditional_rule_based',
+            'max_steps_reached': max_steps_reached,
+            'trajectory_length': len(full_trajectory)
+        }
+        
         return TrajectoryResult(
             task_name=task.task_id,
             task_id=task.task_id, 
@@ -783,7 +1046,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             success=success,
             final_result=final_result,  # 🔧 使用动态提取的结果
             total_duration=total_duration,
-            metadata={'full_trajectory': full_trajectory}
+            metadata={
+                'full_trajectory': full_trajectory,
+                'intelligent_evaluation': intelligent_evaluation  # 🧠 新增智能评估信息
+            }
         )
 
     def _format_result(self, result: str) -> str:
@@ -809,17 +1075,41 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             )
             response = await self.client._call_api(messages)
             
-            # 🔧 根本修复：使用相同的智能判定逻辑
-            success = self._determine_task_success(response, [])
+            # 🧠 标准模式也使用智能评估（简化版）
             final_result = self._extract_final_result(response)
+            
+            try:
+                success, confidence_score, evaluation_reasoning = await self._intelligent_task_success_evaluation(
+                    task_input=task.description,
+                    final_trajectory_str=response,
+                    full_trajectory=[{'content': response, 'timestamp': time.time()}],
+                    final_output=final_result
+                )
+                logger.info(f"🧠 标准模式智能评估: 成功={success}, 置信度={confidence_score:.2f}")
+            except Exception as eval_e:
+                logger.error(f"❌ 标准模式智能评估失败: {eval_e}")
+                success = self._determine_task_success(response, [])
+                confidence_score = 0.5
+                evaluation_reasoning = "降级到传统评估"
             
         except Exception as e:
             logger.error(f"标准模式执行失败: {e}")
             success = False
             final_result = f"执行失败: {str(e)}"
             response = f"Error: {str(e)}"
+            confidence_score = 0.0
+            evaluation_reasoning = f"执行异常: {str(e)}"
         
         total_duration = time.time() - start_time
+        
+        # 🧠 构建标准模式的智能评估元数据
+        intelligent_evaluation = {
+            'confidence_score': confidence_score,
+            'evaluation_reasoning': evaluation_reasoning,
+            'evaluation_method': 'intelligent_semantic_standard_mode',
+            'max_steps_reached': False,
+            'trajectory_length': 1
+        }
         
         # 构建返回对象
         from core.interfaces import TrajectoryResult
@@ -832,7 +1122,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             success=success,
             final_result=final_result,  # 🔧 使用动态提取的结果
             total_duration=total_duration,
-            metadata={'mode': 'standard', 'raw_response': response}
+            metadata={
+                'mode': 'standard', 
+                'raw_response': response,
+                'intelligent_evaluation': intelligent_evaluation  # 🧠 新增智能评估信息
+            }
         )
         
         return trajectory
@@ -855,10 +1149,57 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.warning(f"获取工具描述失败: {e}")
             return "工具描述获取失败"
 
-    def _determine_task_success(self, final_trajectory_str: str, full_trajectory: List) -> bool:
-        """🔧 根本性重构：基于实际执行情况智能判定成功状态
+    async def _intelligent_task_success_evaluation(
+        self, 
+        task_input: str, 
+        final_trajectory_str: str, 
+        full_trajectory: List, 
+        final_output: str
+    ) -> Tuple[bool, float, str]:
+        """
+        🧠 智能任务成功评估 - 新的主要状态判定方法
         
-        优先级：实际工具执行状态 > 答案完整性 > 内容质量 > 错误检查
+        使用语义理解和结果驱动的判定逻辑，替代传统的格式驱动方法
+        
+        Args:
+            task_input: 原始任务输入
+            final_trajectory_str: 完整轨迹字符串
+            full_trajectory: 轨迹步骤列表
+            final_output: 最终输出内容
+            
+        Returns:
+            Tuple[is_success, confidence_score, reasoning]
+        """
+        try:
+            # 提取工具执行结果
+            tool_results = []
+            for step in full_trajectory:
+                if isinstance(step, dict) and 'tool_execution' in step:
+                    tool_results.append(step['tool_execution'])
+            
+            # 调用智能评估器
+            is_success, confidence, reasoning = await intelligent_task_evaluation(
+                llm_client=self.client,
+                task_input=task_input,
+                trajectory=full_trajectory,
+                final_output=final_output,
+                tool_results=tool_results
+            )
+            
+            logger.info(f"🧠 智能状态评估结果: 成功={is_success}, 置信度={confidence:.2f}, 理由={reasoning}")
+            
+            return is_success, confidence, reasoning
+            
+        except Exception as e:
+            logger.error(f"❌ 智能状态评估失败: {e}")
+            # 降级到传统方法
+            traditional_success = self._determine_task_success(final_trajectory_str, full_trajectory)
+            return traditional_success, 0.5, f"降级评估: {traditional_success}"
+
+    def _determine_task_success(self, final_trajectory_str: str, full_trajectory: List) -> bool:
+        """🔧 Priority 1 修复：彻底解决"规划即成功"系统性漏洞
+        
+        核心原则：必须有实际工具执行或明确答案标签，仅有规划/思考内容不能判定为成功
         
         Args:
             final_trajectory_str: 完整轨迹字符串
@@ -871,9 +1212,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         tool_success_rate = self._calculate_tool_success_rate()
         has_successful_tools = tool_success_rate > 0.0
         
-        # 1. 检查是否有完整的答案标签
+        # 1. 检查是否有完整的答案标签（必须有结束标签）
         answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
-        has_answer = f'</{answer_tag}>' in final_trajectory_str or f'<{answer_tag}>' in final_trajectory_str
+        has_complete_answer = f'</{answer_tag}>' in final_trajectory_str
+        has_boxed_answer = "\\boxed{" in final_trajectory_str  # 数学答案格式
         
         # 2. 检查是否有未处理的关键错误指示器
         has_critical_errors = any(
@@ -885,40 +1227,60 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
         has_tool_results = f'<{result_tag}>' in final_trajectory_str and TaskExecutionConstants.NO_ACTION_PERFORMED not in final_trajectory_str
         
-        # 4. 检查是否有有意义的思考内容
+        # 4. 🔧 新增：检查是否只有思考内容（"规划即成功"检测）
         think_tag = TaskExecutionConstants.XML_TAGS['THINK']
-        has_meaningful_thinking = f'<{think_tag}>' in final_trajectory_str and len(final_trajectory_str.strip()) > 50
+        execute_tools_tag = TaskExecutionConstants.XML_TAGS['EXECUTE_TOOLS']
         
-        # 🔧 智能综合判定逻辑：基于多维度评估
+        has_only_thinking = (f'<{think_tag}>' in final_trajectory_str and 
+                           not has_tool_results and 
+                           not has_complete_answer and
+                           not has_boxed_answer and
+                           f'<{execute_tools_tag}>' not in final_trajectory_str)
+        
+        # 🔧 Priority 4 新增：多工具协同质量评估
+        multi_tool_quality = self._evaluate_multi_tool_coordination_quality(final_trajectory_str)
+        
+        # 🔧 Priority 1 核心修复：严格的成功判定逻辑
         success = False
         
-        # 场景1：有工具执行且成功 + 有答案 + 有意义结果 = 明确成功
-        if has_successful_tools and has_answer and not has_critical_errors and self._has_meaningful_tool_results(final_trajectory_str):
+        # 场景1：有实际工具执行成功 + 有完整答案 + 有意义结果 = 明确成功
+        if has_successful_tools and (has_complete_answer or has_boxed_answer) and not has_critical_errors and self._has_meaningful_tool_results(final_trajectory_str):
             success = True
             logger.info("🎯 判定成功：工具执行成功 + 完整答案 + 有意义结果")
         
-        # 场景2：有工具执行且成功 + 有结果输出 = 潜在成功
+        # 场景2：有实际工具执行成功 + 有实际结果输出 = 潜在成功
         elif has_successful_tools and has_tool_results and not has_critical_errors:
             success = True
             logger.info("🎯 判定成功：工具执行成功 + 有实际结果")
         
-        # 场景3：纯推理任务：有答案但无需工具
-        elif has_answer and not has_tool_results and has_meaningful_thinking and not has_critical_errors:
+        # 场景3：🔧 Priority 4 新增：多工具协同成功场景
+        elif multi_tool_quality['is_coordinated'] and multi_tool_quality['quality_score'] > TaskExecutionConstants.MULTI_TOOL_COORDINATION['RESULT_INTEGRATION']['quality_threshold']:
             success = True
-            logger.info("🎯 判定成功：纯推理任务，有完整答案")
+            logger.info(f"🎯 判定成功：多工具协同完成，质量分数={multi_tool_quality['quality_score']:.2f}")
         
-        # 场景4：任何关键错误都导致失败
+        # 场景4：纯推理任务：有完整答案标签（必须有结束标签或boxed格式）
+        elif (has_complete_answer or has_boxed_answer) and not has_critical_errors:
+            success = True
+            logger.info("🎯 判定成功：纯推理任务，有完整答案标签")
+        
+        # 场景5：🔧 "规划即成功"漏洞防护 - 只有思考内容时明确拒绝
+        elif has_only_thinking:
+            success = False
+            logger.warning('🚨 "规划即成功"漏洞防护：仅有思考内容，不认定为成功')
+        
+        # 场景6：任何关键错误都导致失败
         elif has_critical_errors:
             success = False
             logger.info("🎯 判定失败：检测到关键错误")
         
-        # 场景5：其他情况默认失败
+        # 场景7：其他情况默认失败
         else:
             success = False
             logger.info("🎯 判定失败：未满足成功条件")
         
-        logger.info(f"🎯 Success判定详情: tool_success_rate={tool_success_rate:.2f}, has_answer={has_answer}, "
-                   f"has_tool_results={has_tool_results}, has_meaningful_thinking={has_meaningful_thinking}, "
+        logger.info(f"🎯 Success判定详情: tool_success_rate={tool_success_rate:.2f}, "
+                   f"has_complete_answer={has_complete_answer}, has_boxed_answer={has_boxed_answer}, "
+                   f"has_tool_results={has_tool_results}, has_only_thinking={has_only_thinking}, "
                    f"has_critical_errors={has_critical_errors}, final_success={success}")
         
         return success
@@ -1010,6 +1372,12 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     # 如果没有\boxed{}格式，返回原始answer内容
                     logger.info(f"✅ 从<answer>标签提取最终结果: {answer_content[:100]}...")
                     return answer_content
+        else:
+            # 🔧 容错机制：如果标准答案标签解析失败，尝试修复
+            answer_content = self._attempt_answer_extraction(final_trajectory_str)
+            if answer_content:
+                logger.info(f"🔧 容错提取答案成功: {answer_content[:100]}...")
+                return answer_content
         
         # 🔧 第二优先级：提取最后的有效工具执行结果（非"No action"）
         result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
@@ -1295,6 +1663,49 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         return is_executable
     
+    def _extract_first_executable_action(self, plan_content: str) -> Optional[str]:
+        """🔧 Priority 3 新增：从计划中提取第一个可执行的具体动作"""
+        import re
+        
+        plan_lower = plan_content.lower()
+        lines = plan_content.split('\n')
+        
+        # 寻找明确的第一步骤
+        first_step_patterns = [
+            r'(?:step\s*1|first\s*step|第一步|首先)[:\s]*(.*?)(?:\n|$)',
+            r'(?:1\.|①|开始|start)[:\s]*(.*?)(?:\n|$)',
+            r'(?:需要|need\s*to|will|应该)[:\s]*(.*?)(?:\n|$)'
+        ]
+        
+        for pattern in first_step_patterns:
+            match = re.search(pattern, plan_lower, re.IGNORECASE | re.DOTALL)
+            if match:
+                action = match.group(1).strip()
+                # 清理并简化动作描述
+                if len(action) > 10 and len(action) < 200:
+                    return action
+        
+        # 如果没有找到明确的第一步，尝试从计划中提取工具相关的动作
+        tool_action_patterns = [
+            r'(search\s+for\s+[^.\n]+)',
+            r'(execute\s+[^.\n]+)',
+            r'(run\s+[^.\n]+)',
+            r'(use\s+[^.\n]+)',
+            r'(搜索[^。\n]+)',
+            r'(执行[^。\n]+)',
+            r'(运行[^。\n]+)',
+            r'(使用[^。\n]+)'
+        ]
+        
+        for pattern in tool_action_patterns:
+            match = re.search(pattern, plan_lower)
+            if match:
+                action = match.group(1).strip()
+                if len(action) > 5 and len(action) < 150:
+                    return action
+        
+        return None
+    
     def _validate_calculation_context(self, trajectory_str: str, calculation_result: str) -> bool:
         """🔧 新增：验证计算结果是否来自真实的工具执行上下文"""
         import re
@@ -1355,8 +1766,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         return True
     
     def _has_meaningful_tool_results(self, trajectory_str: str) -> bool:
-        """🔧 新增：检查工具执行是否产生了有意义的结果"""
+        """🔧 Priority 2 增强：工具结果解析能力，支持复杂JSON结构"""
         import re
+        import json
         
         result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
         result_pattern = f'<{result_tag}>(.*?)</{result_tag}>'
@@ -1373,20 +1785,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 "Error:" not in result_clean and
                 "failed" not in result_clean.lower()):
                 
-                # 检查是否包含有价值的信息
-                has_data = any(indicator in result_clean.lower() for indicator in [
-                    'result', 'found', 'success', 'completed', '结果', '成功', '完成',
-                    'http', 'www', 'search', 'execute', 'calculation', 'answer'
-                ])
+                # 🔧 Priority 2 新增：复杂JSON结构解析
+                is_meaningful = self._analyze_complex_result_content(result_clean)
                 
-                # 检查是否包含数值、代码执行结果或搜索结果
-                has_numerical = re.search(r'\d+', result_clean)
-                has_technical_content = any(keyword in result_clean.lower() for keyword in [
-                    'python', 'code', 'execute', 'import', 'def', 'return',
-                    'search results', '搜索结果', 'photocurrent', 'iora'
-                ])
-                
-                if has_data or has_numerical or has_technical_content:
+                if is_meaningful:
                     meaningful_results += 1
         
         # 如果有至少一个有意义的工具结果，认为工具执行有意义
@@ -1394,6 +1796,228 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         logger.debug(f"🔍 工具结果分析: 总结果块={len(result_blocks)}, 有意义结果={meaningful_results}, 判定={has_meaningful}")
         
         return has_meaningful
+    
+    def _analyze_complex_result_content(self, result_content: str) -> bool:
+        """🔧 Priority 2 新增：分析复杂结果内容，支持JSON、代码、搜索结果等"""
+        import re
+        import json
+        
+        # 1. 检查是否包含有价值的信息指示词
+        has_data = any(indicator in result_content.lower() for indicator in [
+            'result', 'found', 'success', 'completed', '结果', '成功', '完成',
+            'http', 'www', 'search', 'execute', 'calculation', 'answer'
+        ])
+        
+        # 2. 检查是否包含数值、代码执行结果或搜索结果
+        has_numerical = re.search(r'\d+', result_content)
+        has_technical_content = any(keyword in result_content.lower() for keyword in [
+            'python', 'code', 'execute', 'import', 'def', 'return',
+            'search results', '搜索结果', 'photocurrent', 'iora'
+        ])
+        
+        # 3. 🔧 新增：JSON结构解析
+        has_structured_data = self._has_structured_json_data(result_content)
+        
+        # 4. 🔧 新增：网页内容解析
+        has_web_content = self._has_meaningful_web_content(result_content)
+        
+        # 5. 🔧 新增：文件搜索结果解析
+        has_file_results = self._has_meaningful_file_results(result_content)
+        
+        # 6. 🔧 新增：计算结果解析
+        has_calculation_results = self._has_calculation_results(result_content)
+        
+        return (has_data or has_numerical or has_technical_content or 
+                has_structured_data or has_web_content or has_file_results or 
+                has_calculation_results)
+    
+    def _has_structured_json_data(self, content: str) -> bool:
+        """检查是否包含有意义的JSON结构数据"""
+        import json
+        import re
+        
+        # 尝试提取JSON对象
+        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        json_matches = re.findall(json_pattern, content, re.DOTALL)
+        
+        for json_str in json_matches:
+            try:
+                data = json.loads(json_str)
+                if isinstance(data, dict) and len(data) > 0:
+                    # 检查是否包含有意义的键值对
+                    meaningful_keys = ['result', 'data', 'response', 'output', 'value', 'content']
+                    if any(key in data for key in meaningful_keys):
+                        return True
+            except json.JSONDecodeError:
+                continue
+        
+        return False
+    
+    def _has_meaningful_web_content(self, content: str) -> bool:
+        """检查是否包含有意义的网页内容"""
+        import re
+        
+        # 检查URL模式
+        url_pattern = r'https?://[^\s<>"\']+|www\.[^\s<>"\']+\.[^\s<>"\']+' 
+        has_urls = re.search(url_pattern, content)
+        
+        # 检查HTML标签
+        html_pattern = r'<[^>]+>'
+        has_html = re.search(html_pattern, content)
+        
+        # 检查网页特有内容
+        web_indicators = ['page title', 'page content', 'browser', 'navigation', 'click', 'scroll']
+        has_web_terms = any(indicator in content.lower() for indicator in web_indicators)
+        
+        return has_urls or has_html or has_web_terms
+    
+    def _has_meaningful_file_results(self, content: str) -> bool:
+        """检查是否包含有意义的文件搜索结果"""
+        import re
+        
+        # 文件路径模式
+        file_pattern = r'[^\s<>"\']+\.[a-zA-Z0-9]+'
+        has_files = re.search(file_pattern, content)
+        
+        # 文件操作指示词
+        file_indicators = ['file', 'directory', 'folder', 'path', '文件', '目录', '路径']
+        has_file_terms = any(indicator in content.lower() for indicator in file_indicators)
+        
+        # 搜索结果数量
+        count_pattern = r'found\s+(\d+)|(\d+)\s+results|(\d+)\s+files'
+        has_counts = re.search(count_pattern, content.lower())
+        
+        return has_files or (has_file_terms and has_counts)
+    
+    def _has_calculation_results(self, content: str) -> bool:
+        """检查是否包含计算结果"""
+        import re
+        
+        # 数学表达式和结果
+        math_pattern = r'=\s*[-+]?\d*\.?\d+|result:\s*[-+]?\d*\.?\d+|answer:\s*[-+]?\d*\.?\d+'
+        has_math = re.search(math_pattern, content.lower())
+        
+        # 计算相关术语
+        calc_indicators = ['calculation', 'computed', 'evaluated', '计算', '结果', 'output']
+        has_calc_terms = any(indicator in content.lower() for indicator in calc_indicators)
+        
+        # 复杂数值（科学计数法、小数等）
+        complex_num_pattern = r'[-+]?\d*\.?\d+[eE][-+]?\d+|[-+]?\d+\.\d{2,}'
+        has_complex_nums = re.search(complex_num_pattern, content)
+        
+        return has_math or (has_calc_terms and has_complex_nums)
+    
+    def _evaluate_multi_tool_coordination_quality(self, trajectory_str: str) -> Dict[str, Any]:
+        """🔧 Priority 4 新增：评估多工具协同的质量和效果"""
+        import re
+        
+        # 统计使用的工具类型
+        used_tools = set()
+        result_tag = TaskExecutionConstants.XML_TAGS['RESULT']
+        result_pattern = f'<{result_tag}>(.*?)</{result_tag}>'
+        result_blocks = re.findall(result_pattern, trajectory_str, re.DOTALL)
+        
+        # 识别使用的工具服务
+        tool_services = ['microsandbox', 'deepsearch', 'browser_use', 'search_tool']
+        for service in tool_services:
+            if service in trajectory_str.lower():
+                used_tools.add(service)
+        
+        tools_count = len(used_tools)
+        is_multi_tool = tools_count >= TaskExecutionConstants.MULTI_TOOL_COORDINATION['RESULT_INTEGRATION']['min_meaningful_tools']
+        
+        # 评估工具协同质量
+        quality_score = 0.0
+        coordination_indicators = []
+        
+        if is_multi_tool:
+            # 检查工具间的数据流转
+            data_flow_quality = self._assess_tool_data_flow(trajectory_str, used_tools)
+            quality_score += data_flow_quality * 0.4
+            coordination_indicators.append(f"数据流转质量: {data_flow_quality:.2f}")
+            
+            # 检查结果整合质量
+            integration_quality = self._assess_result_integration(result_blocks)
+            quality_score += integration_quality * 0.3
+            coordination_indicators.append(f"结果整合质量: {integration_quality:.2f}")
+            
+            # 检查任务完成度
+            completion_quality = self._assess_task_completion_via_coordination(trajectory_str)
+            quality_score += completion_quality * 0.3
+            coordination_indicators.append(f"任务完成度: {completion_quality:.2f}")
+        
+        return {
+            'is_coordinated': is_multi_tool,
+            'tools_used': list(used_tools),
+            'tools_count': tools_count,
+            'quality_score': quality_score,
+            'coordination_indicators': coordination_indicators
+        }
+    
+    def _assess_tool_data_flow(self, trajectory_str: str, used_tools: set) -> float:
+        """评估工具间的数据流转质量"""
+        # 检查前一个工具的输出是否被后续工具使用
+        data_flow_score = 0.0
+        
+        # 简化版：检查是否有明显的数据传递模式
+        if 'microsandbox' in used_tools and 'deepsearch' in used_tools:
+            # 搜索后分析模式
+            if 'search' in trajectory_str.lower() and 'code' in trajectory_str.lower():
+                data_flow_score += 0.5
+        
+        if 'browser_use' in used_tools and 'search_tool' in used_tools:
+            # 浏览后搜索模式
+            if 'browse' in trajectory_str.lower() and 'file' in trajectory_str.lower():
+                data_flow_score += 0.5
+        
+        return min(1.0, data_flow_score)
+    
+    def _assess_result_integration(self, result_blocks: list) -> float:
+        """评估结果整合质量"""
+        if len(result_blocks) < 2:
+            return 0.0
+        
+        # 检查结果间的关联性
+        integration_score = 0.0
+        
+        # 简化版：检查结果是否包含相互引用或补充信息
+        combined_results = ' '.join(result_blocks).lower()
+        
+        # 检查是否有数据引用
+        if any(indicator in combined_results for indicator in ['based on', 'according to', 'using the', '基于', '根据']):
+            integration_score += 0.4
+        
+        # 检查是否有综合分析
+        if any(indicator in combined_results for indicator in ['combined', 'integrated', 'overall', '综合', '整合']):
+            integration_score += 0.3
+        
+        # 检查结果的互补性
+        if len(set(result_blocks)) == len(result_blocks):  # 无重复结果
+            integration_score += 0.3
+        
+        return min(1.0, integration_score)
+    
+    def _assess_task_completion_via_coordination(self, trajectory_str: str) -> float:
+        """评估通过工具协同完成任务的程度"""
+        completion_score = 0.0
+        
+        # 检查是否有明确的任务完成指示
+        completion_indicators = [
+            'task completed', 'finished', 'done', 'result', 'conclusion',
+            '任务完成', '完成', '结果', '结论', '答案'
+        ]
+        
+        trajectory_lower = trajectory_str.lower()
+        for indicator in completion_indicators:
+            if indicator in trajectory_lower:
+                completion_score += 0.2
+        
+        # 检查是否有数值或具体结果
+        import re
+        if re.search(r'\d+\.?\d*', trajectory_str):
+            completion_score += 0.3
+        
+        return min(1.0, completion_score)
         
     def _detect_success(self, response: str) -> bool:
         """检测XML响应是否成功 - 保留向后兼容性"""

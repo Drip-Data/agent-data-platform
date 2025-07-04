@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import websockets.legacy.server as websockets_server
 import websockets.legacy.client as websockets_client
 from typing import Dict, Any, Callable, Optional, List, Union
@@ -321,6 +322,14 @@ class MCPServer:
                         "action": action,
                         "result": {"success": False, "error": "No action handler registered", "error_type": "ServerError"}
                     }
+                await self._safe_send(websocket, json.dumps(response))
+            elif request_type == "ping":
+                # 处理ping请求
+                response = {
+                    "type": "pong",
+                    "request_id": request_id,
+                    "timestamp": time.time()
+                }
                 await self._safe_send(websocket, json.dumps(response))
             else:
                 logger.warning(f"Unknown request type or server role mismatch: {request_type}")
