@@ -87,6 +87,9 @@ python3 -m pytest tests/test_synthesis_focus.py    # 合成系统测试
 
 # 运行性能测试
 python3 scripts/batch_test_tasks.py --tasks-file data/test_tasks.jsonl
+
+# 运行单个测试任务
+python3 scripts/batch_test_tasks.py --tasks-file tasks.jsonl
 ```
 
 ### 开发工具
@@ -102,6 +105,9 @@ python3 scripts/port_manager.py
 
 # 验证工具映射
 python3 scripts/verify_tool_id_mappings.py
+
+# Token优化功能测试
+python3 tests/test_token_optimization.py
 ```
 
 ## 架构概览
@@ -200,6 +206,33 @@ answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
 if f"</{answer_tag}>" in response:
     success = self._determine_task_success(response, trajectory)
     final_result = self._extract_final_result(response)
+```
+
+### Token优化与成本控制
+```python
+# 🆕 使用智能Token管理器进行成本优化
+from core.intelligent_token_manager import IntelligentTokenManager
+from core.context_cache_manager import CacheStrategy
+
+# 初始化Token管理器
+token_manager = IntelligentTokenManager(
+    gemini_provider=gemini_provider,
+    cache_strategy=CacheStrategy.BALANCED,
+    token_budget_limit=1000000  # 100万token预算
+)
+
+# 精确Token计数（使用Gemini真实API）
+token_count = await token_manager.count_tokens_accurately(text, model="gemini-2.5-flash")
+
+# 智能消息优化（自动缓存与复用）
+optimized_messages, optimization_info = await token_manager.optimize_messages_with_cache(
+    messages, model="gemini-2.5-flash", session_id="user_session"
+)
+
+# 详细成本分析
+cost_analysis = step_logger._calculate_cost_metrics(token_usage, duration)
+print(f"成本: ${cost_analysis['estimated_cost_usd']:.6f}")
+print(f"缓存节省: ${cost_analysis['cache_analysis']['cache_savings_usd']:.6f}")
 ```
 
 ### 状态判定最佳实践

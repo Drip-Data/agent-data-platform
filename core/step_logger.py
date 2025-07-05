@@ -75,7 +75,8 @@ class StepDiagnosticLogger:
             "raw_llm_response": raw_response,
             "stop_sequence_triggered": stop_sequence,
             "token_usage": enhanced_token_usage,
-            "cost_analysis": self._calculate_cost_metrics(enhanced_token_usage, duration)
+            "total_cost_usd": self._calculate_simple_cost(enhanced_token_usage),
+            "cost_analysis": self._calculate_enhanced_cost_analysis(enhanced_token_usage, duration)
         }
         logger.debug(f"🤖 记录LLM调用，响应长度: {len(raw_response)} 字符")
         
@@ -277,60 +278,454 @@ class StepDiagnosticLogger:
         return None
     
     def _enhance_token_usage(self, token_usage: Optional[Dict], raw_response: str, prompt: List[Dict]) -> Dict:
-        """🔧 增强Token使用统计 - 提供详细的成本分析数据"""
-        if token_usage and all(key in token_usage for key in ['prompt_tokens', 'completion_tokens', 'total_tokens']):
-            # 如果有真实的token数据，使用它
-            enhanced = token_usage.copy()
+        """🔧 简化的Token使用统计 - 优先使用真实API数据"""
+        
+        # 检查是否有真实的API数据 - 扩展检测逻辑
+        data_source = token_usage.get('data_source', 'unknown') if token_usage else 'unknown'
+        
+        # 如果来源包含这些关键词，认为是真实API数据
+        is_real_api = any(keyword in str(data_source).lower() for keyword in ['real_api', 'api_response', 'gemini_api', 'api_provided']) if data_source != 'enhanced_estimation' else False
+        
+        if token_usage and is_real_api:
+            # 使用真实API返回的token数据
+            enhanced = {
+                "prompt_tokens": token_usage.get('prompt_tokens', 0),
+                "completion_tokens": token_usage.get('completion_tokens', 0),
+                "total_tokens": token_usage.get('total_tokens', 0),
+                "model": token_usage.get('model', 'gemini-2.5-flash-lite-preview-06-17'),
+                "data_source": "real_api"
+            }
+            # 添加一些有用的性能分析
+            enhanced.update({
+                "tokens_per_second": enhanced.get('completion_tokens', 0) / max(0.1, token_usage.get('response_time', 1)),
+                "efficiency_ratio": enhanced.get('completion_tokens', 0) / max(1, enhanced.get('prompt_tokens', 1))
+            })
+        elif token_usage and all(key in token_usage for key in ['prompt_tokens', 'completion_tokens']):
+            # 使用提供的token数据并保留有用分析
+            enhanced = token_usage.copy()  # 保留原始数据
+            
+            # 确保基本字段存在并标记数据源
+            enhanced.update({
+                "prompt_tokens": token_usage.get('prompt_tokens', 0),
+                "completion_tokens": token_usage.get('completion_tokens', 0),
+                "total_tokens": token_usage.get('total_tokens', token_usage.get('prompt_tokens', 0) + token_usage.get('completion_tokens', 0)),
+                "model": token_usage.get('model', 'gemini-2.5-flash-lite-preview-06-17'),
+                "data_source": data_source  # 保持原始数据源标记
+            })
         else:
-            # 如果没有真实数据，使用估算
+            # 进行基础估算
             prompt_text = " ".join([msg.get('content', '') for msg in prompt if isinstance(msg, dict)])
-            estimated_prompt_tokens = len(prompt_text.split()) * 1.3  # 粗略估算：1.3 tokens per word
-            estimated_completion_tokens = len(raw_response.split()) * 1.3
+            estimated_prompt_tokens = self._accurate_token_estimation(prompt_text)
+            estimated_completion_tokens = self._accurate_token_estimation(raw_response)
             
             enhanced = {
-                "prompt_tokens": int(estimated_prompt_tokens),
-                "completion_tokens": int(estimated_completion_tokens),
-                "total_tokens": int(estimated_prompt_tokens + estimated_completion_tokens),
-                "data_source": "estimated"  # 标记为估算数据
+                "prompt_tokens": estimated_prompt_tokens,
+                "completion_tokens": estimated_completion_tokens,
+                "total_tokens": estimated_prompt_tokens + estimated_completion_tokens,
+                "model": "gemini-2.5-flash-lite-preview-06-17",
+                "data_source": "estimation"
             }
-        
-        # 添加额外的分析字段
-        enhanced.update({
-            "response_length_chars": len(raw_response),
-            "prompt_length_chars": sum(len(str(msg.get('content', ''))) for msg in prompt if isinstance(msg, dict)),
-            "tokens_per_second": enhanced.get('completion_tokens', 0) / max(0.1, enhanced.get('response_time', 1)),
-            "efficiency_ratio": enhanced.get('completion_tokens', 0) / max(1, enhanced.get('prompt_tokens', 1))
-        })
         
         return enhanced
     
+    def _estimate_tokens(self, text: str) -> int:
+        """简单的token估算函数"""
+        if not text:
+            return 0
+        
+        # 简单的token估算：中文约1.5字符/token，英文约4字符/token
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        other_chars = len(text) - chinese_chars
+        
+        estimated_tokens = int(chinese_chars / 1.5 + other_chars / 4.0)
+        return max(estimated_tokens, 1)
+    
+    def _accurate_token_estimation(self, text: str) -> int:
+        """基于Gemini特性的准确token估算"""
+        if not text:
+            return 0
+        
+        # 中文字符统计
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        japanese_chars = sum(1 for c in text if '\u3040' <= c <= '\u309f' or '\u30a0' <= c <= '\u30ff')
+        korean_chars = sum(1 for c in text if '\uac00' <= c <= '\ud7af')
+        
+        # 其他字符
+        other_chars = len(text) - chinese_chars - japanese_chars - korean_chars
+        
+        # 基于Gemini tokenizer的改进估算
+        # 中文: ~1.5 chars/token, 日文: ~2 chars/token, 韩文: ~2 chars/token, 英文: ~4 chars/token
+        estimated_tokens = int(
+            chinese_chars / 1.5 + 
+            japanese_chars / 2.0 + 
+            korean_chars / 2.0 + 
+            other_chars / 4.0
+        )
+        
+        # 考虑特殊标记和格式
+        special_tokens = text.count('<') + text.count('>') + text.count('{') + text.count('}')
+        estimated_tokens += special_tokens * 0.5  # 特殊标记通常占用额外token
+        
+        return max(estimated_tokens, 1)
+    
+    def _analyze_content_type(self, content: str) -> Dict[str, Any]:
+        """分析内容类型和复杂度"""
+        import re
+        
+        analysis = {
+            "has_code": bool(re.search(r'```|`[^`]+`|def |class |import |function', content)),
+            "has_json": bool(re.search(r'\{[^}]*\}|\[[^\]]*\]', content)),
+            "has_xml": bool(re.search(r'<[^>]+>', content)),
+            "has_markdown": bool(re.search(r'#+|[*_]{1,2}[^*_]+[*_]{1,2}|\[.*\]\(.*\)', content)),
+            "line_count": content.count('\n') + 1,
+            "avg_line_length": len(content) / max(1, content.count('\n') + 1),
+            "complexity_score": self._calculate_content_complexity(content)
+        }
+        
+        return analysis
+    
+    def _analyze_prompt_complexity(self, prompt: List[Dict]) -> Dict[str, Any]:
+        """分析prompt复杂度"""
+        total_length = sum(len(str(msg.get('content', ''))) for msg in prompt)
+        message_count = len(prompt)
+        
+        # 检测特殊指令
+        all_content = " ".join([str(msg.get('content', '')) for msg in prompt])
+        
+        complexity = {
+            "message_count": message_count,
+            "total_length": total_length,
+            "avg_message_length": total_length / max(1, message_count),
+            "has_system_prompt": any(msg.get('role') == 'system' for msg in prompt),
+            "has_examples": 'example' in all_content.lower() or '示例' in all_content,
+            "has_constraints": any(word in all_content.lower() for word in ['must', 'should', 'cannot', '必须', '不能']),
+            "instruction_density": self._calculate_instruction_density(all_content)
+        }
+        
+        return complexity
+    
+    def _calculate_content_complexity(self, content: str) -> float:
+        """计算内容复杂度分数 (0-10)"""
+        score = 0.0
+        
+        # 长度因子 (0-2分)
+        score += min(2.0, len(content) / 1000)
+        
+        # 结构化内容 (0-3分)
+        if '{' in content or '[' in content:
+            score += 1.0
+        if '<' in content and '>' in content:
+            score += 1.0
+        if '```' in content:
+            score += 1.0
+        
+        # 特殊字符密度 (0-2分)
+        special_chars = sum(1 for c in content if c in '{}[]()<>*_`#|\\')
+        score += min(2.0, special_chars / max(1, len(content)) * 100)
+        
+        # 换行密度 (0-2分)
+        line_density = content.count('\n') / max(1, len(content)) * 100
+        score += min(2.0, line_density * 10)
+        
+        # 数字和标点密度 (0-1分)
+        numbers_punct = sum(1 for c in content if c.isdigit() or c in '.,;:!?')
+        score += min(1.0, numbers_punct / max(1, len(content)) * 50)
+        
+        return min(10.0, score)
+    
+    def _calculate_instruction_density(self, content: str) -> float:
+        """计算指令密度"""
+        instruction_words = [
+            'please', 'must', 'should', 'need', 'require', 'ensure', 'make sure',
+            '请', '必须', '需要', '确保', '要求', '应该', '务必'
+        ]
+        
+        content_lower = content.lower()
+        instruction_count = sum(1 for word in instruction_words if word in content_lower)
+        word_count = len(content.split())
+        
+        return instruction_count / max(1, word_count) * 100
+    
+    def _estimate_cache_savings(self, prompt_tokens: int) -> Dict[str, Any]:
+        """估算缓存节省（基于Gemini 2.5缓存机制）"""
+        if prompt_tokens < 1024:  # 不满足Gemini 2.5最小缓存要求
+            return {"eligible": False, "reason": "Below minimum 1024 tokens"}
+        
+        # 基于Gemini 2.5 Flash定价
+        normal_cost = (prompt_tokens / 1_000_000) * 0.30  # $0.30 per 1M input tokens
+        cache_cost = (prompt_tokens / 1_000_000) * 0.075  # $0.075 per 1M cached tokens (25% of input cost)
+        
+        savings_per_reuse = normal_cost - cache_cost
+        
+        return {
+            "eligible": True,
+            "normal_cost_usd": round(normal_cost, 6),
+            "cache_cost_usd": round(cache_cost, 6),
+            "savings_per_reuse_usd": round(savings_per_reuse, 6),
+            "break_even_uses": 2,  # 缓存后第2次使用开始节省
+            "potential_savings_5_uses": round(savings_per_reuse * 4, 6)  # 使用5次的节省
+        }
+    
+    def _calculate_simple_cost(self, token_usage: Dict) -> float:
+        """根据系统实际使用的模型计算简单成本"""
+        prompt_tokens = token_usage.get('prompt_tokens', 0)
+        completion_tokens = token_usage.get('completion_tokens', 0)
+        model = token_usage.get('model', 'gemini-2.5-flash-lite-preview-06-17')
+        
+        # 确保token数为数字类型
+        if isinstance(prompt_tokens, str):
+            prompt_tokens = 0
+        if isinstance(completion_tokens, str):
+            completion_tokens = 0
+        
+        # Gemini 2.5系列定价（美元每100万token）
+        pricing_config = {
+            "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
+            "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+            "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
+            "gemini-2.5-flash-lite-preview-06-17": {"input": 0.10, "output": 0.40}  # 当前系统使用的模型
+        }
+        
+        # 获取模型定价，默认使用flash-lite
+        pricing = pricing_config.get(model, pricing_config["gemini-2.5-flash-lite"])
+        
+        # 计算总成本
+        input_cost = (prompt_tokens / 1_000_000) * pricing["input"]
+        output_cost = (completion_tokens / 1_000_000) * pricing["output"]
+        total_cost = input_cost + output_cost
+        
+        return round(total_cost, 6)
+    
+    def _calculate_enhanced_cost_analysis(self, token_usage: Dict, duration: float) -> Dict:
+        """计算增强的成本分析 - 保留有用信息"""
+        prompt_tokens = token_usage.get('prompt_tokens', 0)
+        completion_tokens = token_usage.get('completion_tokens', 0)
+        model = token_usage.get('model', 'gemini-2.5-flash-lite-preview-06-17')
+        
+        # 确保token数为数字类型
+        if isinstance(prompt_tokens, str):
+            prompt_tokens = 0
+        if isinstance(completion_tokens, str):
+            completion_tokens = 0
+        
+        # 定价配置
+        pricing_config = {
+            "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
+            "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+            "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
+            "gemini-2.5-flash-lite-preview-06-17": {"input": 0.10, "output": 0.40}
+        }
+        
+        pricing = pricing_config.get(model, pricing_config["gemini-2.5-flash-lite"])
+        
+        # 计算成本分解
+        input_cost = (prompt_tokens / 1_000_000) * pricing["input"]
+        output_cost = (completion_tokens / 1_000_000) * pricing["output"]
+        total_cost = input_cost + output_cost
+        
+        # 性能指标
+        tokens_per_second = completion_tokens / max(0.1, duration)
+        cost_per_second = total_cost / max(0.1, duration)
+        tokens_per_dollar = (prompt_tokens + completion_tokens) / max(0.000001, total_cost)
+        efficiency_score = completion_tokens / max(0.1, duration)
+        
+        # 缓存分析
+        cache_eligible = prompt_tokens >= 1024
+        cache_savings_usd = 0.0
+        cache_efficiency = 0.0
+        
+        if cache_eligible:
+            # 计算缓存节省（估算75%节省）
+            cache_cost = input_cost * 0.25  # 25%的原始成本
+            cache_savings_usd = input_cost - cache_cost
+            cache_efficiency = cache_savings_usd / input_cost if input_cost > 0 else 0
+        
+        # 优化建议
+        optimization_suggestions = []
+        if prompt_tokens >= 1024:
+            optimization_suggestions.append("输入超过1024 tokens，建议启用上下文缓存以节省成本")
+        if cache_efficiency == 0 and cache_eligible:
+            optimization_suggestions.append("缓存使用率仅0.0%，可优化空间较大")
+        
+        return {
+            "model": model,
+            "estimated_cost_usd": round(total_cost, 6),
+            "cost_per_second": round(cost_per_second, 6),
+            "tokens_per_dollar": int(tokens_per_dollar),
+            "efficiency_score": round(efficiency_score, 2),
+            "cost_breakdown": {
+                "input_cost": round(input_cost, 6),
+                "output_cost": round(output_cost, 6),
+                "total_cost": round(total_cost, 6)
+            },
+            "cache_analysis": {
+                "cache_eligible": cache_eligible,
+                "cache_savings_usd": round(cache_savings_usd, 6),
+                "cache_efficiency": round(cache_efficiency, 3),
+                "without_cache_cost": round(input_cost + output_cost, 6)
+            },
+            "performance_metrics": {
+                "tokens_per_second": round(tokens_per_second, 1),
+                "cost_per_input_token": round(pricing["input"] / 1_000_000, 6),
+                "cost_per_output_token": round(pricing["output"] / 1_000_000, 6),
+                "total_tokens": prompt_tokens + completion_tokens,
+                "cost_efficiency_rating": self._get_efficiency_rating(efficiency_score)
+            },
+            "optimization_suggestions": optimization_suggestions
+        }
+    
+    def _get_efficiency_rating(self, efficiency_score: float) -> str:
+        """根据效率分数获取评级"""
+        if efficiency_score >= 200:
+            return "Excellent"
+        elif efficiency_score >= 100:
+            return "Good"
+        elif efficiency_score >= 50:
+            return "Fair"
+        else:
+            return "Poor"
+    
     def _calculate_cost_metrics(self, token_usage: Dict, duration: float) -> Dict:
-        """💰 计算成本指标 - 支持多个LLM提供商的成本分析"""
-        # 基础成本计算（以GPT-4为基准，可配置）
-        cost_per_prompt_token = 0.00003  # $0.03 per 1K tokens
-        cost_per_completion_token = 0.00006  # $0.06 per 1K tokens
+        """💰 基于Gemini 2.5实际定价的精确成本计算"""
         
         prompt_tokens = token_usage.get('prompt_tokens', 0)
         completion_tokens = token_usage.get('completion_tokens', 0)
+        cached_tokens = token_usage.get('cached_tokens', 0)
+        model = token_usage.get('model', 'gemini-2.5-flash')
         
+        # 确保token数为数字类型
         if isinstance(prompt_tokens, str) or isinstance(completion_tokens, str):
-            # 如果是"unknown"等字符串，设为0
             prompt_tokens = 0
             completion_tokens = 0
         
-        estimated_cost = (prompt_tokens * cost_per_prompt_token + 
-                         completion_tokens * cost_per_completion_token) / 1000
-        
-        return {
-            "estimated_cost_usd": round(estimated_cost, 6),
-            "cost_per_second": round(estimated_cost / max(0.1, duration), 6),
-            "tokens_per_dollar": int((prompt_tokens + completion_tokens) / max(0.000001, estimated_cost)),
-            "efficiency_score": round(completion_tokens / max(0.1, duration), 2),  # tokens per second
-            "cost_breakdown": {
-                "prompt_cost": round(prompt_tokens * cost_per_prompt_token / 1000, 6),
-                "completion_cost": round(completion_tokens * cost_per_completion_token / 1000, 6)
+        # Gemini 2.5系列实际定价（美元每100万token）
+        pricing_config = {
+            "gemini-2.5-pro": {
+                "input": 1.25,      # $1.25 per 1M input tokens
+                "output": 10.0,     # $10.0 per 1M output tokens  
+                "cache": 0.3125,    # $0.3125 per 1M cached tokens (25% of input)
+                "storage_per_hour": 4.50  # $4.50 per 1M tokens per hour storage
+            },
+            "gemini-2.5-flash": {
+                "input": 0.30,      # $0.30 per 1M input tokens
+                "output": 2.50,     # $2.50 per 1M output tokens
+                "cache": 0.075,     # $0.075 per 1M cached tokens (25% of input)
+                "storage_per_hour": 1.0   # $1.0 per 1M tokens per hour storage
+            },
+            "gemini-2.5-flash-lite": {
+                "input": 0.10,      # $0.10 per 1M input tokens
+                "output": 0.40,     # $0.40 per 1M output tokens
+                "cache": 0.025,     # $0.025 per 1M cached tokens (25% of input)
+                "storage_per_hour": 1.0   # Same as flash
             }
         }
+        
+        # 获取模型定价，默认使用flash
+        pricing = pricing_config.get(model, pricing_config["gemini-2.5-flash"])
+        
+        # 计算实际输入成本（排除缓存部分）
+        actual_input_tokens = max(0, prompt_tokens - cached_tokens)
+        input_cost = (actual_input_tokens / 1_000_000) * pricing["input"]
+        
+        # 缓存成本（如果有使用缓存）
+        cache_cost = (cached_tokens / 1_000_000) * pricing["cache"]
+        
+        # 输出成本
+        output_cost = (completion_tokens / 1_000_000) * pricing["output"]
+        
+        # 总成本
+        total_cost = input_cost + cache_cost + output_cost
+        
+        # 计算如果没有缓存的成本（用于比较节省）
+        no_cache_cost = (prompt_tokens / 1_000_000) * pricing["input"] + output_cost
+        cache_savings = no_cache_cost - total_cost
+        
+        return {
+            "model": model,
+            "estimated_cost_usd": round(total_cost, 6),
+            "cost_per_second": round(total_cost / max(0.1, duration), 6),
+            "tokens_per_dollar": int((prompt_tokens + completion_tokens) / max(0.000001, total_cost)),
+            "efficiency_score": round(completion_tokens / max(0.1, duration), 2),
+            
+            # 详细成本分解
+            "cost_breakdown": {
+                "input_cost": round(input_cost, 6),
+                "cache_cost": round(cache_cost, 6),
+                "output_cost": round(output_cost, 6),
+                "total_cost": round(total_cost, 6)
+            },
+            
+            # 缓存效益分析
+            "cache_analysis": {
+                "cached_tokens": cached_tokens,
+                "cache_savings_usd": round(cache_savings, 6),
+                "cache_efficiency": round(cache_savings / max(0.000001, no_cache_cost) * 100, 2),
+                "without_cache_cost": round(no_cache_cost, 6)
+            },
+            
+            # 性能指标
+            "performance_metrics": {
+                "cost_per_input_token": round(total_cost / max(1, prompt_tokens) * 1000, 6),  # 每1K输入token成本
+                "cost_per_output_token": round(output_cost / max(1, completion_tokens) * 1000, 6),  # 每1K输出token成本
+                "total_tokens": prompt_tokens + completion_tokens,
+                "cost_efficiency_rating": self._calculate_cost_efficiency_rating(total_cost, prompt_tokens + completion_tokens)
+            },
+            
+            # 优化建议
+            "optimization_suggestions": self._generate_cost_optimization_suggestions(
+                model, total_cost, prompt_tokens, completion_tokens, cached_tokens
+            )
+        }
+    
+    def _calculate_cost_efficiency_rating(self, cost: float, total_tokens: int) -> str:
+        """计算成本效率评级"""
+        if total_tokens == 0:
+            return "N/A"
+        
+        cost_per_1k_tokens = (cost / total_tokens) * 1000
+        
+        if cost_per_1k_tokens <= 0.0001:
+            return "Excellent"
+        elif cost_per_1k_tokens <= 0.0005:
+            return "Good"
+        elif cost_per_1k_tokens <= 0.002:
+            return "Fair"
+        else:
+            return "Expensive"
+    
+    def _generate_cost_optimization_suggestions(self, model: str, cost: float, 
+                                              prompt_tokens: int, completion_tokens: int, 
+                                              cached_tokens: int) -> List[str]:
+        """生成成本优化建议"""
+        suggestions = []
+        
+        # 模型选择建议
+        if model == "gemini-2.5-pro" and completion_tokens < 1000:
+            suggestions.append("对于简短回复，考虑使用gemini-2.5-flash以降低成本")
+        
+        if model == "gemini-2.5-flash" and prompt_tokens > 50000:
+            suggestions.append("大量输入时，gemini-2.5-flash-lite可能更经济")
+        
+        # 缓存建议
+        if prompt_tokens > 1024 and cached_tokens == 0:
+            suggestions.append("输入超过1024 tokens，建议启用上下文缓存以节省成本")
+        
+        if cached_tokens > 0:
+            cache_ratio = cached_tokens / prompt_tokens
+            if cache_ratio > 0.5:
+                suggestions.append(f"缓存效果良好（{cache_ratio:.1%}），继续保持")
+            else:
+                suggestions.append("缓存使用率较低，可优化重复内容的识别")
+        
+        # 成本警告
+        if cost > 0.01:  # 超过1美分
+            suggestions.append("单次请求成本较高，建议检查输入长度和模型选择")
+        
+        # 效率建议
+        if completion_tokens > prompt_tokens * 2:
+            suggestions.append("输出远超输入，考虑优化prompt以获得更简洁的回复")
+        
+        return suggestions
     
     def _structure_error_details(self, error_details: str, raw_response: Dict, action: Dict) -> Dict:
         """🔧 结构化错误信息 - 便于自动化错误分析"""

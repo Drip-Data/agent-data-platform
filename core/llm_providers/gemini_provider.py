@@ -261,20 +261,76 @@ class GeminiProvider(ILLMProvider):
 
     async def count_tokens(self, text: str, model: str) -> int:
         """
-        计算给定文本在特定 Gemini 模型中的令牌数。
-        Gemini没有直接的tiktoken，这里使用粗略估计或未来集成Google的token计数API。
+        使用Gemini SDK的真实API计算给定文本在特定模型中的准确token数量
         """
-        # 暂时使用粗略估计，或者如果tiktoken支持Gemini模型，则使用tiktoken
         try:
-            encoding = tiktoken.encoding_for_model(model)
-            return len(encoding.encode(text))
-        except KeyError:
-            logger.warning(f"未找到模型 {model} 的 tiktoken 编码，将使用 cl100k_base 编码进行粗略估计。")
-            encoding = tiktoken.get_encoding("cl100k_base")
-            return len(encoding.encode(text))
+            # 验证模型名称
+            if model not in self._supported_models:
+                logger.warning(f"模型 {model} 不受支持，使用默认模型 {self._default_model}")
+                model = self._default_model
+            
+            # 构造请求payload
+            payload = {
+                "contents": [{"parts": [{"text": text}]}]
+            }
+            
+            # 调用Gemini count_tokens API
+            response = await self.client.post(
+                f"{self.api_url}/models/{model}:countTokens?key={self.api_key}",
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # 解析响应
+            if isinstance(result, dict) and "totalTokens" in result:
+                token_count = result["totalTokens"]
+                logger.debug(f"✅ Gemini API token计数: {token_count} tokens for {len(text)} characters")
+                return int(token_count)
+            else:
+                logger.warning(f"Gemini token计数API响应格式异常: {result}")
+                # 回退到改进的估算方法
+                return self._accurate_token_estimation_fallback(text)
+                
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Gemini token计数API HTTP错误: {e.response.status_code} - {e.response.text}")
+            return self._accurate_token_estimation_fallback(text)
         except Exception as e:
-            logger.error(f"计算令牌数失败: {e}")
-            return int(len(text) / 4) # 粗略估计，并转换为整数
+            logger.warning(f"Gemini token计数API调用失败: {e}, 使用估算方法")
+            return self._accurate_token_estimation_fallback(text)
+    
+    def _accurate_token_estimation_fallback(self, text: str) -> int:
+        """
+        当API调用失败时使用的高精度估算方法
+        基于Gemini tokenizer特性的改进估算
+        """
+        if not text:
+            return 0
+        
+        # 中文字符统计
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        japanese_chars = sum(1 for c in text if '\u3040' <= c <= '\u309f' or '\u30a0' <= c <= '\u30ff')
+        korean_chars = sum(1 for c in text if '\uac00' <= c <= '\ud7af')
+        
+        # 其他字符
+        other_chars = len(text) - chinese_chars - japanese_chars - korean_chars
+        
+        # 基于Gemini tokenizer的改进估算
+        # 中文: ~1.5 chars/token, 日文: ~2 chars/token, 韩文: ~2 chars/token, 英文: ~4 chars/token
+        estimated_tokens = int(
+            chinese_chars / 1.5 + 
+            japanese_chars / 2.0 + 
+            korean_chars / 2.0 + 
+            other_chars / 4.0
+        )
+        
+        # 考虑特殊标记和格式
+        special_tokens = text.count('<') + text.count('>') + text.count('{') + text.count('}')
+        estimated_tokens += int(special_tokens * 0.5)  # 特殊标记通常占用额外token
+        
+        return max(estimated_tokens, 1)
 
     def get_supported_models(self) -> List[str]:
         """

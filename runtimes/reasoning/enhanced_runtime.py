@@ -20,6 +20,9 @@ from core.memory_manager import MemoryManager
 from core.trajectory_enhancer import TrajectoryEnhancer
 from core.step_logger import StepDiagnosticLogger
 from core.intelligent_status_evaluator import IntelligentStatusEvaluator, intelligent_task_evaluation
+from core.intelligent_token_manager import IntelligentTokenManager
+from core.context_cache_manager import CacheStrategy
+from core.llm_providers.gemini_provider import GeminiProvider
 
 
 logger = logging.getLogger(__name__)
@@ -65,7 +68,55 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         )
         self.step_logger = StepDiagnosticLogger()
         self.intelligent_evaluator = IntelligentStatusEvaluator(self.client)
+        
+        # 🆕 初始化Token优化管理器
+        try:
+            # 从LLM客户端获取Gemini Provider
+            gemini_provider = self._get_gemini_provider()
+            if gemini_provider:
+                self.token_manager = IntelligentTokenManager(
+                    gemini_provider=gemini_provider,
+                    redis_manager=redis_manager,
+                    cache_strategy=CacheStrategy.BALANCED,
+                    token_budget_limit=1000000  # 100万token预算
+                )
+                logger.info("✅ Token管理器初始化成功")
+            else:
+                self.token_manager = None
+                logger.warning("⚠️ 无法获取Gemini Provider，Token管理器未启用")
+        except Exception as e:
+            logger.error(f"❌ Token管理器初始化失败: {e}")
+            self.token_manager = None
+        
         self.mcp_servers = self._load_mcp_config("config/mcp_servers.json")
+    
+    def _get_gemini_provider(self) -> Optional[GeminiProvider]:
+        """从LLM客户端获取Gemini Provider实例"""
+        try:
+            # 检查LLM客户端是否有provider属性
+            if hasattr(self.client, 'provider') and isinstance(self.client.provider, GeminiProvider):
+                return self.client.provider
+            
+            # 检查是否有providers字典
+            if hasattr(self.client, 'providers') and 'gemini' in self.client.providers:
+                provider = self.client.providers['gemini']
+                if isinstance(provider, GeminiProvider):
+                    return provider
+            
+            # 尝试从配置创建新的Gemini Provider
+            if hasattr(self.config_manager, 'get_llm_config'):
+                llm_config = self.config_manager.get_llm_config()
+                if 'gemini' in llm_config.get('llm_providers', {}):
+                    gemini_config = llm_config['llm_providers']['gemini']
+                    if gemini_config.get('enabled', False):
+                        return GeminiProvider(gemini_config)
+            
+            logger.warning("无法获取Gemini Provider，可能使用的是其他LLM提供商")
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取Gemini Provider失败: {e}")
+            return None
     
     def _load_mcp_config(self, config_path: str) -> dict:
         """从JSON文件加载并格式化MCP服务器配置。"""
@@ -801,20 +852,70 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             # 🔍 开始步骤日志记录
             self.step_logger.start_step(step)
             
-            # 1. 调用LLM，设置动态停止序列
+            # 1. 🆕 Token优化 - 优化消息以减少token消耗
+            original_history = history.copy()
+            optimized_history = history
+            optimization_info = {}
+            
+            if self.token_manager:
+                try:
+                    optimized_history, optimization_info = await self.token_manager.optimize_messages_with_cache(
+                        history, 
+                        model=getattr(self.client, 'model', 'gemini-2.5-flash'),
+                        session_id=getattr(task, 'session_id', task.task_id)
+                    )
+                    if optimization_info.get('tokens_saved', 0) > 0:
+                        logger.info(f"💰 Token优化: 节省 {optimization_info['tokens_saved']} tokens "
+                                  f"(${optimization_info['cost_saved']:.6f})")
+                except Exception as e:
+                    logger.warning(f"Token优化失败，使用原始消息: {e}")
+                    optimized_history = history
+            
+            # 2. 调用LLM，设置动态停止序列
             stop_sequences = ["<execute_tools />", "<execute_tools></execute_tools>", "</answer>"]
             llm_start_time = time.time()
-            response_text = await self.client._call_api(history, stop_sequences=stop_sequences)
+            response_text = await self.client._call_api(optimized_history, stop_sequences=stop_sequences)
             llm_end_time = time.time()
             
-            # 🔍 记录LLM调用
+            # 3. 🆕 Token使用统计和记录
+            token_usage = {}
+            if self.token_manager:
+                try:
+                    # 计算实际token使用
+                    prompt_text = " ".join([msg.get('content', '') for msg in optimized_history if isinstance(msg, dict)])
+                    prompt_tokens = await self.token_manager.count_tokens_accurately(prompt_text)
+                    completion_tokens = await self.token_manager.count_tokens_accurately(response_text)
+                    
+                    # 记录token使用
+                    await self.token_manager.record_token_usage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        model=getattr(self.client, 'model', 'gemini-2.5-flash'),
+                        task_id=task.task_id,
+                        session_id=getattr(task, 'session_id', None),
+                        cached_tokens=optimization_info.get('tokens_saved', 0)
+                    )
+                    
+                    token_usage = {
+                        'prompt_tokens': prompt_tokens,
+                        'completion_tokens': completion_tokens,
+                        'total_tokens': prompt_tokens + completion_tokens,
+                        'cached_tokens': optimization_info.get('tokens_saved', 0),
+                        'model': getattr(self.client, 'model', 'gemini-2.5-flash'),
+                        'data_source': 'api_provided'
+                    }
+                except Exception as e:
+                    logger.warning(f"Token统计失败: {e}")
+            
+            # 4. 🔍 记录LLM调用（包含详细token信息）
             triggered_stop = self._detect_triggered_stop_sequence(response_text, stop_sequences)
             self.step_logger.log_llm_call(
-                prompt=history,
+                prompt=original_history,  # 使用原始消息记录完整内容
                 raw_response=response_text,
                 stop_sequence=triggered_stop,
                 start_time=llm_start_time,
-                end_time=llm_end_time
+                end_time=llm_end_time,
+                token_usage=token_usage  # 🆕 传递详细的token使用信息
             )
             
             history.append({"role": "assistant", "content": response_text})
