@@ -101,11 +101,7 @@ class ToolInfoFormatter:
             }
         elif server_name == 'browser_use':
             action_categories = {
-                "Core Operations": ['browser_navigate', 'browser_search_google', 'browser_extract_content', 'browser_use_execute_task'],
-                "Page Interaction": ['browser_click_element', 'browser_input_text', 'browser_send_keys', 'browser_scroll_down', 'browser_scroll_up', 'browser_scroll_to_text'],
-                "Tab Management": ['browser_open_tab', 'browser_close_tab', 'browser_switch_tab', 'browser_go_back'],
-                "Advanced Features": ['browser_drag_drop', 'browser_screenshot', 'browser_save_pdf', 'browser_get_ax_tree', 'browser_get_dropdown_options', 'browser_select_dropdown_option'],
-                "Session Control": ['browser_wait', 'browser_done', 'browser_close_session', 'browser_get_page_info', 'browser_get_current_url']
+                "Core Operations": ['browser_navigate', 'browser_search_google', 'browser_extract_content', 'browser_use_execute_task']
             }
         elif server_name == 'deepsearch':
             action_categories = {
