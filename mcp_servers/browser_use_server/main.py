@@ -738,31 +738,133 @@ class BrowserUseMCPServer:
             return {"success": False, "error_message": f"获取内容时发生错误: {str(e)}"}
 
     async def _handle_google_search(self, query: str):
+        """增强的Google搜索处理，包含强化的内容提取和回退机制"""
         try:
+            # 第一步：尝试browser-use的内置搜索
             action_model = ActionModel(search_google=query)
             result = await self.controller.act(action=action_model, browser_context=self.browser_context)
+            
             if isinstance(result, ActionResult):
-                return {"success": not bool(result.error), "data": {"content": result.extracted_content, "is_done": result.is_done, "query": query}, "error_message": result.error or ""}
+                # 🔧 关键修复：检查内容是否真的有用
+                if result.extracted_content and result.extracted_content.strip() and len(result.extracted_content.strip()) > 10:
+                    logger.info(f"✅ Browser-use搜索成功，内容长度: {len(result.extracted_content)}")
+                    return {"success": True, "data": {"content": result.extracted_content, "is_done": result.is_done, "query": query}, "error_message": result.error or ""}
+                else:
+                    # 内容为空或太短，使用回退方案
+                    logger.warning(f"⚠️ Browser-use返回空内容，使用手动提取回退方案")
+                    return await self._manual_google_search_extraction(query)
             else:
                 return {"success": True, "data": {"content": str(result), "query": query}}
+                
         except Exception as e1:
-            logger.warning(f"search_google with ActionModel failed: {e1}")
-            try:
-                import urllib.parse
-                search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-                page = await self.browser_context.get_current_page()
-                await page.goto(search_url, wait_until='networkidle', timeout=30000)
-                title = await page.title()
-                return {"success": True, "data": {"content": f"Google search completed: {query}", "page_title": title}}
-            except Exception as e2:
-                logger.error(f"search_google fallback failed: {e2}")
-                return {"success": False, "error_message": f"Google search failed: {str(e2)}"}
+            logger.warning(f"🔧 search_google with ActionModel failed: {e1}")
+            return await self._manual_google_search_extraction(query)
+    
+    async def _manual_google_search_extraction(self, query: str):
+        """🔧 手动Google搜索和内容提取 - 强化的回退机制"""
+        try:
+            import urllib.parse
+            import asyncio
+            
+            search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+            page = await self.browser_context.get_current_page()
+            
+            # 导航到搜索页面
+            await page.goto(search_url, wait_until='networkidle', timeout=30000)
+            
+            # 等待页面完全加载
+            await asyncio.sleep(3)
+            
+            # 尝试多种策略提取搜索结果
+            search_results = []
+            extraction_methods = [
+                # 方法1：标准Google搜索结果
+                {'selector': 'div[data-ved] h3', 'name': 'data-ved标题'},
+                {'selector': '.g h3', 'name': 'g类标题'},
+                {'selector': 'h3', 'name': '所有h3标题'},
+                {'selector': '.LC20lb', 'name': 'LC20lb类'},
+                {'selector': '[role="heading"]', 'name': 'heading角色'},
+                # 方法2：链接文本
+                {'selector': 'a h3', 'name': '链接中的h3'},
+                {'selector': 'cite', 'name': '引用文本'},
+            ]
+            
+            for method in extraction_methods:
+                try:
+                    elements = await page.query_selector_all(method['selector'])
+                    if elements:
+                        logger.info(f"📋 使用 {method['name']} 提取到 {len(elements)} 个元素")
+                        for element in elements[:8]:  # 取前8个结果
+                            text = await element.text_content()
+                            if text and text.strip() and len(text.strip()) > 3:
+                                search_results.append(text.strip())
+                        
+                        if search_results:
+                            break  # 找到结果就停止尝试其他方法
+                            
+                except Exception as e:
+                    logger.debug(f"提取方法 {method['name']} 失败: {e}")
+                    continue
+            
+            # 如果仍然没有结果，尝试获取页面摘要
+            if not search_results:
+                try:
+                    # 获取页面标题和一些文本内容
+                    title = await page.title()
+                    body_text = await page.evaluate('() => document.body.innerText')
+                    
+                    if body_text and len(body_text) > 50:
+                        # 从body文本中提取前几行有意义的内容
+                        lines = [line.strip() for line in body_text.split('\n') if line.strip() and len(line.strip()) > 10]
+                        search_results = lines[:5]
+                        logger.info(f"📝 从页面文本提取到 {len(search_results)} 行内容")
+                    
+                except Exception as e:
+                    logger.debug(f"页面文本提取失败: {e}")
+            
+            # 构建最终结果
+            if search_results:
+                content = f"Google搜索查询: {query}\n\n搜索结果:\n"
+                for i, result in enumerate(search_results, 1):
+                    content += f"{i}. {result}\n"
+                
+                logger.info(f"✅ 手动搜索成功，提取到 {len(search_results)} 个结果")
+                return {
+                    "success": True, 
+                    "data": {
+                        "content": content,
+                        "query": query,
+                        "results_count": len(search_results),
+                        "extraction_method": "manual_fallback"
+                    }
+                }
+            else:
+                # 最后的回退：至少返回一些基本信息
+                page_title = await page.title()
+                logger.warning(f"⚠️ 无法提取搜索结果，返回基本信息")
+                return {
+                    "success": True,
+                    "data": {
+                        "content": f"Google搜索已完成查询: {query}\n页面标题: {page_title}\n注意: 由于页面结构限制，无法提取具体搜索结果，但搜索操作已成功执行。",
+                        "query": query,
+                        "page_title": page_title,
+                        "extraction_method": "basic_fallback"
+                    }
+                }
+                
+        except Exception as e2:
+            logger.error(f"❌ 手动Google搜索失败: {e2}")
+            return {
+                "success": False, 
+                "error_message": f"Google search failed: {str(e2)}",
+                "query": query
+            }
     
     async def _ensure_browser_session(self):
         """确保browser和context已初始化"""
         if self.browser is None:
             try:
-                # 增强的浏览器配置 - 移除不支持的chrome_path参数
+                # 🔧 增强的反检测浏览器配置
                 browser_config = BrowserConfig(
                     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
                     disable_security=True,     # 允许跨域访问
@@ -770,13 +872,29 @@ class BrowserUseMCPServer:
                         "--no-sandbox",
                         "--disable-dev-shm-usage", 
                         "--disable-gpu",
+                        # 🚀 核心反检测参数
                         "--disable-blink-features=AutomationControlled",
+                        "--disable-web-security",
+                        "--disable-features=VizDisplayCompositor",
+                        "--disable-ipc-flooding-protection",
+                        # 🔧 反爬虫对抗
+                        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                         "--disable-extensions",
                         "--no-first-run",
                         "--disable-default-apps",
                         "--disable-background-timer-throttling",
                         "--disable-backgrounding-occluded-windows",
-                        "--disable-renderer-backgrounding"
+                        "--disable-renderer-backgrounding",
+                        # 🎭 隐身模式增强
+                        "--disable-plugins",
+                        "--disable-images",  # 加快加载速度
+                        "--no-default-browser-check",
+                        "--disable-translate",
+                        "--disable-sync",
+                        # 🔐 额外反检测措施
+                        "--disable-component-extensions-with-background-pages",
+                        "--disable-background-networking",
+                        "--disable-domain-reliability"
                     ]
                 )
                 

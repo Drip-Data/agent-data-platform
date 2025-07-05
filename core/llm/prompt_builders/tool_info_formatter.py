@@ -112,6 +112,11 @@ class ToolInfoFormatter:
                 "Core Operations": ['search_file_content', 'list_code_definitions'],
                 "Advanced Features": ['analyze_tool_needs', 'search_and_install_tools']
             }
+        elif server_name == 'memory_staging':
+            action_categories = {
+                "Core Operations": ['memory_write', 'memory_read', 'memory_list'],
+                "Advanced Features": ['memory_search', 'memory_clear']
+            }
         else:
             action_categories = {"Core Operations": actions}
         
@@ -331,6 +336,33 @@ class ToolInfoFormatter:
                 'example': "need to process PDF files",
                 'use_case': "Search and install new tools for specific needs",
                 'parameters': "task_description (required), reason (optional)"
+            },
+            
+            # Memory Staging工具定义 - 解决信息孤岛问题
+            'memory_write': {
+                'example': '{"key": "stock_price_aapl", "value": 150.25, "data_type": "financial_data", "tags": ["stock", "apple"]}',
+                'use_case': "Save data to memory staging area for use in subsequent steps - CRITICAL for solving information silos",
+                'parameters': "key (required), value (required), data_type (optional), tags (optional), ttl_hours (optional)"
+            },
+            'memory_read': {
+                'example': '{"key": "stock_price_aapl"}',
+                'use_case': "Read previously saved data from memory staging area - use this to access data saved in earlier steps",
+                'parameters': "key (required)"
+            },
+            'memory_list': {
+                'example': '{"include_values": true}',
+                'use_case': "List all available data in memory staging area - see what data has been saved",
+                'parameters': "include_values (optional, default false)"
+            },
+            'memory_search': {
+                'example': '{"query": "stock price", "search_in_values": true}',
+                'use_case': "Search for relevant data in memory staging area by keywords",
+                'parameters': "query (required), search_in_values (optional, default true)"
+            },
+            'memory_clear': {
+                'example': '{"key": "old_data"}',
+                'use_case': "Clear specific data or all data from memory staging area",
+                'parameters': "key (optional - if not provided, clears all data)"
             }
         }
         

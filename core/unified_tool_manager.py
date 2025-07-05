@@ -26,6 +26,16 @@ from typing import Dict, List, Optional, Set, Any, Tuple
 from pathlib import Path
 import re
 
+# Import memory staging tools
+try:
+    from tools.memory_staging_tool import (
+        memory_write, memory_read, memory_list, 
+        memory_search, memory_clear, memory_staging
+    )
+    MEMORY_STAGING_AVAILABLE = True
+except ImportError:
+    MEMORY_STAGING_AVAILABLE = False
+
 # 设置日志
 logger = logging.getLogger(__name__)
 
@@ -396,6 +406,99 @@ class UnifiedToolManager:
                 tools.append(tool_info)
         
         return tools
+    
+    # ==================== 内存暂存工具直接执行 ====================
+    
+    def is_memory_staging_tool(self, tool_id: str) -> bool:
+        """检查是否为内存暂存工具"""
+        try:
+            standard_id = self.get_standard_id(tool_id)
+            return standard_id == "memory_staging"
+        except ValueError:
+            return False
+    
+    def execute_memory_staging_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        直接执行内存暂存工具动作
+        
+        Args:
+            action: 动作名称
+            parameters: 参数字典
+            
+        Returns:
+            执行结果
+        """
+        if not MEMORY_STAGING_AVAILABLE:
+            return {
+                "success": False,
+                "error": "memory_staging_not_available",
+                "message": "内存暂存工具不可用，请检查工具安装"
+            }
+        
+        try:
+            # 设置执行上下文
+            current_step = parameters.get("_current_step")
+            current_tool = parameters.get("_current_tool") 
+            if current_step or current_tool:
+                memory_staging.set_context(step=current_step, tool=current_tool)
+            
+            # 根据动作名称执行相应的函数
+            if action == "memory_write":
+                return memory_write(
+                    key=parameters["key"],
+                    value=parameters["value"],
+                    data_type=parameters.get("data_type"),
+                    tags=parameters.get("tags"),
+                    ttl_hours=parameters.get("ttl_hours")
+                )
+            elif action == "memory_read":
+                return memory_read(key=parameters["key"])
+            elif action == "memory_list":
+                return memory_list(include_values=parameters.get("include_values", False))
+            elif action == "memory_search":
+                return memory_search(
+                    query=parameters["query"],
+                    search_in_values=parameters.get("search_in_values", True)
+                )
+            elif action == "memory_clear":
+                return memory_clear(key=parameters.get("key"))
+            else:
+                return {
+                    "success": False,
+                    "error": "unknown_action",
+                    "message": f"未知的内存暂存动作: {action}"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ 执行内存暂存动作失败: {action}, 错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"执行内存暂存动作失败: {str(e)}"
+            }
+    
+    def get_memory_staging_status(self) -> Dict[str, Any]:
+        """获取内存暂存工具状态"""
+        if not MEMORY_STAGING_AVAILABLE:
+            return {
+                "available": False,
+                "error": "内存暂存工具不可用"
+            }
+        
+        try:
+            # 获取当前存储统计
+            stats = memory_staging.list_all()
+            return {
+                "available": True,
+                "storage_count": stats.get("total_count", 0),
+                "max_entries": memory_staging.max_entries,
+                "default_ttl_hours": memory_staging.default_ttl_hours
+            }
+        except Exception as e:
+            return {
+                "available": True,
+                "error": f"获取状态失败: {str(e)}"
+            }
     
     # ==================== 批量操作方法 ====================
     

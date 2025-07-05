@@ -9,6 +9,7 @@ tool_id_mappings:
     - microsandbox  
     - browser_use
     - mcp-search-tool
+    - memory_staging
   
   # 工具ID别名映射
   tool_aliases:
@@ -35,6 +36,13 @@ tool_id_mappings:
     search-tool: mcp-search-tool
     file-search: mcp-search-tool
     code-search: mcp-search-tool
+    
+    # Memory Staging工具别名
+    memory: memory_staging
+    staging: memory_staging
+    cache: memory_staging
+    storage: memory_staging
+    data-store: memory_staging
 
 # 动作映射 - 统一所有工具的动作名称
 action_mappings:
@@ -308,6 +316,51 @@ action_mappings:
       find_definitions: list_code_definitions
       get_definitions: list_code_definitions
 
+  # Memory Staging工具动作 - 解决信息孤岛问题
+  memory_staging:
+    canonical_actions:
+      - memory_write
+      - memory_read
+      - memory_list
+      - memory_search
+      - memory_clear
+    
+    action_aliases:
+      # 写入相关别名
+      write: memory_write
+      save: memory_write
+      store: memory_write
+      set: memory_write
+      put: memory_write
+      cache: memory_write
+      persist: memory_write
+      
+      # 读取相关别名
+      read: memory_read
+      get: memory_read
+      load: memory_read
+      fetch: memory_read
+      retrieve: memory_read
+      
+      # 列表相关别名
+      list: memory_list
+      show: memory_list
+      display: memory_list
+      index: memory_list
+      
+      # 搜索相关别名
+      search: memory_search
+      find: memory_search
+      query: memory_search
+      locate: memory_search
+      
+      # 清除相关别名
+      clear: memory_clear
+      delete: memory_clear
+      remove: memory_clear
+      purge: memory_clear
+      clean: memory_clear
+
 # 参数映射 - 统一参数名称
 parameter_mappings:
   # 通用参数别名
@@ -389,6 +442,19 @@ parameter_mappings:
       page_url: url
       website: url
       link: url
+
+    memory_staging:
+      # 键相关别名
+      name: key
+      identifier: key
+      id: key
+      tag: key
+      
+      # 数据相关别名
+      data: value
+      content: value
+      item: value
+      object: value
 
 # 错误修正映射 - 常见错误的自动修正
 error_corrections:
@@ -769,6 +835,58 @@ tool_parameters:
       reason:
         type: string
         description: "安装原因"
+        required: false
+
+  # Memory Staging工具参数定义 - 解决信息孤岛问题
+  memory_staging:
+    memory_write:
+      key:
+        type: string
+        description: "数据键名，用于后续检索"
+        required: true
+      value:
+        type: any
+        description: "要保存的数据值，可以是任何类型"
+        required: true
+      data_type:
+        type: string
+        description: "数据类型描述（可选）"
+        required: false
+      tags:
+        type: array
+        description: "标签列表，用于分类和搜索（可选）"
+        required: false
+      ttl_hours:
+        type: integer
+        description: "数据过期时间（小时），默认24小时（可选）"
+        required: false
+    
+    memory_read:
+      key:
+        type: string
+        description: "要读取的数据键名"
+        required: true
+    
+    memory_list:
+      include_values:
+        type: boolean
+        description: "是否包含具体数值，默认false只显示预览"
+        required: false
+    
+    memory_search:
+      query:
+        type: string
+        description: "搜索查询词"
+        required: true
+      search_in_values:
+        type: boolean
+        description: "是否在数据值中搜索，默认true"
+        required: false
+    
+    memory_clear:
+      key:
+        type: string
+        description: "要清除的键名，不提供则清除所有数据"
         required: false
 
 # 配置元数据

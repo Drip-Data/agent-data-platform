@@ -23,6 +23,11 @@ from core.intelligent_status_evaluator import IntelligentStatusEvaluator, intell
 from core.intelligent_token_manager import IntelligentTokenManager
 from core.context_cache_manager import CacheStrategy
 from core.llm_providers.gemini_provider import GeminiProvider
+from core.task_decomposer import TaskDecomposer, TaskComplexity
+from core.xml_parser_enhanced import EnhancedXMLParser
+from core.context_flow_manager import ContextFlowManager
+from core.smart_query_optimizer import SmartQueryOptimizer
+from core.tool_result_enhancer import ToolResultEnhancer
 
 
 logger = logging.getLogger(__name__)
@@ -69,6 +74,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         self.step_logger = StepDiagnosticLogger()
         self.intelligent_evaluator = IntelligentStatusEvaluator(self.client)
         
+        # 🆕 Stage 3: 任务分解器和增强XML解析器
+        self.task_decomposer = TaskDecomposer()
+        self.xml_parser = EnhancedXMLParser()
+        logger.info("✅ Stage 3组件初始化: TaskDecomposer & EnhancedXMLParser")
+        
+        # 🔄 Stage 4: 上下文流管理和工具优化组件
+        self.context_flow_manager = ContextFlowManager()
+        self.query_optimizer = SmartQueryOptimizer()
+        self.result_enhancer = ToolResultEnhancer()
+        logger.info("✅ Stage 4组件初始化: 信息传递优化系统")
+        
         # 🆕 初始化Token优化管理器
         try:
             # 从LLM客户端获取Gemini Provider
@@ -83,9 +99,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 logger.info("✅ Token管理器初始化成功")
             else:
                 self.token_manager = None
-                logger.warning("⚠️ 无法获取Gemini Provider，Token管理器未启用")
+                logger.info("ℹ️ Token管理器未启用 - 当前LLM提供商非Gemini或Gemini Provider不可用")
         except Exception as e:
-            logger.error(f"❌ Token管理器初始化失败: {e}")
+            logger.warning(f"⚠️ Token管理器初始化失败: {e}")
             self.token_manager = None
         
         self.mcp_servers = self._load_mcp_config("config/mcp_servers.json")
@@ -93,29 +109,74 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     def _get_gemini_provider(self) -> Optional[GeminiProvider]:
         """从LLM客户端获取Gemini Provider实例"""
         try:
-            # 检查LLM客户端是否有provider属性
-            if hasattr(self.client, 'provider') and isinstance(self.client.provider, GeminiProvider):
-                return self.client.provider
+            logger.debug("🔍 开始查找Gemini Provider...")
             
-            # 检查是否有providers字典
-            if hasattr(self.client, 'providers') and 'gemini' in self.client.providers:
-                provider = self.client.providers['gemini']
-                if isinstance(provider, GeminiProvider):
-                    return provider
+            # 调试信息：显示客户端属性
+            if hasattr(self.client, 'provider'):
+                logger.debug(f"🔍 LLM客户端provider类型: {type(self.client.provider)}, 值: {getattr(self.client.provider, 'value', 'N/A')}")
+            if hasattr(self.client, 'provider_instance'):
+                logger.debug(f"🔍 LLM客户端provider_instance类型: {type(self.client.provider_instance)}")
             
-            # 尝试从配置创建新的Gemini Provider
+            # 检查LLM客户端是否有provider_instance属性（正确的属性名）
+            if hasattr(self.client, 'provider_instance') and isinstance(self.client.provider_instance, GeminiProvider):
+                logger.info("✅ 找到LLM客户端中的Gemini Provider实例")
+                return self.client.provider_instance
+            
+            # 检查LLM客户端是否使用Gemini提供商
+            if hasattr(self.client, 'provider') and hasattr(self.client.provider, 'value') and self.client.provider.value == 'gemini':
+                if hasattr(self.client, 'provider_instance'):
+                    logger.info("✅ 通过provider枚举找到Gemini Provider实例")
+                    return self.client.provider_instance
+            
+            # 尝试从LLM客户端配置创建新的Gemini Provider
+            if hasattr(self.client, 'config'):
+                client_config = self.client.config
+                provider_name = client_config.get('provider') or client_config.get('default_provider')
+                logger.debug(f"🔍 LLM客户端配置的provider: {provider_name}")
+                
+                if provider_name and provider_name.lower() == 'gemini':
+                    # 创建新的Gemini Provider实例
+                    gemini_config = client_config.copy()
+                    if 'providers' in client_config and 'gemini' in client_config['providers']:
+                        gemini_provider_config = client_config['providers']['gemini']
+                        gemini_config.update(gemini_provider_config)
+                    
+                    # 确保API密钥可用
+                    if not gemini_config.get('api_key') or not gemini_config.get('gemini_api_key'):
+                        import os
+                        api_key = os.getenv('GEMINI_API_KEY')
+                        if api_key:
+                            gemini_config['api_key'] = api_key
+                            gemini_config['gemini_api_key'] = api_key
+                            logger.debug("🔍 从环境变量获取Gemini API Key")
+                    
+                    if gemini_config.get('api_key') or gemini_config.get('gemini_api_key'):
+                        logger.info("✅ 从LLM客户端配置创建新的Gemini Provider实例")
+                        return GeminiProvider(gemini_config)
+                    else:
+                        logger.warning("⚠️ Gemini配置存在但缺少API密钥")
+            
+            # 最后尝试：从配置管理器获取
             if hasattr(self.config_manager, 'get_llm_config'):
                 llm_config = self.config_manager.get_llm_config()
-                if 'gemini' in llm_config.get('llm_providers', {}):
-                    gemini_config = llm_config['llm_providers']['gemini']
-                    if gemini_config.get('enabled', False):
+                if 'providers' in llm_config and 'gemini' in llm_config['providers']:
+                    gemini_config = llm_config['providers']['gemini']
+                    if gemini_config.get('enabled', True):  # 默认启用
+                        # 确保API密钥可用
+                        if not gemini_config.get('api_key'):
+                            import os
+                            api_key = os.getenv('GEMINI_API_KEY')
+                            if api_key:
+                                gemini_config['api_key'] = api_key
+                        
+                        logger.info("✅ 从配置管理器创建Gemini Provider实例")
                         return GeminiProvider(gemini_config)
             
-            logger.warning("无法获取Gemini Provider，可能使用的是其他LLM提供商")
+            logger.info("ℹ️ 无法获取Gemini Provider - 当前系统使用非Gemini LLM提供商")
             return None
             
         except Exception as e:
-            logger.error(f"获取Gemini Provider失败: {e}")
+            logger.error(f"❌ 获取Gemini Provider失败: {e}")
             return None
     
     def _load_mcp_config(self, config_path: str) -> dict:
@@ -408,10 +469,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         return ""
 
-    async def _execute_tool(self, action: dict) -> str:
+    async def _execute_tool(self, action: dict, step_number: int = 0) -> str:
         """
         根据单个动作字典，通过toolscore_client调用对应的MCP Server并返回结果。
         🔧 完整修复：统一所有工具的结果格式化，使结果清晰易读
+        🔄 Stage 4增强：集成查询优化和结果增强
         """
         service_name = action.get('service')
         tool_name = action.get('tool')
@@ -419,6 +481,32 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
         if not all([service_name, tool_name]):
             return "Error: Invalid action format. 'service' and 'tool' are required."
+
+        # 🔄 Stage 4: 查询优化
+        optimized_input = tool_input
+        if service_name in ['deepsearch', 'browser_use'] and tool_input:
+            try:
+                # 分析和优化查询
+                query_analysis = self.query_optimizer.analyze_query(
+                    tool_input, 
+                    context=self.context_flow_manager.get_relevant_context(service_name, step_number)
+                )
+                
+                if query_analysis.confidence < 0.5 and query_analysis.optimized_queries:
+                    # 使用优化后的查询
+                    optimized_input = query_analysis.optimized_queries[0]
+                    logger.info(f"🔍 查询优化: {tool_input[:50]}... -> {optimized_input[:50]}...")
+                
+                # 添加上下文信息到查询
+                context_prompt = self.context_flow_manager.generate_context_prompt(
+                    service_name, step_number, tool_input
+                )
+                if context_prompt:
+                    optimized_input = f"{context_prompt}\n\nQuery: {optimized_input}"
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ 查询优化失败，使用原始查询: {e}")
+                optimized_input = tool_input
 
         # 映射服务到其期望的主要参数名
         param_mapping = {
@@ -428,7 +516,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         }
         # 默认参数名为 'input'
         param_name = param_mapping.get(service_name, "input")
-        parameters = {param_name: tool_input}
+        parameters = {param_name: optimized_input}
 
         logger.info(f"Executing via toolscore_client: service='{service_name}', tool='{tool_name}', params='{param_name}'")
 
@@ -439,12 +527,45 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 parameters=parameters
             )
             
+            # 🔄 Stage 4: 结果增强
+            enhanced_result = None
+            try:
+                enhanced_result = self.result_enhancer.enhance_tool_result(
+                    tool_name=service_name,
+                    raw_result=result,
+                    execution_context={
+                        "step_number": step_number,
+                        "original_query": tool_input,
+                        "optimized_query": optimized_input
+                    }
+                )
+                
+                # 提取上下文数据
+                self.context_flow_manager.extract_context_data(
+                    str(result), service_name, step_number
+                )
+                
+                # 记录查询结果用于学习
+                success = enhanced_result.result_type.value in ['success', 'partial_success']
+                query_type = self.query_optimizer._identify_query_type(tool_input)
+                self.query_optimizer.record_query_result(
+                    tool_input, query_type, success, str(result)
+                )
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 结果增强失败: {e}")
+            
             if isinstance(result, dict):
                 if result.get('success', True):
                     output = result.get('data', result.get('output', result.get('result', str(result))))
                     
                     # 🔧 完整修复：为所有工具统一结果格式化
                     formatted_output = self._format_tool_output(service_name, tool_name, output)
+                    
+                    # 🔄 Stage 4: 如果有增强结果，添加额外信息
+                    if enhanced_result and enhanced_result.confidence_score < 0.5:
+                        formatted_output += f"\n\n⚠️ 结果置信度较低 ({enhanced_result.confidence_score:.2f})，建议验证信息准确性。"
+                    
                     return formatted_output
                 else:
                     error_msg = result.get('error_message', result.get('error', 'Unknown error'))
@@ -492,7 +613,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 return self._format_search_tool_output(output)
             return str(output)
         
-        # 5. 其他工具 - 通用格式化
+        # 5. Memory Staging - 格式化内存暂存结果
+        elif service_name == 'memory_staging':
+            return self._format_memory_staging_output_generic(tool_name, output)
+        
+        # 6. 其他工具 - 通用格式化
         else:
             return self._format_generic_output(output)
     
@@ -772,6 +897,136 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.warning(f"Failed to format generic output: {e}")
             return str(output)
 
+    def _format_memory_staging_output(self, action: str, output: dict) -> str:
+        """格式化内存暂存工具输出 - 为工具执行方法使用"""
+        return self._format_memory_staging_output_generic(action, output)
+    
+    def _format_memory_staging_output_generic(self, action: str, output: dict) -> str:
+        """格式化内存暂存工具输出 - 通用格式化方法"""
+        try:
+            if not isinstance(output, dict):
+                return str(output)
+            
+            success = output.get("success", False)
+            
+            if action == "memory_write":
+                if success:
+                    key = output.get("key", "unknown")
+                    data_type = output.get("data_type", "unknown")
+                    return f"✅ 数据已保存到暂存区: {key} (类型: {data_type})"
+                else:
+                    error = output.get("error", "Unknown error")
+                    return f"❌ 保存数据失败: {error}"
+            
+            elif action == "memory_read":
+                if success:
+                    key = output.get("key", "unknown")
+                    value = output.get("value")
+                    data_type = output.get("data_type", "unknown")
+                    age = output.get("age_seconds", 0)
+                    
+                    # 格式化年龄
+                    if age < 60:
+                        age_str = f"{int(age)}秒前"
+                    elif age < 3600:
+                        age_str = f"{int(age/60)}分钟前"
+                    else:
+                        age_str = f"{int(age/3600)}小时前"
+                    
+                    # 格式化值预览
+                    if isinstance(value, (dict, list)):
+                        value_preview = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+                    else:
+                        value_preview = str(value)[:200] + "..." if len(str(value)) > 200 else str(value)
+                    
+                    return f"📖 从暂存区读取: {key}\n类型: {data_type} ({age_str})\n内容: {value_preview}"
+                else:
+                    error = output.get("error", "Unknown error")
+                    available_keys = output.get("available_keys", [])
+                    if available_keys:
+                        return f"❌ 读取失败: {error}\n可用键名: {', '.join(available_keys)}"
+                    else:
+                        return f"❌ 读取失败: {error}"
+            
+            elif action == "memory_list":
+                if success:
+                    entries = output.get("entries", [])
+                    total_count = output.get("total_count", 0)
+                    
+                    if total_count == 0:
+                        return "📋 暂存区为空"
+                    
+                    result_lines = [f"📋 暂存区内容 ({total_count} 项):"]
+                    for entry in entries[:10]:  # 只显示前10项
+                        key = entry.get("key", "unknown")
+                        data_type = entry.get("data_type", "unknown")
+                        age = entry.get("age_seconds", 0)
+                        
+                        if age < 60:
+                            age_str = f"{int(age)}秒前"
+                        elif age < 3600:
+                            age_str = f"{int(age/60)}分钟前"
+                        else:
+                            age_str = f"{int(age/3600)}小时前"
+                        
+                        result_lines.append(f"  - {key} ({data_type}) - {age_str}")
+                    
+                    if total_count > 10:
+                        result_lines.append(f"  ... 还有 {total_count - 10} 项")
+                    
+                    return "\n".join(result_lines)
+                else:
+                    error = output.get("error", "Unknown error")
+                    return f"❌ 列表获取失败: {error}"
+            
+            elif action == "memory_search":
+                if success:
+                    matches = output.get("matches", [])
+                    total_matches = output.get("total_matches", 0)
+                    query = output.get("query", "")
+                    
+                    if total_matches == 0:
+                        return f"🔍 搜索 '{query}' 无结果"
+                    
+                    result_lines = [f"🔍 搜索 '{query}' 找到 {total_matches} 个匹配项:"]
+                    for match in matches[:5]:  # 只显示前5个匹配
+                        key = match.get("key", "unknown")
+                        score = match.get("score", 0)
+                        reasons = match.get("match_reasons", [])
+                        value_preview = str(match.get("value", ""))[:100] + "..." if len(str(match.get("value", ""))) > 100 else str(match.get("value", ""))
+                        
+                        result_lines.append(f"  - {key} (分数: {score}, 匹配: {', '.join(reasons)})")
+                        result_lines.append(f"    内容: {value_preview}")
+                    
+                    if total_matches > 5:
+                        result_lines.append(f"  ... 还有 {total_matches - 5} 个匹配项")
+                    
+                    return "\n".join(result_lines)
+                else:
+                    error = output.get("error", "Unknown error")
+                    return f"❌ 搜索失败: {error}"
+            
+            elif action == "memory_clear":
+                if success:
+                    key = output.get("key")
+                    if key:
+                        return f"🗑️ 已清除暂存数据: {key}"
+                    else:
+                        cleared_count = output.get("cleared_count", 0)
+                        return f"🗑️ 已清空所有暂存数据 ({cleared_count} 项)"
+                else:
+                    error = output.get("error", "Unknown error")
+                    return f"❌ 清除失败: {error}"
+            
+            else:
+                # 未知动作，使用通用格式化
+                message = output.get("message", str(output))
+                return f"🔄 内存暂存操作 ({action}): {message}"
+        
+        except Exception as e:
+            logger.warning(f"Failed to format memory staging output: {e}")
+            return str(output)
+
     async def _execute_parallel(self, actions: list) -> list:
         """并发执行多个动作。"""
         import asyncio
@@ -832,6 +1087,26 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 🔍 启动步骤级日志记录
         self.step_logger.start_task(task.task_id, task.description)
+        
+        # 🆕 Stage 3: 智能任务分解
+        decomposition_result = None
+        if len(task.description) > 50:  # 对较复杂的任务进行分解
+            try:
+                decomposition_result = self.task_decomposer.decompose_task(task.description)
+                logger.info(f"📋 任务分解完成: {decomposition_result.complexity.value}, "
+                          f"{len(decomposition_result.steps)} 步骤, "
+                          f"预计 {decomposition_result.estimated_total_duration:.1f}秒")
+                
+                # 如果是极复杂任务，记录分解结果
+                if decomposition_result.complexity in [TaskComplexity.COMPLEX, TaskComplexity.VERY_COMPLEX]:
+                    logger.info(f"🎯 复杂任务执行策略: {decomposition_result.execution_strategy}")
+                    for i, step in enumerate(decomposition_result.steps[:3]):  # 只显示前3步
+                        logger.info(f"  步骤{i+1}: {step.description} ({step.action_type})")
+                    if len(decomposition_result.steps) > 3:
+                        logger.info(f"  ... 还有 {len(decomposition_result.steps)-3} 个步骤")
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ 任务分解失败，继续正常执行: {e}")
         
         # 准备历史记录
         available_tools = await self._get_available_tools()
@@ -951,23 +1226,41 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 self.step_logger.finish_step("task_completed_with_answer")
                 break
 
-            # 🔍 记录解析阶段
+            # 🔍 Stage 3增强：使用增强XML解析器
             parsing_start_time = time.time()
-            execution_block = self._parse_execution_block(response_text)
-            actions = execution_block.get("actions", [])
+            
+            # 使用增强XML解析器
+            parse_result = self.xml_parser.parse_xml_response(response_text)
+            actions = parse_result.actions
+            
+            # 记录解析详情
             think_content = self.step_logger._extract_think_content(response_text)
             execution_block_text = self.step_logger._extract_execution_block(response_text)
             parsing_end_time = time.time()
             
+            # 构建解析错误信息
+            parsing_errors = []
+            if not parse_result.success:
+                parsing_errors.extend(parse_result.errors)
+            if parse_result.warnings:
+                parsing_errors.extend([f"警告: {w}" for w in parse_result.warnings])
+            
+            # 记录解析结果（包含增强解析信息）
             self.step_logger.log_parsing_result(
                 think_content=think_content,
                 execution_block=execution_block_text,
                 answer_content=None,
                 actions=actions,
-                parsing_errors=[],
+                parsing_errors=parsing_errors,
                 start_time=parsing_start_time,
                 end_time=parsing_end_time
             )
+            
+            # 记录解析置信度和修复操作
+            if parse_result.repaired_xml:
+                logger.info(f"🔧 XML自动修复成功，置信度: {parse_result.confidence_score:.2f}")
+            if not parse_result.success and len(actions) > 0:
+                logger.warning(f"⚠️ 部分解析成功，提取到 {len(actions)} 个动作")
             
             # 检查是否是仅包含思考的最终答案
             think_tag = TaskExecutionConstants.XML_TAGS['THINK']
@@ -991,9 +1284,23 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 self.step_logger.finish_step("thought_only_final_answer")
                 break
 
-            # 🔧 根本修复：智能判断是否需要注入"无动作"消息
+            # 🔧 Stage 2 增强：复杂任务检测与强制执行机制
             if not actions:
-                # 🔧 Priority 3 增强：计划-执行桥梁机制 - 彻底解决计划-执行脱节问题
+                # 🚨 新增：复杂任务检测与强制执行
+                if self._is_complex_task_response(response_text):
+                    logger.warning("🚨 检测到复杂任务但无工具执行 - 强制执行第一步")
+                    
+                    # 尝试强制执行第一步
+                    force_execution_result = await self._force_first_step_execution(response_text, task)
+                    if force_execution_result:
+                        result_xml = force_execution_result
+                        history.append({"role": "assistant", "content": result_xml})
+                        full_trajectory.append({"role": "assistant", "content": result_xml})
+                        # 🔍 完成步骤记录
+                        self.step_logger.finish_step("complex_task_forced_execution")
+                        continue
+                
+                # 🔧 原有的计划-执行桥梁机制（作为备选方案）
                 plan_content = self._extract_detailed_plan(response_text)
                 if plan_content and self._has_executable_plan(plan_content):
                     logger.info("🎯 检测到详细计划但缺少执行动作，引导LLM开始执行")
@@ -1021,12 +1328,14 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     continue
                 
                 elif self._should_inject_no_action_message(response_text):
-                    logger.warning("No executable actions found in LLM response. Injecting guidance.")
-                    result_xml = self._format_result("No executable action detected in this step.")
+                    logger.warning("🚨 无可执行动作 - 使用增强指导")
+                    # 🔧 使用增强的指导消息
+                    enhanced_guidance = self._enhance_no_action_guidance(response_text)
+                    result_xml = self._format_result(enhanced_guidance)
                     history.append({"role": "assistant", "content": result_xml})
                     full_trajectory.append({"role": "assistant", "content": result_xml})
                     # 🔍 完成步骤记录
-                    self.step_logger.finish_step("no_action_injected")
+                    self.step_logger.finish_step("enhanced_no_action_guidance_injected")
                 else:
                     logger.info("✅ Detected thought-only response without tool execution - this is normal.")
                     # 🔍 完成步骤记录
@@ -1035,7 +1344,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
             # 4. 根据类型分发执行
             results = []
-            block_type = execution_block.get("type")
+            block_type = parse_result.execution_type or "single"
 
             # 对于串行块，我们只执行第一个动作。LLM将在下一轮根据结果决定后续步骤。
             if block_type == "sequential":
@@ -1403,8 +1712,24 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         return successful_executions / total_executions if total_executions > 0 else 0.0
     
     def _analyze_error_type(self, error_message: str) -> str:
-        """🔧 智能错误类型分析"""
+        """🔧 增强的智能错误类型分析 - 检测更多特定错误场景"""
         error_msg_lower = error_message.lower()
+        
+        # 🔍 空结果/无数据错误（高优先级检测）
+        if any(indicator in error_msg_lower for indicator in ['no results', 'empty result', 'no data found', '没有结果', '空结果', '未找到数据', 'empty response']):
+            return "empty_results"
+        
+        # ⏱️ 超时错误
+        if any(indicator in error_msg_lower for indicator in ['timeout', 'time out', 'timed out', '超时', '执行超时']):
+            return "timeout_error"
+        
+        # 🚫 服务不可用错误（需要在数据不可用之前检测）
+        if any(indicator in error_msg_lower for indicator in ['service unavailable', 'server error', '503', '502', '500', '服务不可用', 'service down']):
+            return "service_unavailable"
+        
+        # 📊 数据不可用错误  
+        if any(indicator in error_msg_lower for indicator in ['data not available', 'unavailable', '数据不可用', '不可用', 'data unavailable']):
+            return "data_not_available"
         
         # 参数错误
         if any(indicator in error_msg_lower for indicator in ['parameter', 'param', '参数', '无效参数']):
@@ -1415,7 +1740,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return "tool_not_found"
         
         # 网络/连接错误
-        if any(indicator in error_msg_lower for indicator in ['timeout', 'connection', 'network', 'connect', '超时']):
+        if any(indicator in error_msg_lower for indicator in ['connection', 'network', 'connect', 'connection refused', '网络']):
             return "network_error"
         
         # 验证错误
@@ -1429,7 +1754,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         return "unknown_error"
     
     def _format_error_with_recovery_suggestion(self, error_message: str, error_type: str, service_name: str, tool_name: str) -> str:
-        """🔧 格式化错误信息并提供恢复建议"""
+        """🔧 增强的错误格式化和恢复建议 - 针对具体错误类型提供详细指导"""
         base_error = f"Tool execution failed: {error_message}"
         
         recovery_suggestions = {
@@ -1438,6 +1763,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             "network_error": f"💡 建议: 网络连接问题。等待几秒后重试，或尝试使用替代工具。",
             "validation_error": f"💡 建议: 输入数据验证失败。检查输入格式和内容是否符合要求。",
             "permission_error": f"💡 建议: 权限不足。检查服务配置或尝试其他方法。",
+            "empty_results": f"🔍 建议: 搜索未找到结果。尝试:\n  • 使用不同的关键词或更简单的查询\n  • 切换到其他搜索工具 (如 deepsearch → browser_use)\n  • 检查数据是否已保存在内存暂存区: <memory_staging><memory_list></memory_list></memory_staging>",
+            "data_not_available": f"📊 建议: 数据不可用。尝试:\n  • 使用更广泛的搜索词\n  • 检查内存暂存区是否有相关数据: <memory_staging><memory_search>关键词</memory_search></memory_staging>\n  • 考虑使用示例数据（明确标记为模拟数据）",
+            "timeout_error": f"⏱️ 建议: 工具执行超时。尝试:\n  • 简化查询或操作\n  • 分步骤执行复杂任务\n  • 稍后重试",
+            "service_unavailable": f"🚫 建议: 服务不可用。尝试:\n  • 使用替代工具达到相同目标\n  • 稍后重试\n  • 使用缓存或内存中的数据",
             "unknown_error": f"💡 建议: 未知错误。尝试简化输入或使用其他工具替代。"
         }
         
@@ -2156,48 +2485,107 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         """执行工具调用并记录详细日志"""
         tool_start_time = time.time()
         
-        # 构建toolscore请求
+        # 构建工具执行参数
         service_name = action.get('service')
         tool_name = action.get('tool')
         tool_input = action.get('input')
         
-        param_mapping = {
-            "browser_use": "query",
-            "microsandbox": "code",
-            "deepsearch": "question"
-        }
-        param_name = param_mapping.get(service_name, "input")
-        
-        toolscore_request = {
-            "endpoint": f"http://127.0.0.1:{self._get_service_port(service_name)}/execute_tool",
-            "method": "POST",
-            "payload": {
+        # 🆕 检查是否为内存暂存工具
+        if self.tool_manager.is_memory_staging_tool(service_name):
+            logger.info(f"🔄 执行内存暂存工具: {service_name}.{tool_name}")
+            
+            # 解析工具输入参数
+            try:
+                # 对于内存暂存工具，tool_input可能是字符串或字典
+                if isinstance(tool_input, str):
+                    # 尝试解析为JSON
+                    try:
+                        import json
+                        parameters = json.loads(tool_input)
+                    except:
+                        # 如果解析失败，根据动作类型构建参数
+                        if tool_name in ["memory_write"]:
+                            # 对于写入操作，假设输入是要保存的值
+                            parameters = {"key": f"auto_key_{int(time.time())}", "value": tool_input}
+                        elif tool_name in ["memory_read", "memory_clear"]:
+                            parameters = {"key": tool_input}
+                        elif tool_name in ["memory_search"]:
+                            parameters = {"query": tool_input}
+                        else:
+                            parameters = {}
+                else:
+                    parameters = tool_input or {}
+                
+                # 设置执行上下文
+                parameters["_current_step"] = getattr(self, "_current_step_id", None)
+                parameters["_current_tool"] = service_name
+                
+                # 直接执行内存暂存工具
+                raw_result = self.tool_manager.execute_memory_staging_action(tool_name, parameters)
+                
+                formatted_result = self._format_memory_staging_output(tool_name, raw_result)
+                execution_status = "success" if raw_result.get("success", False) else "failure"
+                error_details = raw_result.get("error") if not raw_result.get("success", False) else None
+                
+            except Exception as e:
+                error_str = str(e)
+                raw_result = {"error": error_str, "success": False}
+                formatted_result = f"Memory staging tool execution failed: {error_str}"
+                execution_status = "failure"
+                error_details = error_str
+                
+            # 记录内存暂存工具调用（无需HTTP请求）
+            toolscore_request = {
+                "tool_type": "memory_staging",
                 "tool_id": service_name,
                 "action": tool_name,
-                "parameters": {param_name: tool_input}
+                "parameters": parameters if 'parameters' in locals() else {}
             }
-        }
-        
-        # 🔧 智能工具执行与错误分析
-        try:
-            raw_result = await self.toolscore_client.execute_tool(
-                tool_id=service_name,
-                action=tool_name,
-                parameters={param_name: tool_input}
-            )
             
-            formatted_result = self._format_tool_output(service_name, tool_name, raw_result)
-            execution_status = "success"
-            error_details = None
+        else:
+            # 原有的外部工具执行逻辑
+            param_mapping = {
+                "browser_use": "query",
+                "microsandbox": "code",
+                "deepsearch": "question"
+            }
+            param_name = param_mapping.get(service_name, "input")
             
-        except Exception as e:
-            error_str = str(e)
-            error_type = self._analyze_error_type(error_str)
+            toolscore_request = {
+                "endpoint": f"http://127.0.0.1:{self._get_service_port(service_name)}/execute_tool",
+                "method": "POST",
+                "payload": {
+                    "tool_id": service_name,
+                    "action": tool_name,
+                    "parameters": {param_name: tool_input}
+                }
+            }
             
-            raw_result = {"error": error_str, "success": False, "error_type": error_type}
-            formatted_result = self._format_error_with_recovery_suggestion(error_str, error_type, service_name, tool_name)
-            execution_status = "failure"
-            error_details = error_str
+            # 🔧 智能工具执行与错误分析
+            try:
+                raw_result = await self.toolscore_client.execute_tool(
+                    tool_id=service_name,
+                    action=tool_name,
+                    parameters={param_name: tool_input}
+                )
+                
+                formatted_result = self._format_tool_output(service_name, tool_name, raw_result)
+                execution_status = "success"
+                error_details = None
+                
+                # 🧠 检测工具结果中的潜在问题并提供智能指导
+                smart_guidance = self._provide_smart_recovery_guidance(raw_result, service_name, tool_name)
+                if smart_guidance:
+                    formatted_result += f"\n\n{smart_guidance}"
+                
+            except Exception as e:
+                error_str = str(e)
+                error_type = self._analyze_error_type(error_str)
+                
+                raw_result = {"error": error_str, "success": False, "error_type": error_type}
+                formatted_result = self._format_error_with_recovery_suggestion(error_str, error_type, service_name, tool_name)
+                execution_status = "failure"
+                error_details = error_str
         
         tool_end_time = time.time()
         
@@ -2263,4 +2651,232 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             await self.toolscore_client.close()
         self.is_initialized = False
         logger.info("✅ 资源清理完成")
+    
+    # 🚨 阶段2新增：复杂任务检测和强制执行机制
+    
+    def _is_complex_task_response(self, response_text: str) -> bool:
+        """检测是否为复杂任务响应（可能导致规划-执行脱节）"""
+        complex_indicators = [
+            # 中文指示符
+            '多步', '分析', '研究', '综合', '详细', 
+            '第一步', '第二步', '第三步',
+            '然后', '接下来', '最后',
+            '需要', '包含', '涉及',
+            '方法论', '方法', '策略',
+            # 英文指示符
+            'step 1', 'step 2', 'step 3', 'first', 'then', 'next', 'finally',
+            'comprehensive', 'detailed', 'analysis', 'research', 'methodology',
+            'approach', 'strategy', 'multiple', 'several', 'various',
+            'I need to', 'I will', 'let me', 'plan', 'outline'
+        ]
+        
+        # 检查是否包含复杂任务指示符
+        text_lower = response_text.lower()
+        indicator_count = sum(1 for indicator in complex_indicators if indicator in text_lower)
+        
+        # 检查是否包含多步骤编号
+        import re
+        step_patterns = [
+            r'\d+[.)] *[^\n]*',  # 1. 或 1)
+            r'step\s*\d+',  # step 1, step 2
+            r'第[\u4e00二三四五六七八九十]*步',  # 第一步, 第二步
+        ]
+        
+        has_step_numbering = any(re.search(pattern, text_lower) for pattern in step_patterns)
+        
+        # 检查响应长度（过长的规划性响应）
+        is_long_response = len(response_text) > 1000
+        
+        # 综合判断
+        is_complex = (
+            indicator_count >= 3 or  # 多个复杂指示符
+            has_step_numbering or    # 包含步骤编号
+            (indicator_count >= 2 and is_long_response)  # 指示符+长响应
+        )
+        
+        if is_complex:
+            logger.debug(f"🚨 检测到复杂任务响应: indicators={indicator_count}, steps={has_step_numbering}, long={is_long_response}")
+        
+        return is_complex
+    
+    async def _force_first_step_execution(self, response_text: str, task: 'TaskSpec') -> Optional[str]:
+        """强制执行第一步机制"""
+        try:
+            # 分析响应中的可执行内容
+            executable_action = self._extract_actionable_content(response_text)
+            
+            if executable_action:
+                logger.info(f"🔥 强制执行第一步: {executable_action}")
+                
+                # 生成强制执行指令
+                force_execution_prompt = (
+                    f"🚨 EXECUTION ENFORCEMENT: You provided planning but no tool execution. "
+                    f"This will cause task failure. You MUST execute the first step immediately.\n\n"
+                    f"Based on your plan, the first action should be: {executable_action}\n\n"
+                    f"Please execute this action now using the proper tool format and end with <execute_tools />. "
+                    f"Remember: Every complex task requires immediate execution after planning!"
+                )
+                
+                return self._format_result(force_execution_prompt)
+                
+            else:
+                # 通用强制指令
+                generic_force_prompt = (
+                    f"🚨 CRITICAL EXECUTION FAILURE: Complex task detected but no tool execution found. "
+                    f"This pattern causes complete task failure.\n\n"
+                    f"You MUST start executing immediately. Choose ONE concrete action you can take right now "
+                    f"and execute it using proper XML tool format. End with <execute_tools />.\n\n"
+                    f"Example actions you could take:\n"
+                    f"- Search for information: <deepsearch><research>topic</research></deepsearch>\n"
+                    f"- Browse for data: <browser_use><browser_search_google>query</browser_search_google></browser_use>\n"
+                    f"- Analyze data: <microsandbox><microsandbox_execute>code</microsandbox_execute></microsandbox>\n\n"
+                    f"Act NOW to prevent task failure!"
+                )
+                
+                return self._format_result(generic_force_prompt)
+                
+        except Exception as e:
+            logger.error(f"⚠️ 强制执行机制失败: {e}")
+            return None
+    
+    def _extract_actionable_content(self, response_text: str) -> Optional[str]:
+        """从响应中提取可执行的内容"""
+        import re
+        
+        # 常见的可执行动作模式
+        action_patterns = [
+            # 中文模式 - 改进的模式匹配
+            r'搜索(.+?)(?:\n|$)',
+            r'查找(.+?)(?:\n|$)',
+            r'研究(.+?)(?:\n|$)',
+            r'分析(.+?)(?:\n|$)',
+            r'调研(.+?)(?:\n|$)',
+            # 英文模式 - 改进的模式匹配
+            r'search for (.+?)(?:\n|$)',
+            r'research (.+?)(?:\n|$)',
+            r'analyze (.+?)(?:\n|$)',
+            r'look up (.+?)(?:\n|$)',
+            r'find (.+?)(?:\n|$)',
+            r'investigate (.+?)(?:\n|$)',
+            # 第一步模式 - 更精确的匹配
+            r'第一步[:\uff1a]?\s*(.+?)(?:\n|$)',
+            r'首先(.+?)(?:\n|$)',
+            r'step 1[:\uff1a]?\s*(.+?)(?:\n|$)',
+            r'first[,\uff0c]?\s*(.+?)(?:\n|$)',
+            # 通用动作模式
+            r'我需要(.+?)(?:\n|$)',
+            r'i need to (.+?)(?:\n|$)',
+        ]
+        
+        for pattern in action_patterns:
+            match = re.search(pattern, response_text, re.IGNORECASE)
+            if match:
+                action = match.group(1).strip()
+                # 清理动作内容
+                action = re.sub(r'^[:\uff1a\s]+', '', action)  # 移除开头的冒号和空格
+                action = re.sub(r'[。\.\n]+$', '', action)  # 移除结尾的句号和换行
+                
+                if len(action) > 5:  # 确保动作有意义
+                    return action[:100]  # 限制长度
+        
+        return None
+    
+    def _enhance_no_action_guidance(self, response_text: str) -> str:
+        """增强的无动作指导"""
+        # 检查是否是复杂任务
+        if self._is_complex_task_response(response_text):
+            return (
+                "🚨 CRITICAL: Complex task detected with no execution. This causes task failure!\n\n"
+                "You MUST execute tools immediately. Choose ONE action and do it now:\n"
+                "- 🔍 Search: <deepsearch><research>topic</research></deepsearch>\n"
+                "- 🌍 Browse: <browser_use><browser_search_google>query</browser_search_google></browser_use>\n"
+                "- 📊 Analyze: <microsandbox><microsandbox_execute>code</microsandbox_execute></microsandbox>\n"
+                "- 🔄 Check Memory: <memory_staging><memory_list></memory_list></memory_staging>\n\n"
+                "End with <execute_tools /> or the task will fail completely!"
+            )
+        else:
+            return "No executable action detected in this step. Please provide a tool call with proper XML format."
+    
+    def _detect_tool_result_issues(self, raw_result: Any, service_name: str, tool_name: str) -> tuple[bool, str]:
+        """🔧 检测工具执行结果中的常见问题，提供智能指导"""
+        
+        # 将结果转换为字符串用于分析
+        result_str = str(raw_result).lower()
+        
+        # 🔧 专门检测browser_use空内容问题
+        if service_name == "browser_use" and tool_name == "browser_search_google":
+            # 检查是否包含"content": none或类似的空内容标志
+            if any(indicator in result_str for indicator in [
+                "'content': none", '"content": null', 'content": none',
+                "'extracted_content': none", '"extracted_content": null'
+            ]):
+                guidance = (
+                    f"🔧 Browser搜索返回空内容 - 这是已知的技术问题。建议立即尝试:\n"
+                    f"• 切换到DeepSearch工具: <deepsearch><research>{tool_name.replace('browser_search_google', '相关查询')}</research></deepsearch>\n"
+                    f"• 或使用更简单的关键词重试browser搜索\n"
+                    f"• 检查内存暂存区是否有相关数据: <memory_staging><memory_list></memory_list></memory_staging>\n"
+                    f"• DeepSearch通常在browser_use失败时表现更好"
+                )
+                return True, guidance
+        
+        # 检测空搜索结果
+        if any(indicator in result_str for indicator in [
+            'no results', 'empty', 'not found', '没有结果', '未找到', 
+            'no data', 'no information', '无数据', '无信息'
+        ]):
+            guidance = (
+                f"🔍 {service_name} 搜索未找到结果。建议尝试:\n"
+                f"• 使用更简单或不同的关键词\n"
+                f"• 切换到其他搜索工具 (deepsearch ↔ browser_use)\n"
+                f"• 检查内存暂存区中的相关数据: <memory_staging><memory_search>相关词</memory_search></memory_staging>\n"
+                f"• 如果确实无法找到，考虑使用示例数据并明确说明"
+            )
+            return True, guidance
+        
+        # 检测超时或连接问题
+        if any(indicator in result_str for indicator in [
+            'timeout', 'connection', 'network error', '超时', '连接'
+        ]):
+            guidance = (
+                f"⏱️ {service_name} 连接或超时问题。建议:\n"
+                f"• 稍等片刻后重试\n"
+                f"• 尝试使用其他工具达到相同目标\n"
+                f"• 简化查询或操作"
+            )
+            return True, guidance
+        
+        # 检测权限或访问问题
+        if any(indicator in result_str for indicator in [
+            'forbidden', 'unauthorized', 'access denied', '拒绝访问', '权限'
+        ]):
+            guidance = (
+                f"🚫 {service_name} 访问受限。建议:\n"
+                f"• 尝试使用其他公开数据源\n"
+                f"• 使用不同的搜索策略\n"
+                f"• 考虑使用内存中已有的数据"
+            )
+            return True, guidance
+        
+        # 检测服务错误
+        if any(indicator in result_str for indicator in [
+            'error', 'failed', 'exception', '错误', '失败'
+        ]):
+            guidance = (
+                f"🔧 {service_name} 执行出错。建议:\n"
+                f"• 检查参数格式是否正确\n"
+                f"• 尝试简化操作\n"
+                f"• 使用替代方法或工具"
+            )
+            return True, guidance
+        
+        return False, ""
+    
+    def _provide_smart_recovery_guidance(self, raw_result: Any, service_name: str, tool_name: str) -> str:
+        """🧠 为工具执行结果提供智能恢复指导"""
+        has_issue, guidance = self._detect_tool_result_issues(raw_result, service_name, tool_name)
+        
+        if has_issue:
+            return f"{guidance}\n\n💡 你可以在下一步尝试建议的方法，或继续使用现有信息。"
+        
+        return ""
     
