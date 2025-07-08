@@ -135,10 +135,10 @@ class ToolInfoFormatter:
         real_params = self._get_real_parameters(server_name, action_name)
         
         tool_definitions = {
-            # MicroSandbox工具定义
+            # MicroSandbox工具定义 
             'microsandbox_execute': {
                 'example': "print('Hello World'); result = 2 + 3; print(result)",
-                'use_case': "Execute Python code in secure sandbox environment",
+                'use_case': "Execute Python code in secure sandbox environment. You can use 'execute', 'run', or 'microsandbox_execute'",
                 'parameters': "code (required), session_id (optional), timeout (optional)"
             },
             'microsandbox_install_package': {

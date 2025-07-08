@@ -80,10 +80,16 @@ class IntelligentCache:
         
         # 初始化时加载持久化缓存
         try:
-            asyncio.create_task(self._load_persistent_cache())
+            # 检查是否有运行中的事件循环
+            loop = asyncio.get_running_loop()
+            if loop and not loop.is_closed():
+                asyncio.create_task(self._load_persistent_cache())
+            else:
+                # 同步加载缓存
+                self._load_persistent_cache_sync()
         except RuntimeError:
-            # 在同步环境中跳过异步初始化
-            pass
+            # 在同步环境中使用同步加载
+            self._load_persistent_cache_sync()
     
     async def _load_persistent_cache(self):
         """异步加载持久化缓存"""
@@ -139,6 +145,32 @@ class IntelligentCache:
             
         except Exception as e:
             logger.error(f"Failed to save persistent cache: {e}")
+    
+    def _load_persistent_cache_sync(self):
+        """同步加载持久化缓存"""
+        try:
+            cache_file = self.cache_dir / "cache_entries.json"
+            if cache_file.exists():
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                loaded_count = 0
+                for entry_data in data.get('entries', []):
+                    try:
+                        entry = CacheEntry.from_dict(entry_data)
+                        if not entry.is_expired():
+                            self._memory_cache[entry.question_hash] = entry
+                            loaded_count += 1
+                    except Exception as entry_error:
+                        logger.warning(f"Failed to load cache entry: {entry_error}")
+                        continue
+                
+                logger.info(f"Loaded {loaded_count} valid cache entries from persistent storage (sync)")
+            else:
+                logger.debug("No persistent cache file found, starting with empty cache")
+                
+        except Exception as e:
+            logger.error(f"Failed to load persistent cache (sync): {e}")
     
     def _generate_cache_key(self, question: str, research_depth: str = "standard") -> str:
         """生成缓存键"""

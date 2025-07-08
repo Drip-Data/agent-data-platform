@@ -200,6 +200,22 @@ class TaskValidationResult:
     # 验证元数据
     validation_method: str = "llm_verification"
     validated_at: datetime = field(default_factory=datetime.now)
+    
+    @property
+    def validation_reason(self) -> str:
+        """获取验证失败原因的简要描述"""
+        if self.is_valid:
+            return "Task passed validation"
+        
+        reasons = []
+        if not self.atomicity_check:
+            reasons.append("不符合原子性要求")
+        if not self.tool_necessity_check:
+            reasons.append("不需要工具调用")
+        if self.reasoning_sufficiency_check:
+            reasons.append("仅通过推理即可解决")
+            
+        return "; ".join(reasons) if reasons else "Unknown validation failure"
 
 
 @dataclass

@@ -410,7 +410,8 @@ class ReasoningPromptBuilder(IPromptBuilder):
         5. **Acknowledge Limits**: If multiple attempts fail, clearly explain the limitation and proceed with available information
 
         **TOOL USAGE GUIDELINES**:
-        - 🔧 **MicroSandbox**: Use `<microsandbox><microsandbox_execute>your_python_code</microsandbox_execute></microsandbox>` (NOT execute_python)
+        - 🔧 **MicroSandbox**: Use `<microsandbox><execute>your_python_code</execute></microsandbox>` or `<microsandbox><microsandbox_execute>your_python_code</microsandbox_execute></microsandbox>`
+          - ✅ **Action Aliases**: You can use 'execute', 'run', 'exec', or 'microsandbox_execute' - all are valid
           - ✅ **DO**: Small, focused calculations or analysis on data you received from other tools
           - ❌ **DON'T**: Large scripts that simulate data or solve everything at once
         - 🔧 **Browser**: Use `<browser_use><browser_search_google>your_query</browser_search_google></browser_use>` with proper query format

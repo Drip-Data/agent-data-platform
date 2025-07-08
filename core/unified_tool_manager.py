@@ -220,6 +220,25 @@ class UnifiedToolManager:
         """
         return sorted(self._standard_ids)
     
+    def _get_canonical_action(self, tool_id: str, action: str) -> str:
+        """
+        🔧 获取动作的标准名称（处理别名映射）
+        
+        Args:
+            tool_id: 工具ID
+            action: 动作名称（可能是别名）
+            
+        Returns:
+            标准动作名称
+        """
+        try:
+            from core.config.unified_mapping_manager import get_unified_mapping_manager
+            mapping_manager = get_unified_mapping_manager()
+            return mapping_manager.get_canonical_action(tool_id, action)
+        except Exception as e:
+            logger.debug(f"动作别名映射失败: {e}，使用原始动作名称")
+            return action
+    
     def is_valid_tool_id(self, tool_id: str) -> bool:
         """
         ✅ 检查工具ID是否有效
@@ -255,18 +274,20 @@ class UnifiedToolManager:
     
     def is_valid_action(self, tool_id: str, action: str) -> bool:
         """
-        ✅ 检查工具动作是否有效
+        ✅ 检查工具动作是否有效（支持动作别名）
         
         Args:
             tool_id: 工具ID
-            action: 动作名称
+            action: 动作名称（可以是别名）
             
         Returns:
             True表示有效，False表示无效
         """
         try:
+            # 🔧 关键修复：集成动作别名映射
+            canonical_action = self._get_canonical_action(tool_id, action)
             valid_actions = self.get_tool_actions(tool_id)
-            return action in valid_actions
+            return canonical_action in valid_actions
         except ValueError:
             return False
     
@@ -523,16 +544,20 @@ class UnifiedToolManager:
             errors.append(str(e))
             return False, errors
         
-        # 验证动作
+        # 🔧 关键修复：验证动作（支持别名）
+        canonical_action = self._get_canonical_action(standard_id, action)
         if not self.is_valid_action(standard_id, action):
             valid_actions = self.get_tool_actions(standard_id)
-            errors.append(f"工具 {standard_id} 不支持动作 {action}，可用动作: {valid_actions}")
+            if action != canonical_action:
+                errors.append(f"工具 {standard_id} 不支持动作 {action}（映射为 {canonical_action}），可用动作: {valid_actions}")
+            else:
+                errors.append(f"工具 {standard_id} 不支持动作 {action}，可用动作: {valid_actions}")
             return False, errors
         
-        # 验证参数
+        # 验证参数（使用标准动作名称）
         try:
-            required_params = self.get_required_parameters(standard_id, action)
-            param_definitions = self.get_action_parameters(standard_id, action)
+            required_params = self.get_required_parameters(standard_id, canonical_action)
+            param_definitions = self.get_action_parameters(standard_id, canonical_action)
             
             # 检查必需参数
             missing_params = []

@@ -12,6 +12,8 @@ import logging
 import os
 import json
 import time
+import re  # 🔧 修复：将re模块移到全局导入，避免作用域问题
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 
@@ -55,6 +57,7 @@ except ImportError as e:
     sys.exit(1)
 from core.llm_client import LLMClient
 from core.unified_tool_manager import UnifiedToolManager
+from core.shared_workspace import get_workspace_manager
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,6 @@ class StructuredOutputWrapper:
             
             # Try to parse as JSON for structured output
             import json
-            import re
             try:
                 # First try to parse directly
                 parsed = json.loads(content)
@@ -114,6 +116,7 @@ class StructuredOutputWrapper:
     
     async def ainvoke(self, input_data, config=None, **kwargs):
         """Async invoke the wrapped LLM and return structured response"""
+        import re  # 🔧 修复：在异步函数内部导入re模块，避免作用域问题
         try:
             # Get response from the LLM using apredict_messages if available
             if hasattr(self.llm_adapter, 'apredict_messages') and isinstance(input_data, list):
@@ -139,7 +142,6 @@ class StructuredOutputWrapper:
             
             # Try to parse as JSON for structured output
             import json
-            import re
             try:
                 # First try to parse directly
                 parsed = json.loads(content)
@@ -206,6 +208,316 @@ class MockActionModel:
         for action_params in self.action_data.values():
             if isinstance(action_params, dict):
                 action_params['index'] = index
+
+
+class BrowserUseResultAnalyzer:
+    """Browser-Use风格的结果分析器 - 模仿AgentHistoryList的功能"""
+    
+    def __init__(self, agent_history):
+        self.history = agent_history
+    
+    def extract_comprehensive_result(self, task: str) -> Dict[str, Any]:
+        """全面的结果提取 - 模仿Browser-Use的逻辑"""
+        
+        # 1. 基础状态检查
+        if not self.history or not hasattr(self.history, 'history') or not self.history.history:
+            return self._create_error_result("No execution history found", task)
+        
+        # 2. 获取Browser-Use的原生方法结果
+        final_result = self._get_final_result()
+        is_done = self._is_done()
+        is_successful = self._is_successful()
+        has_errors = self._has_errors()
+        
+        # 3. 提取执行统计
+        steps_taken = len(self.history.history)
+        total_duration = self._get_total_duration()
+        error_list = self._get_errors()
+        
+        # 4. 获取最后一步的详细信息
+        last_step = self.history.history[-1] if self.history.history else None
+        
+        # 5. 构建综合结果
+        result_data = {
+            "success": self._determine_overall_success(is_done, is_successful, has_errors),
+            "data": {
+                "task": task,
+                "result": final_result or self._extract_fallback_content(),
+                "is_done": is_done,
+                "is_successful": is_successful,
+                "steps_taken": steps_taken,
+                "total_duration_seconds": total_duration,
+                "has_errors": has_errors,
+                "error_count": len([e for e in error_list if e is not None]),
+                "last_action": self._get_last_action(),
+                "extracted_contents": self._get_extracted_content(),
+                "urls_visited": self._get_unique_urls(),
+                "attachments": self._extract_attachments(),
+                "execution_summary": self._create_execution_summary(),
+                "action_breakdown": self._get_action_breakdown()
+            },
+            "error_message": self._get_primary_error_message(),
+            "error_type": self._classify_error_type(),
+            "debug_info": {
+                "browser_use_version": getattr(self.history, 'version', 'unknown'),
+                "raw_final_result": final_result,
+                "history_length": steps_taken,
+                "last_step_details": self._get_last_step_debug_info()
+            }
+        }
+        
+        # 确保结果是JSON可序列化的
+        return self._ensure_json_serializable(result_data)
+    
+    def _get_final_result(self):
+        """模仿Browser-Use的final_result()方法"""
+        try:
+            return self.history.final_result() if hasattr(self.history, 'final_result') else None
+        except Exception as e:
+            logger.debug(f"Error getting final_result: {e}")
+            return None
+    
+    def _is_done(self):
+        """模仿Browser-Use的is_done()方法"""
+        try:
+            return self.history.is_done() if hasattr(self.history, 'is_done') else False
+        except Exception as e:
+            logger.debug(f"Error checking is_done: {e}")
+            return False
+    
+    def _is_successful(self):
+        """模仿Browser-Use的is_successful()方法"""
+        try:
+            return self.history.is_successful() if hasattr(self.history, 'is_successful') else None
+        except Exception as e:
+            logger.debug(f"Error checking is_successful: {e}")
+            return None
+    
+    def _has_errors(self):
+        """模仿Browser-Use的has_errors()方法"""
+        try:
+            return self.history.has_errors() if hasattr(self.history, 'has_errors') else False
+        except Exception as e:
+            logger.debug(f"Error checking has_errors: {e}")
+            return False
+    
+    def _get_total_duration(self):
+        """获取总执行时间"""
+        try:
+            return self.history.total_duration_seconds() if hasattr(self.history, 'total_duration_seconds') else 0.0
+        except Exception as e:
+            logger.debug(f"Error getting total_duration: {e}")
+            return 0.0
+    
+    def _get_errors(self):
+        """获取错误列表"""
+        try:
+            return self.history.errors() if hasattr(self.history, 'errors') else []
+        except Exception as e:
+            logger.debug(f"Error getting errors: {e}")
+            return []
+    
+    def _get_last_action(self):
+        """获取最后一个动作"""
+        try:
+            if hasattr(self.history, 'last_action'):
+                action = self.history.last_action()
+                # 确保action是可序列化的
+                if hasattr(action, 'model_dump'):
+                    return action.model_dump()
+                elif isinstance(action, dict):
+                    return action
+                else:
+                    return str(action) if action is not None else None
+            return None
+        except Exception as e:
+            logger.debug(f"Error getting last_action: {e}")
+            return None
+    
+    def _get_extracted_content(self):
+        """获取所有提取的内容"""
+        try:
+            return self.history.extracted_content() if hasattr(self.history, 'extracted_content') else []
+        except Exception as e:
+            logger.debug(f"Error getting extracted_content: {e}")
+            return []
+    
+    def _get_unique_urls(self):
+        """获取访问的URL列表"""
+        try:
+            urls = self.history.urls() if hasattr(self.history, 'urls') else []
+            return list(set([url for url in urls if url]))
+        except Exception as e:
+            logger.debug(f"Error getting URLs: {e}")
+            return []
+    
+    def _get_action_breakdown(self):
+        """获取动作分解"""
+        try:
+            if hasattr(self.history, 'action_names'):
+                action_names = self.history.action_names()
+                action_counts = {}
+                for action in action_names:
+                    action_counts[action] = action_counts.get(action, 0) + 1
+                return action_counts
+            return {}
+        except Exception as e:
+            logger.debug(f"Error getting action breakdown: {e}")
+            return {}
+    
+    def _determine_overall_success(self, is_done: bool, is_successful: bool | None, has_errors: bool) -> bool:
+        """模仿Browser-Use的成功判断逻辑"""
+        if not is_done:
+            return False
+        if is_successful is not None:
+            return is_successful
+        return not has_errors
+    
+    def _extract_fallback_content(self) -> str:
+        """当没有final_result时的回退内容提取"""
+        # 1. 尝试从提取内容获取
+        contents = self._get_extracted_content()
+        if contents:
+            return contents[-1]
+        
+        # 2. 尝试从最后一步的结果获取
+        if self.history.history:
+            last_step = self.history.history[-1]
+            if hasattr(last_step, 'result') and last_step.result:
+                for result in reversed(last_step.result):
+                    if hasattr(result, 'extracted_content') and result.extracted_content:
+                        return result.extracted_content
+        
+        # 3. 尝试从model输出获取
+        try:
+            if hasattr(self.history, 'model_outputs'):
+                model_outputs = self.history.model_outputs()
+                if model_outputs:
+                    last_output = model_outputs[-1]
+                    if hasattr(last_output, 'next_goal') and hasattr(last_output, 'memory'):
+                        return f"Goal: {last_output.next_goal}, Memory: {last_output.memory}"
+        except Exception as e:
+            logger.debug(f"Error extracting from model outputs: {e}")
+        
+        # 4. 最后的回退
+        return "Task executed but no specific content extracted"
+    
+    def _extract_attachments(self) -> List[str]:
+        """提取所有附件"""
+        attachments = []
+        try:
+            if hasattr(self.history, 'action_results'):
+                for result in self.history.action_results():
+                    if hasattr(result, 'attachments') and result.attachments:
+                        attachments.extend(result.attachments)
+        except Exception as e:
+            logger.debug(f"Error extracting attachments: {e}")
+        return attachments
+    
+    def _create_execution_summary(self) -> Dict[str, Any]:
+        """创建执行摘要"""
+        action_counts = self._get_action_breakdown()
+        return {
+            "total_actions": sum(action_counts.values()),
+            "action_breakdown": action_counts,
+            "unique_actions": len(action_counts),
+            "most_used_action": max(action_counts.items(), key=lambda x: x[1])[0] if action_counts else None
+        }
+    
+    def _get_primary_error_message(self) -> str:
+        """获取主要错误信息"""
+        errors = self._get_errors()
+        error_messages = [e for e in errors if e is not None]
+        if error_messages:
+            return error_messages[-1]
+        return ""
+    
+    def _classify_error_type(self) -> str:
+        """错误类型分类"""
+        error_msg = self._get_primary_error_message().lower()
+        if not error_msg:
+            return ""
+        
+        if "network" in error_msg or "connection" in error_msg:
+            return "NetworkError"
+        elif "element" in error_msg or "selector" in error_msg:
+            return "ElementError"
+        elif "timeout" in error_msg:
+            return "TimeoutError"
+        elif "validation" in error_msg:
+            return "ValidationError"
+        elif "llm" in error_msg or "api" in error_msg:
+            return "LLMError"
+        else:
+            return "UnknownError"
+    
+    def _get_last_step_debug_info(self) -> Dict[str, Any]:
+        """获取最后一步的调试信息"""
+        if not self.history.history:
+            return {}
+        
+        try:
+            last_step = self.history.history[-1]
+            debug_info = {
+                "has_model_output": hasattr(last_step, 'model_output') and last_step.model_output is not None,
+                "has_result": hasattr(last_step, 'result') and bool(last_step.result),
+                "result_count": len(last_step.result) if hasattr(last_step, 'result') and last_step.result else 0
+            }
+            
+            if hasattr(last_step, 'result') and last_step.result:
+                last_result = last_step.result[-1]
+                debug_info.update({
+                    "last_result_is_done": getattr(last_result, 'is_done', None),
+                    "last_result_success": getattr(last_result, 'success', None),
+                    "last_result_error": getattr(last_result, 'error', None),
+                    "last_result_has_content": bool(getattr(last_result, 'extracted_content', None))
+                })
+            
+            # 确保所有值都是JSON可序列化的
+            serializable_debug_info = {}
+            for key, value in debug_info.items():
+                if value is None or isinstance(value, (bool, int, float, str)):
+                    serializable_debug_info[key] = value
+                else:
+                    serializable_debug_info[key] = str(value)
+            
+            return serializable_debug_info
+        except Exception as e:
+            logger.debug(f"Error getting debug info: {e}")
+            return {"debug_info_error": str(e)}
+    
+    def _create_error_result(self, error_msg: str, task: str) -> Dict[str, Any]:
+        """创建错误结果"""
+        return {
+            "success": False,
+            "data": {
+                "task": task,
+                "result": "",
+                "is_done": False,
+                "steps_taken": 0,
+                "error_details": error_msg
+            },
+            "error_message": error_msg,
+            "error_type": "SystemError"
+        }
+    
+    def _ensure_json_serializable(self, data: Any) -> Any:
+        """确保数据是JSON可序列化的"""
+        try:
+            if data is None:
+                return None
+            elif isinstance(data, (bool, int, float, str)):
+                return data
+            elif isinstance(data, (list, tuple)):
+                return [self._ensure_json_serializable(item) for item in data]
+            elif isinstance(data, dict):
+                return {key: self._ensure_json_serializable(value) for key, value in data.items()}
+            else:
+                # 对于Mock对象或其他不可序列化的对象，转换为字符串
+                return str(data)
+        except Exception as e:
+            logger.debug(f"Error serializing data: {e}")
+            return str(data)
 
 
 class StructuredResponse:
@@ -525,7 +837,7 @@ class BrowserUseLLMAdapter(BaseChatModel):
     def _parse_structured_response(self, content):
         """Parse structured response from LLM content"""
         import json
-        import re
+        import re  # 🔧 修复：在函数内部导入re模块，确保在所有执行上下文中都可用
         try:
             # First try to parse directly
             parsed = json.loads(content)
@@ -588,7 +900,7 @@ class BrowserUseMCPServer:
             browser_use_port = int(dynamic_port)
             logger.info(f"使用动态分配端口: {browser_use_port}")
         else:
-            browser_use_port = ports_config['mcp_servers'].get('browser_use', {}).get('port', 8003)
+            browser_use_port = ports_config['mcp_servers'].get('browser_use_server', {}).get('port', 8082)
             logger.info(f"使用配置文件端口: {browser_use_port}")
         
         toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
@@ -992,7 +1304,7 @@ class BrowserUseMCPServer:
             }
     
     async def _execute_task(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """执行AI浏览器任务"""
+        """执行AI浏览器任务 - 使用增强版结果提取"""
         task = parameters.get("task", "")
         max_steps = parameters.get("max_steps", 50)
         use_vision = parameters.get("use_vision", True)
@@ -1019,41 +1331,82 @@ class BrowserUseMCPServer:
                 retry_delay=5
             )
             
-            # 执行任务
-            result = await agent.run(max_steps=max_steps)
+            # 执行任务并获取完整的AgentHistoryList
+            agent_history = await agent.run(max_steps=max_steps)
             
-            # 提取结果
-            if hasattr(result, 'history') and result.history:
-                last_step = result.history[-1]
-                success = getattr(last_step, 'success', True)
-                content = getattr(last_step, 'extracted_content', '')
+            # 使用Browser-Use风格的结果分析器
+            analyzer = BrowserUseResultAnalyzer(agent_history)
+            comprehensive_result = analyzer.extract_comprehensive_result(task)
+            
+            # 添加执行统计日志
+            data = comprehensive_result.get('data', {})
+            debug_info = comprehensive_result.get('debug_info', {})
+            
+            logger.info(f"✅ Browser-Use task execution completed:")
+            logger.info(f"  📋 Task: {task[:50]}...")
+            logger.info(f"  🎯 Success: {comprehensive_result['success']}")
+            logger.info(f"  📊 Steps taken: {data.get('steps_taken', 0)}")
+            logger.info(f"  ⏱️ Duration: {data.get('total_duration_seconds', 0):.2f}s")
+            logger.info(f"  ✔️ Is done: {data.get('is_done', False)}")
+            logger.info(f"  🏆 Is successful: {data.get('is_successful', None)}")
+            logger.info(f"  ❌ Has errors: {data.get('has_errors', False)}")
+            logger.info(f"  🔧 Error count: {data.get('error_count', 0)}")
+            
+            if data.get('action_breakdown'):
+                logger.info(f"  📈 Actions: {data['action_breakdown']}")
+            
+            if comprehensive_result.get('error_message'):
+                logger.warning(f"  ⚠️ Error: {comprehensive_result['error_message']}")
+            
+            # 调试信息
+            logger.debug(f"Debug info: {debug_info}")
+            
+            # 将结果保存到共享工作区
+            try:
+                workspace = get_workspace_manager()
+                session_id = parameters.get('session_id', f"browser_task_{int(time.time())}")
                 
-                return {
-                    "success": success,
-                    "data": {
-                        "task": task,
-                        "result": content,
-                        "steps_taken": len(result.history),
-                        "max_steps": max_steps
+                # 保存浏览器任务结果
+                workspace.save_data(
+                    session_id=session_id,
+                    data_key="browser_result",
+                    data={
+                        "task_description": task,
+                        "execution_time": datetime.now().isoformat(),
+                        "result": comprehensive_result,
+                        "raw_content": data.get('result', ''),
+                        "urls_visited": data.get('urls_visited', []),
+                        "attachments": data.get('attachments', [])
                     },
-                    "error_message": "",
-                    "error_type": ""
+                    file_format="json"
+                )
+                
+                # 如果有具体的内容数据，也单独保存
+                if data.get('result'):
+                    workspace.save_data(
+                        session_id=session_id,
+                        data_key="extracted_content",
+                        data=data['result'],
+                        file_format="text"
+                    )
+                
+                # 添加工作区信息到结果中
+                comprehensive_result['workspace_info'] = {
+                    "session_id": session_id,
+                    "workspace_path": str(workspace.get_session_path(session_id)),
+                    "saved_files": ["browser_result.json", "extracted_content.txt"]
                 }
-            else:
-                return {
-                    "success": True,
-                    "data": {
-                        "task": task,
-                        "result": "任务执行完成",
-                        "steps_taken": 0,
-                        "max_steps": max_steps
-                    },
-                    "error_message": "",
-                    "error_type": ""
-                }
+                
+                logger.info(f"💾 浏览器结果已保存到共享工作区: {session_id}")
+                
+            except Exception as workspace_error:
+                logger.warning(f"⚠️ 保存到共享工作区失败: {workspace_error}")
+                # 不影响主要结果返回
+            
+            return comprehensive_result
                 
         except Exception as e:
-            logger.error(f"Browser-Use task execution failed: {e}", exc_info=True)
+            logger.error(f"❌ Browser-Use task execution failed: {e}", exc_info=True)
             return {
                 "success": False,
                 "data": None,

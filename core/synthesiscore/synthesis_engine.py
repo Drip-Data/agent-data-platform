@@ -18,6 +18,9 @@ from .interfaces import (
 from .task_validator import TaskValidator
 from .task_storage import TaskStorage
 from .prompts import prompt_manager
+from .trajectory_step_extractor import EnhancedTrajectoryBasedTaskGenerator
+from .enhanced_task_extensions import EnhancedTaskExtensions
+from .task_complexity_evaluator import TaskComplexityEvaluator, ComplexityScore
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +50,20 @@ class SynthesisEngine:
         self.validator = TaskValidator(llm_client, enable_strict_validation)
         self.storage = TaskStorage(storage_dir)
         
+        # 初始化增强的基于轨迹的任务生成器
+        self.trajectory_task_generator = EnhancedTrajectoryBasedTaskGenerator(llm_client, self.validator)
+        
+        # 初始化增强扩展器和复杂度评估器
+        self.enhanced_extensions = EnhancedTaskExtensions(llm_client)
+        self.complexity_evaluator = TaskComplexityEvaluator()
+        
         # 运行统计
         self.session_stats = {
             "sessions_completed": 0,
             "total_tasks_generated": 0,
             "valid_tasks_count": 0,
             "tool_required_count": 0,
-            "reasoning_only_count": 0
+            "reasoning_only_count": 0  # Deprecated: now only generating tool_required tasks
         }
         
         # LLM重试配置
@@ -147,30 +157,58 @@ class SynthesisEngine:
             ]
             logger.info(f"✅ 有效原子任务: {len(valid_atomic_tasks)}/{len(atomic_tasks)}")
             
-            # 第二步：深度扩展（可选）
+            # 第二步：增强深度扩展（可选）
             if generate_depth_extensions and valid_atomic_tasks:
-                logger.info("📈 第二步：深度扩展 (超集搜索 + 中间任务)")
-                depth_tasks = await self._generate_depth_extensions(
+                logger.info("📈 第二步：增强深度扩展 (LLM驱动的多步骤推理)")
+                depth_tasks = await self.enhanced_extensions.generate_enhanced_depth_extensions(
                     valid_atomic_tasks, max_depth_extensions
                 )
-                result.depth_extended_tasks = depth_tasks
                 
-                # 验证深度扩展任务
-                if depth_tasks:
-                    depth_validations = await self.validator.batch_validate_tasks(depth_tasks)
+                # 评估和过滤深度扩展任务
+                filtered_depth_tasks = []
+                for task in depth_tasks:
+                    complexity_score = self.complexity_evaluator.evaluate_depth_extended_task(task)
+                    logger.info(f"📊 深度任务 {task.task_id} 复杂度: {complexity_score.complexity_level} (分数: {complexity_score.total_score:.2f})")
+                    
+                    # 🔧 修复：降低复杂度门槛，包含简单任务以提升综合任务生成率
+                    if complexity_score.complexity_level in ["simple", "moderate", "complex", "comprehensive"]:
+                        filtered_depth_tasks.append(task)
+                        logger.info(f"✅ 深度任务通过复杂度检查: {task.task_id} (级别: {complexity_score.complexity_level})")
+                    else:
+                        logger.warning(f"⚠️ 深度任务复杂度过低: {task.task_id} - {complexity_score.quality_issues}")
+                
+                result.depth_extended_tasks = filtered_depth_tasks
+                
+                # 验证通过评估的深度扩展任务
+                if filtered_depth_tasks:
+                    depth_validations = await self.validator.batch_validate_tasks(filtered_depth_tasks)
                     result.validation_results.extend(depth_validations)
             
-            # 第三步：宽度扩展（可选）
+            # 第三步：增强宽度扩展（可选）
             if generate_width_extensions and len(valid_atomic_tasks) >= 2:
-                logger.info("📊 第三步：宽度扩展 (多任务合并)")
-                width_tasks = await self._generate_width_extensions(
+                logger.info("📊 第三步：增强宽度扩展 (智能协同任务)")
+                width_tasks = await self.enhanced_extensions.generate_enhanced_width_extensions(
                     valid_atomic_tasks, max_width_extensions
                 )
-                result.width_extended_tasks = width_tasks
                 
-                # 验证宽度扩展任务
-                if width_tasks:
-                    width_validations = await self.validator.batch_validate_tasks(width_tasks)
+                # 评估和过滤宽度扩展任务
+                filtered_width_tasks = []
+                for task in width_tasks:
+                    complexity_score = self.complexity_evaluator.evaluate_width_extended_task(task)
+                    logger.info(f"📊 宽度任务 {task.task_id} 复杂度: {complexity_score.complexity_level} (分数: {complexity_score.total_score:.2f})")
+                    
+                    # 🔧 修复：降低协同价值门槛，包含简单任务以提升综合任务生成率
+                    if complexity_score.complexity_level in ["simple", "moderate", "complex", "comprehensive"]:
+                        filtered_width_tasks.append(task)
+                        logger.info(f"✅ 宽度任务通过复杂度检查: {task.task_id} (级别: {complexity_score.complexity_level})")
+                    else:
+                        logger.warning(f"⚠️ 宽度任务协同价值过低: {task.task_id} - {complexity_score.quality_issues}")
+                
+                result.width_extended_tasks = filtered_width_tasks
+                
+                # 验证通过评估的宽度扩展任务
+                if filtered_width_tasks:
+                    width_validations = await self.validator.batch_validate_tasks(filtered_width_tasks)
                     result.validation_results.extend(width_validations)
             
             # 第四步：存储结果
@@ -205,79 +243,141 @@ class SynthesisEngine:
             return result
     
     async def _generate_atomic_tasks(self, trajectories_data: List[Dict], max_tasks: int) -> List[AtomicTask]:
-        """生成原子任务 - 使用模板化Prompt和LLM"""
+        """生成原子任务 - 混合使用基于轨迹证据的生成和LLM生成"""
         logger.debug(f"🔬 从 {len(trajectories_data)} 个轨迹生成原子任务")
         
         atomic_tasks = []
         
         try:
-            # 步骤1：从轨迹数据中提取结论
-            conclusions = await self._extract_conclusions_from_trajectories(trajectories_data)
-            logger.info(f"📊 提取到 {len(conclusions)} 个结论")
+            # 🆕 步骤1：基于轨迹证据生成任务（占60%）
+            evidence_task_count = max(1, int(max_tasks * 0.6))
+            logger.info(f"🧬 开始基于轨迹证据生成 {evidence_task_count} 个任务")
             
-            # 步骤2：基于结论生成原子任务
-            for conclusion in conclusions[:max_tasks]:
-                try:
-                    generated_tasks = await self._generate_tasks_from_conclusion(conclusion)
+            evidence_tasks = await self.trajectory_task_generator.generate_evidence_based_tasks(
+                trajectories_data, max_tasks=evidence_task_count
+            )
+            
+            # 将证据任务转换为AtomicTask对象
+            for i, task_data in enumerate(evidence_tasks):
+                if len(atomic_tasks) >= max_tasks:
+                    break
                     
-                    for task_data in generated_tasks:
-                        if len(atomic_tasks) >= max_tasks:
-                            break
+                # 创建增强的Synthesis组件
+                input_info = SynthesisInput(
+                    input_id=f"evidence_input_{i}",
+                    content=task_data.get("question", "未知问题"),
+                    metadata={
+                        "difficulty": task_data.get("difficulty", "中等"),
+                        "creativity_level": task_data.get("creativity_level", "3"),
+                        "source_conclusion": "基于轨迹证据生成",
+                        "task_pattern": task_data.get("relation_pattern", "trajectory_evidence")
+                    }
+                )
+                
+                answer = SynthesisAnswer(
+                    answer_id=f"evidence_answer_{i}",
+                    answer=task_data.get("expected_answer", "基于轨迹证据的答案"),
+                    confidence=float(task_data.get("creativity_level", "3")) / 5.0
+                )
+                
+                relation = SynthesisRelation(
+                    relation_id=f"evidence_relation_{i}",
+                    relation_type=task_data.get("relation_pattern", "trajectory_evidence"),
+                    description=task_data.get("creativity_explanation", "基于轨迹证据的任务"),
+                    parameters={
+                        "reasoning_steps": task_data.get("reasoning_steps", []),
+                        "entity_generalization": task_data.get("entity_generalization", ""),
+                        "reverse_reasoning": task_data.get("reverse_reasoning", "")
+                    }
+                )
+                
+                # 创建原子任务
+                atomic_task = AtomicTask.create_atomic(
+                    question=task_data.get("question", "未知问题"),
+                    input_info=input_info,
+                    answer=answer,
+                    relation=relation,
+                    domain=task_data.get("domain", "general"),
+                    requires_tool=task_data.get("required_tools", []) != [],
+                    expected_tools=task_data.get("required_tools", [])
+                )
+                
+                atomic_tasks.append(atomic_task)
+                
+            logger.info(f"✨ 基于轨迹证据生成了 {len(atomic_tasks)} 个任务")
+            
+            # 步骤2：基于结论的传统LLM生成（占40%）
+            remaining_tasks = max_tasks - len(atomic_tasks)
+            if remaining_tasks > 0:
+                logger.info(f"🧠 开始基于结论的LLM生成 {remaining_tasks} 个任务")
+                
+                # 从轨迹数据中提取结论
+                conclusions = await self._extract_conclusions_from_trajectories(trajectories_data)
+                logger.info(f"📊 提取到 {len(conclusions)} 个结论")
+                
+                # 基于结论生成原子任务
+                for conclusion in conclusions[:remaining_tasks]:
+                    try:
+                        generated_tasks = await self._generate_tasks_from_conclusion(conclusion)
+                        
+                        for task_data in generated_tasks:
+                            if len(atomic_tasks) >= max_tasks:
+                                break
+                                
+                            # 创建增强的Synthesis组件
+                            input_info = SynthesisInput(
+                                input_id=f"llm_input_{len(atomic_tasks)}",
+                                content=task_data.get("question", "未知问题"),
+                                metadata={
+                                    "difficulty": task_data.get("difficulty", "中等"),
+                                    "creativity_level": task_data.get("creativity_level", "3"),
+                                    "source_conclusion": conclusion.get("content", ""),
+                                    "task_pattern": task_data.get("relation_pattern", "general")
+                                }
+                            )
                             
-                        # 创建增强的Synthesis组件
-                        input_info = SynthesisInput(
-                            input_id=f"input_{len(atomic_tasks)}",
-                            content=task_data.get("question", "未知问题"),
-                            metadata={
-                                "difficulty": task_data.get("difficulty", "中等"),
-                                "creativity_level": task_data.get("creativity_level", "3"),
-                                "source_conclusion": conclusion.get("content", ""),
-                                "task_pattern": task_data.get("relation_pattern", "general")
-                            }
-                        )
+                            answer = SynthesisAnswer(
+                                answer_id=f"llm_answer_{len(atomic_tasks)}",
+                                answer=task_data.get("expected_answer", "示例答案"),
+                                confidence=float(task_data.get("creativity_level", "3")) / 5.0
+                            )
+                            
+                            # 使用更丰富的关系信息
+                            relation_type = task_data.get("relation_pattern", "extract_info")
+                            relation = SynthesisRelation(
+                                relation_id=f"llm_relation_{len(atomic_tasks)}",
+                                relation_type=relation_type,
+                                description=task_data.get("creativity_explanation", "从输入中提取信息"),
+                                parameters={
+                                    "reasoning_steps": task_data.get("reasoning_steps", []),
+                                    "entity_generalization": task_data.get("entity_generalization", ""),
+                                    "reverse_reasoning": task_data.get("reverse_reasoning", "")
+                                }
+                            )
+                            
+                            # 创建原子任务
+                            atomic_task = AtomicTask.create_atomic(
+                                question=task_data.get("question", "未知问题"),
+                                input_info=input_info,
+                                answer=answer,
+                                relation=relation,
+                                domain=task_data.get("domain", "general"),
+                                requires_tool=task_data.get("required_tools", []) != [],
+                                expected_tools=task_data.get("required_tools", [])
+                            )
+                            
+                            atomic_tasks.append(atomic_task)
+                            
+                    except Exception as e:
+                        logger.error(f"❌ 从结论生成原子任务失败: {e}")
+                        continue
                         
-                        answer = SynthesisAnswer(
-                            answer_id=f"answer_{len(atomic_tasks)}",
-                            answer=task_data.get("expected_answer", "示例答案"),
-                            confidence=float(task_data.get("creativity_level", "3")) / 5.0
-                        )
-                        
-                        # 使用更丰富的关系信息
-                        relation_type = task_data.get("relation_pattern", "extract_info")
-                        relation = SynthesisRelation(
-                            relation_id=f"relation_{len(atomic_tasks)}",
-                            relation_type=relation_type,
-                            description=task_data.get("creativity_explanation", "从输入中提取信息"),
-                            parameters={
-                                "reasoning_steps": task_data.get("reasoning_steps", []),
-                                "entity_generalization": task_data.get("entity_generalization", ""),
-                                "reverse_reasoning": task_data.get("reverse_reasoning", "")
-                            }
-                        )
-                        
-                        # 创建原子任务 - 移除无效的task_type参数
-                        atomic_task = AtomicTask.create_atomic(
-                            question=task_data.get("question", "未知问题"),
-                            input_info=input_info,
-                            answer=answer,
-                            relation=relation,
-                            domain=task_data.get("domain", "general"),
-                            requires_tool=task_data.get("required_tools", []) != [],
-                            expected_tools=task_data.get("required_tools", [])
-                        )
-                        
-                        atomic_tasks.append(atomic_task)
-                        
-                except Exception as e:
-                    logger.error(f"❌ 从结论生成原子任务失败: {e}")
-                    continue
-                    
         except Exception as e:
             logger.error(f"❌ 原子任务生成过程失败: {e}")
             # 失败时直接报错，不再回退
             raise RuntimeError(f"原子任务生成失败: {e}")
         
-        logger.info(f"📋 生成原子任务: {len(atomic_tasks)} 个")
+        logger.info(f"📋 生成原子任务: {len(atomic_tasks)} 个 (证据任务: {len([t for t in atomic_tasks if 'evidence' in t.input_info.input_id])}, LLM任务: {len([t for t in atomic_tasks if 'llm' in t.input_info.input_id])})")
         return atomic_tasks
     
     async def _generate_depth_extensions(self, atomic_tasks: List[AtomicTask], max_extensions: int) -> List[DepthExtendedTask]:
@@ -374,18 +474,28 @@ class SynthesisEngine:
     async def _extract_conclusions_from_trajectories(self, trajectories_data: List[Dict]) -> List[Dict]:
         """从轨迹数据中提取深度结论和结构化关系 - 使用关系驱动的模板"""
         try:
-            # 准备轨迹数据摘要（保持更多上下文信息）
+            # 准备轨迹数据摘要（修复字段映射）
             trajectory_summary = []
             for trajectory in trajectories_data[:5]:  # 限制处理数量
+                # 修复字段映射：使用实际存在的字段
+                raw_response = trajectory.get("raw_response", "")
+                
+                # 解析步骤和工具信息
+                parsed_steps = self._parse_steps_from_response(raw_response)
+                tools_used = self._extract_tools_from_response(raw_response)
+                reasoning_blocks = self._extract_reasoning_from_response(raw_response)
+                
                 summary = {
                     "task_id": trajectory.get("task_id", "unknown"),
-                    "question": trajectory.get("question", "未知问题"),
-                    "steps": trajectory.get("steps", [])[:5],  # 增加步骤信息
-                    "final_answer": trajectory.get("final_answer", "无答案"),
+                    "question": trajectory.get("task_description", "未知问题"),  # 修复：task_description
+                    "steps": parsed_steps[:5],  # 从raw_response解析的真实步骤
+                    "final_answer": trajectory.get("final_result", "无答案"),  # 修复：final_result
                     "success": trajectory.get("success", False),
-                    "tools_used": trajectory.get("tools_used", []),  # 新增工具信息
-                    "reasoning_process": trajectory.get("reasoning_process", ""),  # 新增推理过程
-                    "domain": trajectory.get("domain", "general")  # 新增领域信息
+                    "tools_used": tools_used,  # 从raw_response解析的工具
+                    "reasoning_process": reasoning_blocks,  # 从raw_response解析的推理过程
+                    "domain": self._infer_domain_from_content(trajectory.get("task_description", "")),
+                    "duration": trajectory.get("duration", 0),
+                    "raw_content": raw_response[:500]  # 保留部分原始内容用于分析
                 }
                 trajectory_summary.append(summary)
             
@@ -402,7 +512,11 @@ class SynthesisEngine:
             # 解析响应（包括结构化关系）
             try:
                 import json
-                result = json.loads(response)
+                # 确保response是字符串
+                if isinstance(response, dict):
+                    result = response
+                else:
+                    result = json.loads(response)
                 conclusions = result.get("conclusions", [])
                 
                 # 验证结论质量（确保包含关系信息）
@@ -461,7 +575,11 @@ class SynthesisEngine:
             # 解析响应并验证创造性
             try:
                 import json
-                result = json.loads(response)
+                # 确保response是字符串
+                if isinstance(response, dict):
+                    result = response
+                else:
+                    result = json.loads(response)
                 tasks = result.get("atomic_tasks", [])
                 
                 # 验证任务的创造性和关系驱动特征
@@ -795,7 +913,7 @@ class SynthesisEngine:
                     "relation_type": "logical_reasoning",
                     "scenario": "复杂推理场景",
                     "difficulty": "中等",
-                    "required_tools": [],
+                    "required_tools": ["code_execution"],
                     "generalization_potential": "可应用于同类推理问题",
                     "confidence": 0.7,
                     "domain_knowledge": self._extract_domain_from_question(question),
@@ -846,7 +964,7 @@ class SynthesisEngine:
                     {
                         "question": f"设计一个{primary_tool}工具的高级应用场景，要求比基础用法更复杂",
                         "expected_answer": f"基于{primary_tool}的创新应用方案",
-                        "task_type": "tool_required" if required_tools else "reasoning_only",
+                        "task_type": "tool_required",
                         "domain": domain,
                         "difficulty": "困难",
                         "required_tools": required_tools,
@@ -860,10 +978,10 @@ class SynthesisEngine:
                     {
                         "question": f"如果{primary_tool}工具失效，设计3种替代解决方案",
                         "expected_answer": "多元化的问题解决策略",
-                        "task_type": "reasoning_only",
+                        "task_type": "tool_required",
                         "domain": domain,
                         "difficulty": "困难",
-                        "required_tools": [],
+                        "required_tools": ["code_execution"],
                         "reasoning_steps": ["分析工具依赖", "探索替代方案", "评估可行性"],
                         "relation_pattern": "tool_failure_contingency",
                         "entity_generalization": "容错性设计思维",
@@ -879,10 +997,10 @@ class SynthesisEngine:
                     {
                         "question": f"基于{domain}领域知识，构建一个需要多步推理的复杂问题",
                         "expected_answer": "结构化的推理问题和解决路径",
-                        "task_type": "reasoning_only",
+                        "task_type": "tool_required",
                         "domain": domain,
                         "difficulty": "困难",
-                        "required_tools": [],
+                        "required_tools": ["code_execution"],
                         "reasoning_steps": ["问题构造", "推理链设计", "验证逻辑"],
                         "relation_pattern": "multi_step_reasoning_construction",
                         "entity_generalization": "复杂推理问题设计",
@@ -893,10 +1011,10 @@ class SynthesisEngine:
                     {
                         "question": f"设计一个{domain}领域的思维陷阱题，并提供破解思路",
                         "expected_answer": "具有启发性的陷阱题目和解题方法",
-                        "task_type": "reasoning_only",
+                        "task_type": "tool_required",
                         "domain": domain,
                         "difficulty": "困难",
-                        "required_tools": [],
+                        "required_tools": ["code_execution"],
                         "reasoning_steps": ["识别认知偏误", "设计陷阱机制", "构建解题路径"],
                         "relation_pattern": "cognitive_trap_design",
                         "entity_generalization": "认知挑战题设计",
@@ -912,10 +1030,10 @@ class SynthesisEngine:
                     {
                         "question": f"将{domain}领域的概念跨界应用到另一个完全不同的领域",
                         "expected_answer": "创新的跨领域应用方案",
-                        "task_type": "reasoning_only",
+                        "task_type": "tool_required",
                         "domain": "跨领域创新",
                         "difficulty": "困难",
-                        "required_tools": [],
+                        "required_tools": ["code_execution"],
                         "reasoning_steps": ["概念抽象", "领域映射", "创新整合"],
                         "relation_pattern": "cross_domain_innovation",
                         "entity_generalization": "跨界思维模式",
@@ -961,7 +1079,7 @@ class SynthesisEngine:
             
             # 存储验证结果
             for validation in result.validation_results:
-                await self.storage.store_validation_result(validation)
+                self.storage.store_validation_result(validation)
             
             # 存储会话信息
             await self.storage.store_synthesis_session(result)
@@ -970,6 +1088,135 @@ class SynthesisEngine:
             
         except Exception as e:
             logger.error(f"❌ 存储合成结果失败: {e}")
+    
+    def _parse_steps_from_response(self, raw_response: str) -> List[str]:
+        """从原始响应中解析执行步骤"""
+        import re
+        
+        steps = []
+        
+        # 1. 提取工具调用步骤
+        tool_patterns = [
+            r'<(browser_use|microsandbox|deepsearch|memory_staging)>([^<]+)</\1>',
+            r'<(browser_search_google|browser_extract_content|microsandbox_execute|microsandbox_install_package)>([^<]+)</\1>'
+        ]
+        
+        for pattern in tool_patterns:
+            matches = re.findall(pattern, raw_response, re.DOTALL)
+            for tool_name, content in matches:
+                # 提取工具调用的核心操作
+                step_desc = self._extract_step_description(tool_name, content.strip()[:100])
+                if step_desc:
+                    steps.append(step_desc)
+        
+        # 2. 提取思考和推理步骤
+        think_blocks = re.findall(r'<think>(.*?)</think>', raw_response, re.DOTALL)
+        for think in think_blocks:
+            reasoning_steps = self._extract_reasoning_steps(think.strip())
+            steps.extend(reasoning_steps)
+        
+        # 3. 提取answer标签中的总结步骤
+        answer_blocks = re.findall(r'<answer>(.*?)</answer>', raw_response, re.DOTALL)
+        for answer in answer_blocks:
+            summary_steps = self._extract_summary_steps(answer.strip())
+            steps.extend(summary_steps)
+        
+        return list(dict.fromkeys(steps))  # 去重但保持顺序
+    
+    def _extract_tools_from_response(self, raw_response: str) -> List[str]:
+        """从原始响应中提取使用的工具"""
+        import re
+        
+        tools = []
+        
+        # 提取所有工具调用
+        tool_patterns = [
+            r'<(browser_use|microsandbox|deepsearch|memory_staging)',
+            r'<(browser_search_google|browser_extract_content|microsandbox_execute|microsandbox_install_package)'
+        ]
+        
+        for pattern in tool_patterns:
+            matches = re.findall(pattern, raw_response)
+            tools.extend(matches)
+        
+        return list(set(tools))  # 去重
+    
+    def _extract_reasoning_from_response(self, raw_response: str) -> str:
+        """从原始响应中提取推理过程"""
+        import re
+        
+        reasoning_blocks = []
+        
+        # 提取think块
+        think_matches = re.findall(r'<think>(.*?)</think>', raw_response, re.DOTALL)
+        for think in think_matches:
+            clean_think = think.strip()[:200]  # 限制长度
+            if clean_think:
+                reasoning_blocks.append(clean_think)
+        
+        return " | ".join(reasoning_blocks)
+    
+    def _extract_step_description(self, tool_name: str, content: str) -> str:
+        """根据工具名称和内容提取步骤描述"""
+        tool_mappings = {
+            "browser_search_google": f"搜索信息: {content[:50]}",
+            "browser_extract_content": f"提取内容: {content[:50]}",
+            "microsandbox_execute": f"执行代码: {content[:50]}",
+            "microsandbox_install_package": f"安装包: {content}",
+            "deepsearch": f"深度搜索: {content[:50]}",
+            "memory_staging": f"内存操作: {content[:50]}"
+        }
+        
+        return tool_mappings.get(tool_name, f"{tool_name}: {content[:50]}")
+    
+    def _extract_reasoning_steps(self, think_content: str) -> List[str]:
+        """从思考内容中提取推理步骤"""
+        steps = []
+        
+        # 查找明确的步骤指示词
+        step_indicators = ["首先", "然后", "接下来", "最后", "步骤", "第一", "第二", "第三"]
+        
+        lines = think_content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if len(line) > 10:  # 过滤过短的行
+                for indicator in step_indicators:
+                    if indicator in line:
+                        steps.append(f"推理步骤: {line[:80]}")
+                        break
+        
+        return steps[:3]  # 限制推理步骤数量
+    
+    def _extract_summary_steps(self, answer_content: str) -> List[str]:
+        """从答案内容中提取总结步骤"""
+        steps = []
+        
+        # 提取boxed内容
+        import re
+        boxed_matches = re.findall(r'\\boxed\{([^}]+)\}', answer_content, re.DOTALL)
+        for boxed in boxed_matches:
+            if len(boxed.strip()) > 20:  # 只取有意义的内容
+                steps.append(f"总结结果: {boxed.strip()[:80]}")
+        
+        return steps
+    
+    def _infer_domain_from_content(self, content: str) -> str:
+        """从内容推断领域"""
+        domain_keywords = {
+            "股票|股价|金融|投资": "金融",
+            "量子|物理|科学": "科学研究",
+            "代码|编程|Python|算法": "编程",
+            "搜索|研究|论文": "研究分析",
+            "大学|学校|教育": "教育",
+            "蛋白质|生物|医学": "生物医学"
+        }
+        
+        import re
+        for pattern, domain in domain_keywords.items():
+            if re.search(pattern, content):
+                return domain
+        
+        return "通用"
     
     def _calculate_result_statistics(self, result: SynthesisResult) -> None:
         """计算结果统计信息"""
@@ -1018,7 +1265,7 @@ class SynthesisEngine:
             
             # 存储验证结果
             for validation in validations:
-                await self.storage.store_validation_result(validation)
+                self.storage.store_validation_result(validation)
             
             return validations
         
@@ -1064,7 +1311,11 @@ class SynthesisEngine:
             response = await self._call_llm_with_retry(prompt, "反向搜索算法")
             
             import json
-            result = json.loads(response)
+            # 确保response是字符串
+            if isinstance(response, dict):
+                result = response
+            else:
+                result = json.loads(response)
             return result.get("backward_search_result")
             
         except Exception as e:
@@ -1084,7 +1335,11 @@ class SynthesisEngine:
             response = await self._call_llm_with_retry(prompt, "任务融合算法")
             
             import json
-            result = json.loads(response)
+            # 确保response是字符串
+            if isinstance(response, dict):
+                result = response
+            else:
+                result = json.loads(response)
             return result.get("task_fusion_result")
             
         except Exception as e:
@@ -1187,7 +1442,11 @@ class SynthesisEngine:
             response = await self._call_llm_with_retry(prompt, "主题感知融合")
             
             import json
-            result = json.loads(response)
+            # 确保response是字符串
+            if isinstance(response, dict):
+                result = response
+            else:
+                result = json.loads(response)
             return result.get("theme_fusion_result")
             
         except Exception as e:

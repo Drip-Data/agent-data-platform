@@ -100,6 +100,30 @@ class StepDiagnosticLogger:
         }
         logger.debug(f"🔍 记录解析结果，识别到 {len(actions)} 个动作")
         
+    def log_step_error(self, step_index: int, error_type: str, error_message: str, 
+                      recovery_attempted: bool = False):
+        """
+        记录步骤执行错误
+        """
+        if not self.current_step_data:
+            logger.warning("⚠️ 尝试记录步骤错误，但步骤未初始化")
+            return
+        
+        error_info = {
+            "step_index": step_index,
+            "error_type": error_type,
+            "error_message": error_message,
+            "error_time": datetime.now().isoformat(),
+            "recovery_attempted": recovery_attempted
+        }
+        
+        # 如果step_data中没有errors字段，创建一个
+        if "errors" not in self.current_step_data:
+            self.current_step_data["errors"] = []
+        
+        self.current_step_data["errors"].append(error_info)
+        logger.debug(f"❌ 记录步骤错误: {error_type} - {error_message}")
+        
     def log_tool_execution(self, execution_index: int, action: Dict, 
                           toolscore_request: Dict, raw_response: Dict,
                           formatted_result: str, start_time: float, end_time: float,

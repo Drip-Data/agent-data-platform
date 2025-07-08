@@ -122,6 +122,7 @@ async def start():
     
     logger.info(f"✅ 成功启动 {len(successful_servers)}/{len(mcp_servers)} 个MCP服务器: {successful_servers}")
 
+
 async def _start_server(server_name: str):
     """启动单个MCP服务器"""
     global mcp_processes, server_statuses
@@ -474,11 +475,23 @@ async def _check_websocket_health(url: str) -> bool:
     """检查WebSocket端点健康状态"""
     try:
         import websockets
-        async with websockets.connect(url, ping_timeout=3, close_timeout=3) as websocket:
+        # 修复: 使用更严格的超时设置和错误处理
+        async with websockets.connect(
+            url, 
+            ping_timeout=3, 
+            close_timeout=3,
+            open_timeout=5
+        ) as websocket:
             # 简单的ping检查
             await websocket.send('{"type": "ping"}')
+            # 等待响应以确保连接正常工作
+            response = await asyncio.wait_for(websocket.recv(), timeout=2)
             return True
-    except Exception:
+    except asyncio.TimeoutError:
+        logger.debug(f"WebSocket健康检查超时: {url}")
+        return False
+    except Exception as e:
+        logger.debug(f"WebSocket健康检查失败: {url}, 错误: {e}")
         return False
 
 async def _check_port_readiness(server_name: str) -> bool:

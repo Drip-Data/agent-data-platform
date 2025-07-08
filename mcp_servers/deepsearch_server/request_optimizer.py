@@ -19,7 +19,7 @@ class LLMRequest:
     task_type: str  # "query_generation", "search_execution", "reflection", "synthesis"
     prompt: str
     priority: int = 1  # 1=高优先级, 2=中优先级, 3=低优先级
-    timeout: float = 180.0  # 增加到180秒
+    timeout: float = 180.0  # 恢复到180秒适应复杂查询
     created_at: datetime = None
     
     def __post_init__(self):
@@ -30,7 +30,7 @@ class RequestOptimizer:
     """请求优化器 - 合并和优化LLM调用"""
     
     def __init__(self, llm_client, batch_size: int = 3, batch_timeout: float = 2.0, 
-                 max_concurrent_requests: int = 5, default_timeout: float = 180.0):  # 增加到180秒
+                 max_concurrent_requests: int = 5, default_timeout: float = 180.0):  # 恢复到180秒适应复杂查询
         self.llm_client = llm_client
         self.batch_size = batch_size
         self.batch_timeout = batch_timeout
@@ -405,7 +405,7 @@ class OptimizedSearchMixin:
         if hasattr(self, 'llm_client') and self.request_optimizer is None:
             # 从配置中获取并发和超时参数
             max_concurrent = getattr(self, 'config', {}).get('max_concurrent_requests', 5)
-            default_timeout = getattr(self, 'config', {}).get('default_timeout', 30.0)
+            default_timeout = getattr(self, 'config', {}).get('default_timeout', 180.0)  # 恢复180秒适应复杂查询
             batch_size = getattr(self, 'config', {}).get('batch_size', 3)
             
             self.request_optimizer = RequestOptimizer(
@@ -416,26 +416,58 @@ class OptimizedSearchMixin:
             )
     
     async def _optimized_llm_call(self, prompt: str, task_type: str = "general", priority: int = 1) -> str:
-        """优化的LLM调用"""
+        """优化的LLM调用 - 简化版本，移除复杂批处理，保留task_type优化"""
         if self.request_optimizer is None:
             self._init_request_optimizer()
         
-        if self.request_optimizer:
-            request = LLMRequest(
-                task_type=task_type,
-                prompt=prompt,
-                priority=priority
-            )
-            return await self.request_optimizer.execute_request(request)
-        else:
-            # 回退到直接调用，使用较长的超时时间适应复杂查询
-            messages = [{"role": "user", "content": prompt}]
-            return await self.llm_client._call_api(messages, timeout=180)
+        # 根据task_type优化prompt（保留原始设计的核心价值）
+        optimized_prompt = self._optimize_prompt_by_task_type(prompt, task_type)
+        
+        # 直接调用LLM，避免复杂的批处理逻辑
+        messages = [{"role": "user", "content": optimized_prompt}]
+        try:
+            result = await self.llm_client._call_api(messages, timeout=180)
+            
+            # 更新统计
+            if self.request_optimizer:
+                self.request_optimizer.stats["total_requests"] += 1
+            
+            return result
+        except Exception as e:
+            if self.request_optimizer:
+                self.request_optimizer.stats["timeout_errors"] += 1
+            raise
+    
+    def _optimize_prompt_by_task_type(self, prompt: str, task_type: str) -> str:
+        """根据任务类型优化prompt - 保留原始设计的核心价值"""
+        
+        # 任务类型特定的优化前缀
+        optimization_prefixes = {
+            "query_generation": "作为搜索查询生成专家，请专注于生成多样化、高质量的搜索查询：\n\n",
+            "search_execution": "作为专业研究分析师，请基于您的知识提供详细、准确的信息：\n\n", 
+            "reflection": "作为信息评估专家，请客观分析现有信息的完整性和质量：\n\n",
+            "synthesis": "作为专业报告撰写专家，请整合所有信息生成结构化、全面的分析报告：\n\n"
+        }
+        
+        # 任务类型特定的优化后缀
+        optimization_suffixes = {
+            "query_generation": "\n\n请确保查询的多样性和搜索效果，以JSON格式返回结果。",
+            "search_execution": "\n\n请提供最新、准确的信息，包含具体数据和事实。",
+            "reflection": "\n\n请以JSON格式返回客观的评估结果。",
+            "synthesis": "\n\n请生成结构化、专业的综合分析报告。"
+        }
+        
+        prefix = optimization_prefixes.get(task_type, "")
+        suffix = optimization_suffixes.get(task_type, "")
+        
+        return f"{prefix}{prompt}{suffix}"
     
     def get_optimization_stats(self) -> Dict[str, Any]:
         """获取优化统计信息"""
         if self.request_optimizer:
-            return self.request_optimizer.get_stats()
+            stats = self.request_optimizer.get_stats()
+            stats["optimization_type"] = "prompt_optimization_only"
+            return stats
         return {"optimization_enabled": False}
     
     def get_health_status(self) -> Dict[str, Any]:

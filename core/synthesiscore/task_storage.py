@@ -301,24 +301,20 @@ class TaskStorage:
         except Exception:
             return 0
     
-    def store_validation_result(self, task_id: str, validation_result: dict):
-        """存储验证结果"""
+    def store_validation_result(self, validation_result: 'TaskValidationResult'):
+        """存储验证结果（已禁用文件输出）"""
         try:
-            storage_path = self.storage_dir / f"{task_id}_validation.json"
-            data = {
-                "task_id": task_id,
-                "timestamp": datetime.now().isoformat(),
-                "validation_result": validation_result
-            }
+            # 不再生成独立的validation.json文件，只记录日志
+            logger.debug(f"🔍 验证完成 - 任务 {validation_result.task_id}: "
+                        f"有效={validation_result.is_valid}, "
+                        f"分数={validation_result.validation_score:.2f}")
             
-            with open(storage_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                
-            logger.info(f"💾 验证结果已保存: {storage_path}")
+            # 如果需要详细信息，只在调试级别记录
+            if not validation_result.is_valid and validation_result.errors:
+                logger.debug(f"  验证错误: {validation_result.errors}")
             
         except Exception as e:
-            logger.error(f"❌ 存储验证结果失败: {e}")
-            raise
+            logger.error(f"❌ 记录验证结果失败: {e}")
 
     async def clear_storage(self, confirm: bool = False) -> bool:
         """清空存储（危险操作）"""

@@ -133,8 +133,11 @@ class TaskValidator:
         # 3. 原子性检查
         atomicity = await self._check_atomicity(task.question)
         
-        # 综合判断
-        requires_tool = tool_necessity and not reasoning_sufficiency
+        # 综合判断（更宽松的工具必要性判断）
+        has_action_keywords = any(keyword in task.question.lower() for keyword in ["搜索", "查询", "获取", "下载", "执行", "计算", "分析", "提取", "访问", "生成", "创建"])
+        requires_tool = tool_necessity or has_action_keywords
+        
+        # 更宽松的验证标准
         is_valid = atomicity and (requires_tool if self.enable_strict_mode else True)
         
         # 计算验证分数
@@ -150,7 +153,12 @@ class TaskValidator:
             errors.append("任务不符合原子性要求，包含多个子任务")
         
         if not requires_tool and self.enable_strict_mode:
-            errors.append("任务可以仅通过推理解决，不需要工具调用")
+            # 更宽松的工具必要性判断 - 只有明显的纯推理任务才被拒绝
+            if any(keyword in task.question.lower() for keyword in ["搜索", "查询", "获取", "下载", "执行", "计算", "分析", "提取"]):
+                # 包含操作性关键词的任务应该需要工具，覆盖LLM判断
+                warnings.append("LLM判断可能有误：任务包含操作性关键词，应该需要工具")
+            else:
+                errors.append("任务可以仅通过推理解决，不需要工具调用")
         elif not requires_tool:
             warnings.append("任务可能不需要工具调用")
         
@@ -422,22 +430,17 @@ class TaskValidator:
         return True
     
     def _calculate_validation_score(self, tool_necessity: bool, reasoning_sufficiency: bool, atomicity: bool) -> float:
-        """计算验证分数"""
+        """计算验证分数（更宽松的评分标准）"""
         score = 0.0
         
-        # 原子性权重最高
+        # 原子性权重最高，但降低要求
         if atomicity:
-            score += 0.5
+            score += 0.6  # 提高权重
         
-        # 工具必要性次之
+        # 工具必要性权重适中
         if tool_necessity:
-            score += 0.3
+            score += 0.4  # 提高权重
         
-        # 推理充分性检查（需要工具的任务，推理不应该充分）
-        if tool_necessity and not reasoning_sufficiency:
-            score += 0.2
-        elif not tool_necessity and reasoning_sufficiency:
-            score += 0.1  # 推理任务，但分数较低
-        
-        return min(score, 1.0)
+        # 对于明显需要工具的任务，即使LLM判断有误也给予基础分数
+        return min(1.0, score)  # 确保不超过1.0
     

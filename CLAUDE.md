@@ -2,60 +2,154 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 核心开发原则 (CRITICAL DEVELOPMENT PRINCIPLES)
+## Quick Start for New Claude Code Instances
 
-### 🚨 第一要务：代码质量至上
-**严禁屎山代码！** 优先做减法或者在不新增大量代码的情况下完成bug修复。精简、高效、高可读性与维护性是第一要义。避免不知节制的增加补丁，导致屎山代码。
+**Critical Dependencies:**
+- MicroSandbox: `pip install microsandbox` (required for all code execution)
+- Redis: Must be running for task queues and memory management
+- Environment: `export GEMINI_API_KEY=your_key`
 
-### 💪 专家级问题解决
-Don't hold back. Give it your all. 你是一个顶级的黑客兼程序员，对于这种问题你很拿手。请给我一个解决方案。
+**Key Architecture Points:**
+- All code execution MUST go through MicroSandbox server (port 8090)
+- Anti-hallucination framework prevents fake tool results via XML streaming
+- ToolScore system (port 8088/8089) manages all MCP server communications
+- Enhanced Runtime (`runtimes/reasoning/enhanced_runtime.py`) is the main execution engine
 
-### 🖥️ 系统环境要求
-- **操作系统**: macOS 15.5 - 运行命令时请注意兼容性
-- **Python版本**: 使用 `python3` 而不是 `python`
-- **必读文档**: 首先阅读 `agent-data-platform/docs/` 下的文档和 `agent-data-platform/README.md` 快速了解系统基本架构和文件功能
+**Most Important Files:**
+- `main.py`: System entry point
+- `core/interfaces.py`: Constants and data structures (avoid hardcoding)
+- `runtimes/reasoning/enhanced_runtime.py`: Core execution logic
+- `core/toolscore/`: Tool management system
 
-### 🔧 根本性问题解决
-任何修改和debug的目标均应该是**彻底从根本上解决问题**，而不是采用"降低验证标准"和"简化检查"的方式。
-- **根本解决**: 所有修改和调试都应该从根本上解决问题，绝不采用"降低验证标准"或"简化检查"的方式掩盖问题
-- **彻底修复**: 追求问题的本质原因，实施彻底的解决方案
+## Essential Commands
 
-### 📁 架构整洁性维护
-- **避免文件污染**: 尽量避免在根目录和主目录下创建新的未归类文件
-- **有意识维护**: 有意识地维护当前系统架构的清晰整洁性，便于后期维护
+### Start the platform
+```bash
+python3 main.py
+```
 
-### 🏗️ 结构化开发
-- **模块化优先**: 任何修改不应该只做简单的粘贴修补，最好是结构化的、模块化的补充和完善
-- **清晰引用**: 提高系统引用之间的清晰与连贯，避免多跳引用、跨级引用等操作
-- **降低维护难度**: 保持代码可读性与清晰性，减少维护困难
+### Run tests
+```bash
+# Run all tests
+python3 -m pytest tests/ -v
 
-### 🧹 代码库清理
-- **清理废弃代码**: 任何新功能对旧功能的替换操作，应该审阅并清理旧文件
-- **防止冗余**: 防止废弃代码残留和代码库冗余
-- **目标**: 保持代码库的清晰整洁与高度可维护性
+# Run specific test suites  
+python3 -m pytest tests/test_microsandbox_*.py -v
+python3 -m pytest tests/test_system_validation.py -v
 
-### 🔒 反硬编码原则 (NEW!)
-**严禁任何形式的硬编码！** 
-- **常量化**: 所有固定字符串、状态判定标准、错误消息等均应定义为常量
-- **配置化**: 可变的参数和阈值应通过配置文件管理
-- **动态逻辑**: 状态判定、结果提取等逻辑应基于实际数据而非固定模式
-- **可扩展性**: 设计时考虑未来变化，避免写死特定值或格式
+# Submit test tasks
+python3 scripts/batch_test_tasks.py --tasks-file tasks.jsonl
+python3 scripts/batch_test_tasks.py --tasks-file data/test_tasks.jsonl
+```
 
-### 📋 开发效率原则
-**避免过度文档化！**
-- **不要创建专门的修复报告**: 修复代码问题时，直接在代码中注释解释即可，无需单独创建 `.md` 报告文件
-- **精简文档**: 只在 `CLAUDE.md` 和 `GEMINI.md` 中更新关键变更，避免冗余文档
-- **重点在实现**: 优先完成功能修复和测试，而非详细的文档报告
+### Health checks
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8088/health  # ToolScore service
+```
 
-**硬编码检查清单：**
-- ❌ 硬编码的成功/失败判定条件
-- ❌ 硬编码的错误消息文本
-- ❌ 硬编码的XML标签名称
-- ❌ 硬编码的状态值或枚举
-- ❌ 硬编码的文件路径或URL
-- ✅ 使用TaskExecutionConstants等常量类
-- ✅ 基于配置文件的参数管理
-- ✅ 动态的结果提取和状态判定
+### Dependency management
+```bash
+# Install core dependencies
+pip install -r requirements.txt
+
+# Install MicroSandbox (critical for code execution)
+pip install microsandbox
+
+# Verify MicroSandbox installation
+python3 -c "from microsandbox import PythonSandbox; print('✅ MicroSandbox ready')"
+```
+
+## Architecture Overview
+
+Agent Data Platform is a multi-agent AI system combining LLM reasoning with real tool execution through an anti-hallucination framework. The system prevents LLMs from generating fake tool results by implementing a "stop-and-wait" mechanism.
+
+### Core Components
+
+**Enhanced Runtime** (`runtimes/reasoning/enhanced_runtime.py`)
+- Main execution engine with XML streaming and anti-hallucination
+- Handles memory management and trajectory enhancement
+- Coordinates LLM interactions with real tool execution
+
+**ToolScore System** (`core/toolscore/`)
+- Unified tool management with MCP server integration
+- Dynamic tool discovery and session management
+- HTTP API on port 8088, WebSocket on port 8089
+
+**Memory & Planning**
+- `MemoryManager`: Redis-based persistent session memory
+- `StepPlanner`: Multi-step reasoning with adaptive planning
+- Supports up to 100 execution steps for complex tasks
+
+### MCP Tool Servers
+
+**MicroSandbox Server** (port 8090) - Critical for code execution
+- Secure Python code execution environment
+- Session management with state persistence
+- Package installation and dependency management
+
+**Browser Use Server** (port 8082) - Web automation
+- AI-driven browser automation with 25+ tools
+- Web scraping and intelligent form filling
+
+**DeepSearch Server** (port 8086) - Research capabilities
+- Advanced search and multi-source information aggregation
+- Intelligent query optimization with caching
+
+**Search Tool Server** (port 8080) - File operations
+- File system search and content pattern matching
+
+### Data Synthesis Learning
+
+The platform implements a "data flywheel" for continuous learning:
+
+**Trajectory Monitoring**
+- Real-time monitoring of `output/trajectories/` directory
+- Automatic triggering on trajectory file modifications
+- Synthesis processing delay of 2-5 minutes
+
+**Synthesis Process**
+1. Extract successful execution patterns
+2. Generate atomic seed tasks from trajectories
+3. Apply depth/breadth expansion for task variants
+4. Multi-dimensional quality validation
+5. Store validated tasks in `output/seed_tasks.jsonl`
+
+**Output Files**
+- `output/trajectories/trajectories_collection.json`: Raw execution data
+- `output/seed_tasks.jsonl`: Auto-generated learning tasks
+- `output/task_essences.json`: Extracted task patterns
+
+## Development Principles
+
+### System Requirements
+- **Python**: Use `python3` not `python`
+- **Platform**: macOS 15.5 compatible
+- **Redis**: Required for task queues and memory management
+- **MicroSandbox**: Critical dependency for secure code execution
+
+### Code Quality Standards
+- **No hardcoded values**: Use constants from `core.interfaces.TaskExecutionConstants`
+- **Modular design**: Prefer editing existing files over creating new ones
+- **Clean architecture**: Maintain clear separation between components
+- **Anti-hallucination**: All tool execution must go through MCP servers
+
+### Key Development Patterns
+```python
+# ✅ Correct: Use constants
+from core.interfaces import TaskExecutionConstants
+answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
+
+# ❌ Wrong: Hardcoded strings
+if "Final Answer:" in response:
+    success = True
+```
+
+### Testing Requirements
+- Always run pytest before committing changes
+- Test MicroSandbox integration for code execution tasks
+- Verify anti-hallucination framework integrity
+- Check all MCP server connections
 
 ## 系统概述
 
@@ -139,7 +233,7 @@ python3 tests/test_token_optimization.py
 
 **MicroSandbox服务器** (端口 8090)
 - 安全的Python代码执行环境
-- 具有状态持久性的会话管理
+- 会话管理和状态持久性
 - 包安装和依赖管理
 
 **Browser Use服务器** (端口 8082) 
@@ -165,24 +259,34 @@ python3 tests/test_token_optimization.py
 5. **工具执行**: 通过MCP服务器进行真实工具调用
 6. **结果存储**: 轨迹存储和合成学习
 
-## 核心配置文件
+## Key Configuration Files
 
-**核心配置**
-- `config/llm_config.yaml`: LLM提供商设置 (Gemini, OpenAI等)
-- `config/routing_config.yaml`: 任务路由和队列配置
-- `requirements.txt`: Python依赖 (MicroSandbox需单独安装)
+- `config/llm_config.yaml`: LLM provider settings (Gemini primary, OpenAI backup)
+- `config/routing_config.yaml`: Task routing and queue configuration  
+- `config/unified_tool_definitions.yaml`: Tool definitions and mappings
+- `requirements.txt`: Python dependencies (MicroSandbox requires separate installation)
 
-**环境变量**
+### Required Environment Variables
 ```bash
-# 必需
-GEMINI_API_KEY=your_gemini_api_key
+# Required
+export GEMINI_API_KEY=your_gemini_api_key
 
-# 可选
-OPENAI_API_KEY=your_openai_api_key
-REDIS_URL=redis://localhost:6379
-LOG_LEVEL=INFO
-MICROSANDBOX_TIMEOUT=30
+# Optional
+export OPENAI_API_KEY=your_openai_api_key
+export REDIS_URL=redis://localhost:6379
+export LOG_LEVEL=INFO
+export MICROSANDBOX_TIMEOUT=30
 ```
+
+### Port Configuration
+- 8000: Task API Service
+- 8088: ToolScore HTTP API
+- 8089: ToolScore WebSocket
+- 8090: MicroSandbox Server (critical)
+- 8082: Browser Use Server
+- 8086: DeepSearch Server
+- 8080: Search Tool Server
+- 6379: Redis
 
 ## 开发指南
 
@@ -250,22 +354,26 @@ print(f"缓存节省: ${cost_analysis['cache_analysis']['cache_savings_usd']:.6f
 4. 在 service_manager 中注册
 ```
 
-### 任务类型
-- `code`: 代码生成和执行任务
-- `reasoning`: 多步分析任务
-- `research`: 信息收集和分析
-- `web`: 基于浏览器的交互
+### 服务管理
+- 使用系统级重启来重启服务（重启main.py）
+- 端口清理机制在启动时自动处理冲突进程
 
-### 内存管理
-- 在任务上下文中使用session_id实现持久内存
-- MemoryManager自动存储/检索上下文
-- 上下文被注入到LLM提示中以保持连续性
+### Task Types
+- `code`: Code generation and execution tasks
+- `reasoning`: Multi-step analysis tasks  
+- `research`: Information gathering and analysis
+- `web`: Browser-based interactions
 
-### 错误处理
-- 带恢复建议的结构化错误对象
-- 针对瞬时故障的自动重试机制
-- 针对复杂错误恢复的LLM反思
-- 全面的错误分类和严重性级别
+### Memory Management
+- Use `session_id` in task context for persistent memory
+- MemoryManager automatically stores/retrieves context
+- Context injected into LLM prompts for continuity
+
+### Error Handling
+- Structured error objects with recovery suggestions
+- Automatic retry mechanisms for transient failures
+- LLM reflection for complex error recovery
+- Comprehensive error classification and severity levels
 
 ## 数据合成学习
 
@@ -307,22 +415,36 @@ curl "http://localhost:8000/api/v1/tasks/{task_id}"
 - 通过Redis CLI进行队列监控
 - 执行模式的轨迹分析
 
-## 常见故障排除
+## Troubleshooting
 
-**端口冲突**: 启动前运行`python3 utility/cleanup_ports.py`
+### Quick Diagnostics
+```bash
+# Check all critical services
+curl http://localhost:8000/health           # Task API
+curl http://localhost:8088/health           # ToolScore
+redis-cli ping                              # Redis
+python3 -c "from microsandbox import PythonSandbox; print('✅ MicroSandbox OK')"
 
-**MicroSandbox问题**: 确保`pip install microsandbox`成功完成
+# Port cleanup (if needed)
+python3 utility/cleanup_ports.py
 
-**Redis连接**: 用`redis-cli ping`验证Redis正在运行
+# Check task queue status
+redis-cli XLEN tasks:reasoning
 
-**API密钥**: 检查环境变量是否正确设置
+# Monitor system logs
+tail -f logs/System.log
+```
 
-**服务健康**: 使用`curl http://localhost:8000/health`进行状态检查
+### Common Issues
+- **Port conflicts**: `python3 utility/cleanup_ports.py` then restart
+- **MicroSandbox missing**: `pip install microsandbox`
+- **Redis down**: Start Redis service for your OS
+- **Tasks stuck**: Check queue with `redis-cli XLEN tasks:reasoning`
 
-## 安全考虑
+## Security Considerations
 
-- 所有代码执行都限制在MicroSandbox容器中
-- API密钥从日志和错误消息中过滤
-- 整个管道的输入验证和清理
-- 资源限制和超时强制执行
-- 所有工具执行的审计日志
+- All code execution restricted to MicroSandbox containers
+- API keys filtered from logs and error messages
+- Input validation and sanitization throughout pipeline
+- Resource limits and timeout enforcement
+- Audit logging for all tool executions

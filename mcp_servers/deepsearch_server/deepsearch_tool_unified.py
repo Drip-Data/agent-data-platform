@@ -240,7 +240,7 @@ class DeepSearchToolUnified(OptimizedSearchMixin):
 
 只返回JSON，不要其他文字："""
 
-            # 使用优化的LLM调用生成查询
+            # 使用优化的LLM调用生成查询，但缩短超时时间
             response = await self._optimized_llm_call(prompt, task_type="query_generation", priority=1)
             
             # 解析响应 - 增强类型检查和错误处理

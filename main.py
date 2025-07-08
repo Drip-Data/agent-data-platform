@@ -248,23 +248,63 @@ def parse_arguments():
 
 def setup_signal_handlers(service_manager):
     """设置信号处理器以优雅关闭"""
+    shutdown_requested = False
+    
     def signal_handler(sig, frame):
-        logger.info(f"收到信号 {sig}，正在强制关闭所有服务...")
+        nonlocal shutdown_requested
         
-        # 设置一个短超时来尝试优雅关闭
+        if shutdown_requested:
+            logger.warning("⚠️ 收到第二次中断信号，强制退出...")
+            force_cleanup()
+            os._exit(1)
+        
+        shutdown_requested = True
+        logger.info(f"🛑 收到信号 {sig} (Ctrl+C)，正在优雅关闭服务...")
+        logger.info("💡 提示：再次按 Ctrl+C 可强制退出")
+        
+        # 创建异步任务来优雅关闭
         try:
-            # 尝试使用服务管理器的强制停止
-            service_manager.force_stop_all()
-            logger.info("服务管理器强制停止完成")
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果事件循环正在运行，安排优雅关闭任务
+                asyncio.create_task(graceful_shutdown(service_manager))
+            else:
+                # 如果没有事件循环，直接同步关闭
+                sync_graceful_shutdown(service_manager)
         except Exception as e:
-            logger.warning(f"服务管理器强制停止失败: {e}")
-        
-        # 无论如何都执行强制清理
-        force_cleanup()
-        
-        # 强制退出
-        logger.info("强制退出系统")
-        os._exit(0)
+            logger.error(f"❌ 优雅关闭失败，执行强制关闭: {e}")
+            force_cleanup()
+            os._exit(1)
+    
+    async def graceful_shutdown(service_manager):
+        """异步优雅关闭"""
+        try:
+            logger.info("🔄 开始优雅关闭所有服务...")
+            await asyncio.wait_for(service_manager.stop_all(), timeout=15)
+            logger.info("✅ 所有服务已优雅关闭")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ 服务关闭超时，执行强制清理")
+            force_cleanup()
+        except Exception as e:
+            logger.error(f"❌ 优雅关闭失败: {e}")
+            force_cleanup()
+        finally:
+            logger.info("👋 Agent Data Platform 已安全退出")
+            os._exit(0)
+    
+    def sync_graceful_shutdown(service_manager):
+        """同步优雅关闭"""
+        try:
+            logger.info("🔄 开始优雅关闭所有服务...")
+            service_manager.force_stop_all()  # 同步停止
+            logger.info("✅ 所有服务已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭失败: {e}")
+            force_cleanup()
+        finally:
+            logger.info("👋 Agent Data Platform 已退出")
+            os._exit(0)
     
     async def emergency_shutdown(service_manager):
         """紧急关闭流程"""
@@ -340,9 +380,9 @@ def setup_signal_handlers(service_manager):
             except:
                 pass
     
-    # 注册信号处理器
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # 信号处理器已暂时移除 - 避免误退出
+    # signal.signal(signal.SIGINT, signal_handler)
+    # signal.signal(signal.SIGTERM, signal_handler)
 
 async def main_async():
     """异步主函数，应用入口点"""
@@ -527,7 +567,8 @@ async def main_async():
         dependencies=["redis"]
     )
     
-    setup_signal_handlers(service_manager)
+    # 信号处理器已暂时移除 - 用户可以通过重启main来自动清理进程
+    # setup_signal_handlers(service_manager)
     
     try:
         logger.debug("🔧 开始初始化所有服务...")

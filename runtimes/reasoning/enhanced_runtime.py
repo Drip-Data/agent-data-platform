@@ -3,6 +3,7 @@
 专注于核心功能：LLM推理、工具执行、任务处理、XML流式输出
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -559,6 +560,20 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 if result.get('success', True):
                     output = result.get('data', result.get('output', result.get('result', str(result))))
                     
+                    # 🔧 修复：特殊处理 DeepSearch 的 JSON 字符串输出
+                    if service_name == 'deepsearch' and isinstance(output, str):
+                        try:
+                            # 尝试解析 JSON 字符串（DeepSearch 的成功输出格式）
+                            import json
+                            parsed_output = json.loads(output)
+                            if isinstance(parsed_output, dict):
+                                output = parsed_output
+                                logger.debug(f"Successfully parsed DeepSearch JSON string output")
+                        except (json.JSONDecodeError, ValueError) as e:
+                            # 如果不是有效的JSON，保持原始字符串
+                            logger.debug(f"DeepSearch output is not JSON string, keeping as string: {e}")
+                            pass
+                    
                     # 🔧 完整修复：为所有工具统一结果格式化
                     formatted_output = self._format_tool_output(service_name, tool_name, output)
                     
@@ -622,12 +637,39 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return self._format_generic_output(output)
     
     def _format_deepsearch_output(self, output: dict) -> str:
-        """🔧 格式化DeepSearch搜索结果 - 使用常量避免硬编码"""
+        """🔧 修复：正确处理DeepSearch的实际输出格式，支持JSON字符串和结构化数据"""
         try:
-            # 提取关键信息
+            # 🔧 修复：首先处理 DeepSearch 的实际输出格式
+            # 检查是否是包含JSON字符串的格式（成功情况）
+            if 'query' in output and 'content' in output:
+                query = output.get('query', '')
+                content = output.get('content', '')
+                
+                formatted_lines = []
+                
+                # 添加查询信息
+                if query:
+                    formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_QUERY']}: {query}")
+                
+                # 添加内容（这是主要的研究结果）
+                if content and content.strip():
+                    formatted_lines.append(f"\n{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_SUMMARY']}:")
+                    # 限制内容长度，避免过长
+                    max_content = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_CONTENT_LENGTH']
+                    content_clean = content.strip()
+                    if len(content_clean) > max_content:
+                        content_clean = content_clean[:max_content] + "..."
+                    formatted_lines.append(content_clean)
+                
+                # 如果有格式化内容，返回它
+                if formatted_lines:
+                    return '\n'.join(formatted_lines)
+            
+            # 🔧 回退：处理传统的 search_results 格式
             search_results = output.get('search_results', [])
             query = output.get('query', '')
             summary = output.get('summary', '')
+            answer = output.get('answer', '')  # 添加对answer字段的支持
             
             formatted_lines = []
             
@@ -635,8 +677,15 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if query:
                 formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_QUERY']}: {query}")
             
-            # 添加摘要
-            if summary:
+            # 添加答案或摘要
+            if answer:
+                formatted_lines.append(f"\n{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_SUMMARY']}:")
+                max_content = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_CONTENT_LENGTH']
+                answer_clean = answer.strip()
+                if len(answer_clean) > max_content:
+                    answer_clean = answer_clean[:max_content] + "..."
+                formatted_lines.append(answer_clean)
+            elif summary:
                 formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['SEARCH_SUMMARY']}: {summary}")
             
             # 格式化搜索结果
@@ -662,7 +711,24 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         formatted_lines.append("")  # 空行分隔
             
             result_text = '\n'.join(formatted_lines).strip()
-            return result_text if result_text else "搜索完成，但未找到相关结果"
+            
+            # 🔧 修复：只有在完全没有任何有用信息时才返回"未找到结果"
+            if not result_text:
+                # 检查是否有任何其他有用的字段
+                other_content = []
+                for key, value in output.items():
+                    if key not in ['query', 'content', 'search_results', 'summary', 'answer'] and value:
+                        if isinstance(value, str) and value.strip():
+                            other_content.append(f"{key}: {str(value)[:200]}...")
+                        elif isinstance(value, (dict, list)) and value:
+                            other_content.append(f"{key}: {str(value)[:200]}...")
+                
+                if other_content:
+                    return "DeepSearch结果:\n" + "\n".join(other_content)
+                else:
+                    return "搜索完成，但未找到相关结果"
+            
+            return result_text
             
         except Exception as e:
             logger.warning(f"Failed to format DeepSearch output: {e}")
@@ -670,7 +736,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return f"DeepSearch搜索完成，原始结果: {str(output)[:max_content]}..."
     
     def _format_deepsearch_list_output(self, output: list) -> str:
-        """🔧 格式化DeepSearch列表结果 - 使用常量避免硬编码"""
+        """🔧 修复：格式化DeepSearch列表结果，避免错误的硬编码消息"""
         try:
             if not output:
                 return "搜索完成，但未找到相关结果"
@@ -702,16 +768,24 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     def _format_browser_use_output(self, output: dict) -> str:
         """🔧 完整修复：格式化Browser Use操作结果，确保搜索结果不丢失"""
         try:
-            # 提取关键信息 - 增强字段提取
-            action = output.get('action', output.get('operation', TaskExecutionConstants.TOOL_FORMAT_PREFIXES['BROWSER_ACTION']))
-            status = output.get('status', output.get('success', output.get('result', True)))
-            content = output.get('content', output.get('data', output.get('text', '')))
-            url = output.get('url', output.get('current_url', ''))
-            error = output.get('error', output.get('error_message', ''))
+            # 🔧 修复：正确提取browser-use的响应结构
+            # browser-use返回: {result: {success: true, data: {content: "...", ...}}}
+            result_data = output.get('result', {})
+            data_content = result_data.get('data', {}) if isinstance(result_data, dict) else {}
             
-            # 🔧 新增：专门处理搜索结果
-            search_results = output.get('search_results', output.get('results', []))
-            query = output.get('query', output.get('search_query', ''))
+            # 提取关键信息 - 正确的字段路径
+            action = output.get('action', data_content.get('operation', TaskExecutionConstants.TOOL_FORMAT_PREFIXES['BROWSER_ACTION']))
+            status = result_data.get('success', output.get('success', True))
+            
+            # 🔧 关键修复：browser-use搜索内容在data.content中，不是extracted_content
+            content = data_content.get('content', output.get('content', output.get('data', output.get('text', ''))))
+            
+            url = data_content.get('current_url', output.get('url', output.get('current_url', '')))
+            error = result_data.get('error_message', output.get('error', output.get('error_message', '')))
+            
+            # 🔧 新增：专门处理搜索结果 - 检查多个可能的字段
+            search_results = data_content.get('search_results', data_content.get('results', output.get('search_results', output.get('results', []))))
+            query = data_content.get('query', output.get('query', output.get('search_query', '')))
             
             formatted_lines = []
             
@@ -1063,6 +1137,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             raise RuntimeError("LLM客户端未配置")
         if not self.toolscore_client:
             raise RuntimeError("工具客户端未配置")
+        
+        # MicroSandbox连接管理器已移除 - 使用标准工具执行流程
+            
         self.is_initialized = True
         logger.info("✅ Enhanced Reasoning Runtime 初始化完成")
     
@@ -1146,15 +1223,47 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     logger.warning(f"Token优化失败，使用原始消息: {e}")
                     optimized_history = history
             
-            # 2. 调用LLM，设置动态停止序列
+            # 2. 🔧 调用LLM，带完整异常处理和重试机制
             stop_sequences = ["<execute_tools />", "<execute_tools></execute_tools>", "</answer>"]
             llm_start_time = time.time()
-            response_text = await self.client._call_api(optimized_history, stop_sequences=stop_sequences)
-            llm_end_time = time.time()
-            
-            # 3. 🆕 Token使用统计和记录
+            response_text = None
+            llm_error = None
             token_usage = {}
-            if self.token_manager:
+            
+            # 🔥 LLM API调用重试机制
+            for attempt in range(3):  # 最多重试3次
+                try:
+                    logger.debug(f"🔄 LLM API调用尝试 {attempt + 1}/3")
+                    response_text = await self.client._call_api(optimized_history, stop_sequences=stop_sequences)
+                    llm_end_time = time.time()
+                    
+                    logger.info(f"✅ LLM API调用成功 (尝试 {attempt + 1})")
+                    break  # 成功则跳出重试循环
+                    
+                except Exception as e:
+                    llm_end_time = time.time()
+                    llm_error = e
+                    wait_time = 2 ** attempt  # 指数退避: 1, 2, 4 秒
+                    
+                    logger.error(f"❌ LLM API调用失败 (尝试 {attempt + 1}/3): {e}")
+                    
+                    # 特殊处理不同类型的错误
+                    error_type = type(e).__name__
+                    if "RemoteProtocolError" in error_type:
+                        logger.warning("🚨 检测到RemoteProtocolError - 服务器连接中断")
+                    elif "TimeoutError" in error_type or "timeout" in str(e).lower():
+                        logger.warning("⏰ 检测到超时错误")
+                    elif "HTTPStatusError" in error_type:
+                        logger.warning(f"🌐 检测到HTTP状态错误: {getattr(e, 'response', {}).get('status_code', 'unknown')}")
+                    
+                    if attempt < 2:  # 不是最后一次尝试
+                        logger.info(f"🔄 {wait_time}秒后进行第 {attempt + 2} 次重试...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error("❌ 所有LLM API调用尝试都失败了")
+            
+            # 3. 🆕 Token使用统计和记录（无论成功失败都尝试）
+            if response_text and self.token_manager:
                 try:
                     # 计算实际token使用
                     prompt_text = " ".join([msg.get('content', '') for msg in optimized_history if isinstance(msg, dict)])
@@ -1182,8 +1291,14 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 except Exception as e:
                     logger.warning(f"Token统计失败: {e}")
             
-            # 4. 🔍 记录LLM调用（包含详细token信息）
-            triggered_stop = self._detect_triggered_stop_sequence(response_text, stop_sequences)
+            # 4. 🔍 记录LLM调用（包含错误信息和token信息）
+            if response_text:
+                triggered_stop = self._detect_triggered_stop_sequence(response_text, stop_sequences)
+            else:
+                triggered_stop = None
+                # 🔧 即使LLM调用失败也记录轨迹
+                response_text = f"LLM API调用失败: {llm_error}" if llm_error else "LLM API调用失败: 未知原因"
+            
             self.step_logger.log_llm_call(
                 prompt=original_history,  # 使用原始消息记录完整内容
                 raw_response=response_text,
@@ -1192,6 +1307,29 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 end_time=llm_end_time,
                 token_usage=token_usage  # 🆕 传递详细的token使用信息
             )
+            
+            # 5. 🚨 如果LLM调用彻底失败，生成错误响应但继续记录轨迹
+            if llm_error:
+                error_response = self._generate_llm_failure_response(llm_error, task)
+                
+                # 记录错误步骤
+                self.step_logger.log_step_error(
+                    step_index=len(full_trajectory),
+                    error_type="LLM_API_FAILURE",
+                    error_message=str(llm_error),
+                    recovery_attempted=True
+                )
+                
+                # 仍然添加到历史中以保持轨迹完整性
+                history.append({"role": "assistant", "content": error_response})
+                full_trajectory.append({"role": "assistant", "content": error_response})
+                
+                # 设置任务失败但不立即退出，确保轨迹被保存
+                success = False
+                final_result = f"任务因LLM API连接问题失败: {llm_error}"
+                
+                # 跳到轨迹保存和返回
+                break
             
             history.append({"role": "assistant", "content": response_text})
             full_trajectory.append({"role": "assistant", "content": response_text})
@@ -2800,30 +2938,173 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     def _detect_tool_result_issues(self, raw_result: Any, service_name: str, tool_name: str) -> tuple[bool, str]:
         """🔧 检测工具执行结果中的常见问题，提供智能指导"""
         
-        # 将结果转换为字符串用于分析
-        result_str = str(raw_result).lower()
+        # 🔧 修复：对于 microsandbox，正确提取实际输出内容而非整个字典结构
+        if service_name == "microsandbox":
+            import re
+            # 正确提取 microsandbox 的实际输出内容
+            if isinstance(raw_result, dict):
+                # 获取 data 字段中的内容
+                data = raw_result.get('data', raw_result)
+                if isinstance(data, dict):
+                    # 提取 stdout 作为主要输出内容
+                    stdout_content = data.get('stdout', '')
+                    stderr_content = data.get('stderr', '')
+                    result_str = str(stdout_content).lower()
+                    
+                    # 如果 stdout 为空但有 stderr，分析 stderr（但不直接判断为错误）
+                    if not stdout_content and stderr_content:
+                        result_str = str(stderr_content).lower()
+                else:
+                    result_str = str(data).lower()
+            else:
+                result_str = str(raw_result).lower()
+            
+            # 检查是否有数值输出（科学记数法、小数、计算结果等）
+            has_numeric_output = bool(re.search(r'\d+\.?\d*e?[+-]?\d*', result_str))
+            
+            # 检查是否有典型的成功输出模式
+            success_output_patterns = [
+                'watts:', 'photocurrent:', 'frequency:', 'result:', 'output:', 'print',
+                '瓦特', '光电流', '频率', '结果', '输出', 'completed', 'finished',
+                ':', 'hz', 'ampere', 'volt', 'calculation'
+            ]
+            has_success_output = any(indicator in result_str for indicator in success_output_patterns)
+            
+            # 检查是否没有明显的错误指标
+            error_patterns = ['traceback', 'exception:', 'error:', 'failed to', 'cannot', 'unable to']
+            has_obvious_error = any(pattern in result_str for pattern in error_patterns)
+            
+            # 如果有数值输出或成功模式，且没有明显错误，说明执行成功
+            if (has_numeric_output or has_success_output) and not has_obvious_error:
+                logger.debug(f"✅ {service_name} 检测到成功输出，跳过问题检测")
+                return False, ""
+        # 🔧 修复：为 deepsearch 正确提取实际输出内容  
+        elif service_name == "deepsearch":
+            try:
+                if isinstance(raw_result, dict):
+                    # 🔧 增强的内容提取逻辑 - 支持多层嵌套结构
+                    report_content = None
+                    
+                    # 方案1：直接从根级别查找
+                    content_fields = ['answer', 'final_report', 'report', 'summary', 'content', 'result', 'response']
+                    for field in content_fields:
+                        if field in raw_result and raw_result[field]:
+                            report_content = raw_result[field]
+                            break
+                    
+                    # 方案2：从 data 字段中查找
+                    if not report_content:
+                        data = raw_result.get('data', {})
+                        if isinstance(data, dict):
+                            for field in content_fields:
+                                if field in data and data[field]:
+                                    report_content = data[field]
+                                    break
+                    
+                    # 方案3：从 result 字段中查找（针对 step_logs 中的特定结构）
+                    if not report_content:
+                        result_data = raw_result.get('result', {})
+                        if isinstance(result_data, dict):
+                            for field in content_fields:
+                                if field in result_data and result_data[field]:
+                                    report_content = result_data[field]
+                                    break
+                    
+                    # 方案4：递归查找任何包含实质性内容的字段
+                    if not report_content:
+                        report_content = self._extract_deepsearch_content_recursive(raw_result)
+                    
+                    # 🔧 更宽松的成功检测标准
+                    if report_content:
+                        content_str = str(report_content).strip()
+                        # 降低长度要求，增加内容质量检测
+                        if (len(content_str) >= 50 and  # 降低到50字符
+                            self._is_meaningful_research_content(content_str)):
+                            logger.debug(f"✅ {service_name} 检测到有效研究报告内容，跳过问题检测")
+                            return False, ""
+                        
+                        result_str = content_str.lower()
+                    else:
+                        # 如果没有找到特定字段，检查整体结构
+                        full_content = str(raw_result)
+                        if (len(full_content) >= 200 and  # 完整结构的最低要求
+                            self._is_meaningful_research_content(full_content)):
+                            logger.debug(f"✅ {service_name} 从完整结构检测到研究内容，跳过问题检测")
+                            return False, ""
+                        result_str = full_content.lower()
+                else:
+                    result_str = str(raw_result).lower()
+                    # 对于非字典结构，也要检查是否包含研究内容
+                    if (len(result_str) >= 100 and 
+                        self._is_meaningful_research_content(result_str)):
+                        logger.debug(f"✅ {service_name} 从字符串结构检测到研究内容，跳过问题检测")
+                        return False, ""
+                        
+            except Exception as e:
+                logger.warning(f"检查deepsearch内容时出错: {e}")
+                result_str = str(raw_result).lower()
+                # 即使出现异常，也要尝试基本的内容检测
+                if len(result_str) >= 100:
+                    logger.debug(f"⚠️ {service_name} 异常处理中检测到足够内容，跳过问题检测")
+                    return False, ""
         
-        # 🔧 专门检测browser_use空内容问题
-        if service_name == "browser_use" and tool_name == "browser_search_google":
-            # 检查是否包含"content": none或类似的空内容标志
-            if any(indicator in result_str for indicator in [
-                "'content': none", '"content": null', 'content": none',
-                "'extracted_content': none", '"extracted_content": null'
-            ]):
-                guidance = (
-                    f"🔧 Browser搜索返回空内容 - 这是已知的技术问题。建议立即尝试:\n"
-                    f"• 切换到DeepSearch工具: <deepsearch><research>{tool_name.replace('browser_search_google', '相关查询')}</research></deepsearch>\n"
-                    f"• 或使用更简单的关键词重试browser搜索\n"
-                    f"• 检查内存暂存区是否有相关数据: <memory_staging><memory_list></memory_list></memory_staging>\n"
-                    f"• DeepSearch通常在browser_use失败时表现更好"
-                )
-                return True, guidance
+        # 🔧 修复：为其他工具正确提取内容
+        else:
+            # 对于其他服务，尝试智能提取内容
+            try:
+                if isinstance(raw_result, dict):
+                    # 优先查找常见的内容字段
+                    content_fields = ['content', 'result', 'output', 'data', 'message']
+                    extracted_content = None
+                    
+                    for field in content_fields:
+                        if field in raw_result and raw_result[field]:
+                            extracted_content = raw_result[field]
+                            break
+                    
+                    if extracted_content:
+                        result_str = str(extracted_content).lower()
+                    else:
+                        result_str = str(raw_result).lower()
+                else:
+                    result_str = str(raw_result).lower()
+            except Exception as e:
+                logger.warning(f"提取{service_name}内容时出错: {e}")
+                result_str = str(raw_result).lower()
         
-        # 检测空搜索结果
-        if any(indicator in result_str for indicator in [
+        # 🚀 对于其他工具，检查是否有明显的成功标志
+        success_patterns = [
+            r'success["\']?\s*:\s*true',  # "success": true
+            r'completed successfully',     # 成功完成
+            r'executed successfully',      # 成功执行
+            r'operation completed',        # 操作完成
+        ]
+        if any(re.search(pattern, result_str) for pattern in success_patterns):
+            return False, ""
+        
+        # 🔧 增强的搜索结果检测 - 区分执行失败和内容为空
+        empty_result_indicators = [
             'no results', 'empty', 'not found', '没有结果', '未找到', 
             'no data', 'no information', '无数据', '无信息'
-        ]):
+        ]
+        
+        # 🔧 特殊处理：成功完成但无内容的情况
+        successful_empty_indicators = [
+            '搜索完成，但未找到相关结果',  # deepsearch 的标准空结果消息
+            '搜索完成，没有找到', 
+            'search completed, no results',
+            'search finished, no content found'
+        ]
+        
+        # 先检查是否是成功的空结果
+        for indicator in successful_empty_indicators:
+            if indicator in result_str:
+                logger.debug(f"✅ {service_name} 搜索成功执行但未找到内容，这是正常情况")
+                # 不返回错误，而是让它被标记为成功但提供使用建议
+                return False, ""  # 不标记为问题
+        
+        # 再检查一般的空结果（可能是真正的错误）
+        if any(indicator in result_str for indicator in empty_result_indicators):
             guidance = (
                 f"🔍 {service_name} 搜索未找到结果。建议尝试:\n"
                 f"• 使用更简单或不同的关键词\n"
@@ -2833,17 +3114,22 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             )
             return True, guidance
         
-        # 检测超时或连接问题
-        if any(indicator in result_str for indicator in [
-            'timeout', 'connection', 'network error', '超时', '连接'
-        ]):
-            guidance = (
-                f"⏱️ {service_name} 连接或超时问题。建议:\n"
-                f"• 稍等片刻后重试\n"
-                f"• 尝试使用其他工具达到相同目标\n"
-                f"• 简化查询或操作"
-            )
-            return True, guidance
+        # 检测超时或连接问题（更精确的匹配，避免误判）
+        # 🔧 修复：对于microsandbox，如果已经通过了成功检测，不要再检查超时
+        if service_name != "microsandbox":
+            timeout_indicators = [
+                'timeout', 'timed out', 'connection failed', 'connection error',
+                'network error', 'connection refused', 'connection reset',
+                '超时', '连接失败', '连接错误', '网络错误', '连接被拒绝'
+            ]
+            if any(indicator in result_str.lower() for indicator in timeout_indicators):
+                guidance = (
+                    f"⏱️ {service_name} 连接或超时问题。建议:\n"
+                    f"• 稍等片刻后重试\n"
+                    f"• 尝试使用其他工具达到相同目标\n"
+                    f"• 简化查询或操作"
+                )
+                return True, guidance
         
         # 检测权限或访问问题
         if any(indicator in result_str for indicator in [
@@ -2857,10 +3143,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             )
             return True, guidance
         
-        # 检测服务错误
-        if any(indicator in result_str for indicator in [
-            'error', 'failed', 'exception', '错误', '失败'
-        ]):
+        # 检测服务错误（更精确的匹配，避免误判成功的输出）
+        error_indicators = [
+            'error:', 'failed:', 'exception:', 'traceback:', 'fatal error',
+            'execution failed', 'command failed', 'operation failed',
+            '执行失败', '命令失败', '操作失败', '发生错误', '异常:'
+        ]
+        # 排除包含成功指标的情况
+        success_indicators = ['success', 'completed', 'finished', '成功', '完成', '结果:']
+        has_success = any(indicator in result_str.lower() for indicator in success_indicators)
+        
+        if not has_success and any(indicator in result_str.lower() for indicator in error_indicators):
             guidance = (
                 f"🔧 {service_name} 执行出错。建议:\n"
                 f"• 检查参数格式是否正确\n"
@@ -2879,4 +3172,206 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return f"{guidance}\n\n💡 你可以在下一步尝试建议的方法，或继续使用现有信息。"
         
         return ""
+    
+    def _generate_llm_failure_response(self, error: Exception, task) -> str:
+        """
+        🔧 生成LLM调用失败时的错误响应
+        确保即使API失败也能生成有意义的回复
+        """
+        error_type = type(error).__name__
+        error_message = str(error)
+        
+        # 基于错误类型生成不同的响应
+        if "RemoteProtocolError" in error_type:
+            response = f"""<think>
+Gemini API连接协议错误：{error_message}
+这通常是由于网络不稳定或服务器负载过高导致的。
+虽然无法完成LLM推理，但我已经记录了这个错误。
+</think>
+
+<answer>
+抱歉，由于Gemini API连接协议错误，无法完成此次任务推理。
+
+错误详情：{error_type} - {error_message}
+
+建议：
+1. 检查网络连接是否稳定
+2. 稍后重试任务
+3. 如果问题持续，可能需要检查API服务状态
+
+任务ID: {task.task_id}
+</answer>"""
+        elif "TimeoutError" in error_type or "timeout" in error_message.lower():
+            response = f"""<think>
+LLM API调用超时：{error_message}
+这可能是由于网络延迟或服务器响应缓慢导致的。
+</think>
+
+<answer>
+抱歉，LLM API调用超时，无法完成此次推理任务。
+
+错误详情：{error_type} - {error_message}
+
+建议：
+1. 检查网络连接速度
+2. 稍后重试任务
+3. 考虑简化任务复杂度
+
+任务ID: {task.task_id}
+</answer>"""
+        elif "HTTPStatusError" in error_type:
+            response = f"""<think>
+LLM API HTTP状态错误：{error_message}
+这可能是API服务暂时不可用或达到了使用限制。
+</think>
+
+<answer>
+抱歉，LLM API服务返回错误状态，无法完成此次任务。
+
+错误详情：{error_type} - {error_message}
+
+建议：
+1. 检查API密钥是否有效
+2. 验证API服务状态
+3. 稍后重试任务
+
+任务ID: {task.task_id}
+</answer>"""
+        else:
+            response = f"""<think>
+LLM API调用遇到未知错误：{error_message}
+这是一个意外的错误情况，需要进一步调查。
+</think>
+
+<answer>
+抱歉，LLM API调用遇到未知错误，无法完成此次推理任务。
+
+错误详情：{error_type} - {error_message}
+
+建议：
+1. 检查系统日志获取更多信息
+2. 验证系统配置
+3. 如果问题持续，请联系技术支持
+
+任务ID: {task.task_id}
+</answer>"""
+        
+        return response
+
+    async def cleanup(self):
+        """清理运行时资源"""
+        logger.info("🧹 清理Enhanced Reasoning Runtime资源...")
+        
+        try:
+            # MicroSandbox连接管理器已移除 - 无需清理
+            
+            # 清理其他资源
+            if hasattr(self, 'memory_manager') and self.memory_manager:
+                # 假设MemoryManager有cleanup方法
+                if hasattr(self.memory_manager, 'cleanup'):
+                    await self.memory_manager.cleanup()
+                    
+            logger.info("✅ Enhanced Reasoning Runtime清理完成")
+            
+        except Exception as e:
+            logger.error(f"❌ 清理Enhanced Reasoning Runtime时出错: {e}")
+    
+    def get_connection_stats(self) -> Dict[str, Any]:
+        """获取连接统计信息"""
+        stats = {}
+        
+        # MicroSandbox连接管理器已移除 - 无统计信息
+        
+        return stats
+    
+    def _extract_deepsearch_content_recursive(self, data: Any, max_depth: int = 3) -> str:
+        """🔧 递归提取 deepsearch 结果中的实质性内容"""
+        if max_depth <= 0:
+            return ""
+        
+        if isinstance(data, dict):
+            # 优先查找包含实质性内容的字段
+            priority_fields = ['answer', 'final_report', 'report', 'summary', 'content', 'result']
+            for field in priority_fields:
+                if field in data:
+                    value = data[field]
+                    if isinstance(value, str) and len(value.strip()) >= 50:
+                        return value.strip()
+                    elif isinstance(value, (dict, list)):
+                        recursive_result = self._extract_deepsearch_content_recursive(value, max_depth - 1)
+                        if recursive_result:
+                            return recursive_result
+            
+            # 如果优先字段没有内容，遍历所有字段
+            for key, value in data.items():
+                if isinstance(value, str) and len(value.strip()) >= 100:
+                    return value.strip()
+                elif isinstance(value, (dict, list)):
+                    recursive_result = self._extract_deepsearch_content_recursive(value, max_depth - 1)
+                    if recursive_result:
+                        return recursive_result
+        
+        elif isinstance(data, list):
+            for item in data:
+                recursive_result = self._extract_deepsearch_content_recursive(item, max_depth - 1)
+                if recursive_result:
+                    return recursive_result
+        
+        elif isinstance(data, str) and len(data.strip()) >= 50:
+            return data.strip()
+        
+        return ""
+    
+    def _is_meaningful_research_content(self, content: str) -> bool:
+        """🔧 检测内容是否为有意义的研究报告"""
+        if not content or len(content.strip()) < 30:
+            return False
+        
+        content_lower = content.lower()
+        
+        # 检查研究相关关键词
+        research_indicators = [
+            # 中文研究指标
+            '研究', '分析', '应用', '技术', '方法', '发展', '趋势', '挑战', '机遇', 
+            '算法', '模型', '系统', '框架', '实验', '结果', '结论', '总结',
+            '量子', '机器学习', '人工智能', '深度学习', '神经网络',
+            # 英文研究指标
+            'research', 'analysis', 'application', 'technology', 'method', 'development',
+            'trend', 'challenge', 'opportunity', 'algorithm', 'model', 'system', 
+            'framework', 'experiment', 'result', 'conclusion', 'summary',
+            'quantum', 'machine learning', 'artificial intelligence', 'deep learning',
+            'neural network', 'computing', 'optimization'
+        ]
+        
+        # 计算研究相关词汇的出现次数
+        research_score = sum(1 for indicator in research_indicators if indicator in content_lower)
+        
+        # 检查结构化内容指标
+        structure_indicators = [
+            '1.', '2.', '3.', '一、', '二、', '三、', '首先', '其次', '最后',
+            'introduction', 'background', 'methodology', 'approach', 'conclusion',
+            '背景', '方法', '结论', '总结'
+        ]
+        has_structure = any(indicator in content_lower for indicator in structure_indicators)
+        
+        # 检查技术深度指标
+        technical_indicators = [
+            'algorithm', 'implementation', 'performance', 'accuracy', 'efficiency',
+            'optimization', 'parameter', 'dataset', 'training', 'testing',
+            '算法', '实现', '性能', '准确率', '效率', '优化', '参数', '数据集', '训练', '测试'
+        ]
+        technical_score = sum(1 for indicator in technical_indicators if indicator in content_lower)
+        
+        # 综合评分判断
+        is_meaningful = (
+            research_score >= 3 or  # 至少3个研究相关词汇
+            (research_score >= 2 and has_structure) or  # 2个研究词汇+结构化
+            (research_score >= 2 and technical_score >= 2) or  # 研究词汇+技术词汇
+            (len(content) >= 200 and research_score >= 1)  # 长内容+基本研究词汇
+        )
+        
+        logger.debug(f"内容质量评估: 长度={len(content)}, 研究分数={research_score}, "
+                    f"技术分数={technical_score}, 有结构={has_structure}, 有意义={is_meaningful}")
+        
+        return is_meaningful
     

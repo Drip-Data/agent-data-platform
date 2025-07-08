@@ -286,12 +286,10 @@ class IntelligentStatusEvaluator:
         )
         
         try:
-            # 使用较小的max_tokens确保快速响应
-            response = await self.llm_client.generate_response(
+            # 使用LLMClient的_call_api方法
+            response = await self.llm_client._call_api(
                 messages=[{"role": "user", "content": prompt}],
-                model="gemini-2.5-flash-lite-preview-06-17",
-                temperature=0.1,
-                max_tokens=1024
+                timeout=30  # 快速响应
             )
             
             # 尝试解析JSON响应
