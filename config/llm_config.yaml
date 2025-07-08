@@ -13,7 +13,7 @@ llm_providers:
     model: "gpt-4o"
   gemini:
     enabled: true
-    api_key: "AIzaSyCc-dEWgtklPtqe19JI1cOjWUjp8PLMhic"
+    api_key: "AIzaSyBAE7-wY_hk22w5wIeZpdKFY6z53WUrRvw"
     model: "gemini-2.5-flash-lite-preview-06-17" 
     temperature: 0.2
     max_tokens: 64000  # Significantly increased for complex tasks with extensive code generation

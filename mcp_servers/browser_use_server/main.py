@@ -83,6 +83,7 @@ class StructuredOutputWrapper:
             
             # Try to parse as JSON for structured output
             import json
+            import re  # 🔧 修复：在同步函数内部导入re模块，避免作用域问题
             try:
                 # First try to parse directly
                 parsed = json.loads(content)
