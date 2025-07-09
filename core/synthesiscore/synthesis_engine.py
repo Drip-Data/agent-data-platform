@@ -6,6 +6,7 @@ Synthesis 统一合成引擎
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
@@ -57,6 +58,9 @@ class SynthesisEngine:
         self.enhanced_extensions = EnhancedTaskExtensions(llm_client)
         self.complexity_evaluator = TaskComplexityEvaluator()
         
+        # 🆕 初始化Token管理器和成本分析器
+        self._initialize_cost_tracking()
+        
         # 运行统计
         self.session_stats = {
             "sessions_completed": 0,
@@ -72,9 +76,52 @@ class SynthesisEngine:
         
         logger.info("✅ SynthesisEngine 初始化完成")
     
+    def _initialize_cost_tracking(self):
+        """初始化成本追踪组件"""
+        try:
+            # 导入智能Token管理器和成本分析器
+            import os
+            from core.intelligent_token_manager import IntelligentTokenManager
+            from core.cost_analyzer import get_cost_analyzer
+            from core.llm_providers.gemini_provider import GeminiProvider
+            
+            # 创建Gemini提供者实例（用于精确token计数）
+            if hasattr(self.llm_client, '_provider') and isinstance(self.llm_client._provider, GeminiProvider):
+                gemini_provider = self.llm_client._provider
+            else:
+                # 如果LLM客户端不是Gemini，创建一个用于token计数
+                gemini_config = {
+                    'gemini_api_key': os.getenv('GEMINI_API_KEY'),
+                    'model': 'gemini-2.5-flash'
+                }
+                gemini_provider = GeminiProvider(gemini_config)
+            
+            # 初始化Token管理器
+            self.token_manager = IntelligentTokenManager(gemini_provider=gemini_provider)
+            
+            # 初始化成本分析器
+            self.cost_analyzer = get_cost_analyzer()
+            
+            # 🆕 会话成本追踪
+            self.session_cost_tracking = {
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
+                "total_cost_usd": 0.0,
+                "phase_costs": {},  # 各阶段成本
+                "llm_calls": []     # 每次LLM调用的详细记录
+            }
+            
+            logger.info("✅ 成本追踪组件初始化完成")
+            
+        except ImportError as e:
+            logger.warning(f"⚠️ 成本追踪组件导入失败: {e}，将使用简化成本估算")
+            self.token_manager = None
+            self.cost_analyzer = None
+            self.session_cost_tracking = None
+    
     async def _call_llm_with_retry(self, prompt: str, operation_name: str) -> str:
         """
-        带重试机制的LLM调用方法
+        带重试机制的LLM调用方法，集成真实token追踪
         
         Args:
             prompt: 发送给LLM的提示
@@ -87,13 +134,31 @@ class SynthesisEngine:
             RuntimeError: 重试次数用尽后仍然失败
         """
         last_error = None
+        call_start_time = time.time()
         
         for attempt in range(1, self.max_retries + 1):
             try:
                 logger.debug(f"🔄 {operation_name} - 尝试 {attempt}/{self.max_retries}")
-                # 将字符串prompt转换为消息列表格式
-                messages = [{"role": "user", "content": prompt}]
-                response = await self.llm_client._call_api(messages)
+                
+                # 🆕 使用Token管理器进行精确token计数和成本追踪
+                if self.token_manager:
+                    # 将字符串prompt转换为消息列表格式
+                    messages = [{"role": "user", "content": prompt}]
+                    
+                    # 使用智能Token管理器进行优化调用
+                    response, token_usage = await self._call_llm_with_cost_tracking(
+                        messages, operation_name
+                    )
+                    
+                    # 记录成本信息到会话追踪
+                    if self.session_cost_tracking and token_usage:
+                        self._record_llm_call_cost(operation_name, token_usage, call_start_time)
+                    
+                else:
+                    # 回退到简单调用（不记录成本）
+                    messages = [{"role": "user", "content": prompt}]
+                    response = await self.llm_client._call_api(messages)
+                
                 logger.debug(f"✅ {operation_name} - 第{attempt}次尝试成功")
                 return response
                 
@@ -112,6 +177,102 @@ class SynthesisEngine:
         
         # 抛出运行时错误，不再使用简单回退
         raise RuntimeError(f"{operation_name} 失败：经过 {self.max_retries} 次重试仍无法与LLM正常通信。最后错误: {last_error}")
+    
+    async def _call_llm_with_cost_tracking(self, messages: List[Dict], operation_name: str) -> Tuple[str, Optional[Dict]]:
+        """使用Token管理器进行LLM调用并追踪成本"""
+        try:
+            # 精确计算输入token数
+            input_text = "\n".join([msg.get("content", "") for msg in messages])
+            input_tokens = await self.token_manager.count_tokens_accurately(
+                input_text, model="gemini-2.5-flash"
+            )
+            
+            # 调用LLM
+            response = await self.llm_client._call_api(messages)
+            
+            # 精确计算输出token数
+            output_tokens = await self.token_manager.count_tokens_accurately(
+                response, model="gemini-2.5-flash"
+            )
+            
+            # 计算成本（基于Gemini 2.5 Flash定价）
+            input_cost = (input_tokens / 1_000_000) * 0.30  # $0.30/M tokens
+            output_cost = (output_tokens / 1_000_000) * 2.50  # $2.50/M tokens
+            total_cost = input_cost + output_cost
+            
+            # 构建token使用记录
+            token_usage = {
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+                "estimated_cost_usd": total_cost,
+                "input_cost_usd": input_cost,
+                "output_cost_usd": output_cost,
+                "model": "gemini-2.5-flash",
+                "operation": operation_name
+            }
+            
+            logger.debug(f"💰 {operation_name} 成本: 输入{input_tokens}tokens(${input_cost:.6f}), "
+                        f"输出{output_tokens}tokens(${output_cost:.6f}), 总计${total_cost:.6f}")
+            
+            return response, token_usage
+            
+        except Exception as e:
+            logger.error(f"❌ Token追踪调用失败: {e}")
+            # 回退到简单调用
+            response = await self.llm_client._call_api(messages)
+            return response, None
+    
+    def _record_llm_call_cost(self, operation_name: str, token_usage: Dict, start_time: float):
+        """记录LLM调用成本到会话追踪"""
+        if not self.session_cost_tracking:
+            return
+            
+        # 更新总计
+        self.session_cost_tracking["total_prompt_tokens"] += token_usage["prompt_tokens"]
+        self.session_cost_tracking["total_completion_tokens"] += token_usage["completion_tokens"]
+        self.session_cost_tracking["total_cost_usd"] += token_usage["estimated_cost_usd"]
+        
+        # 按阶段记录成本
+        phase_key = self._map_operation_to_phase(operation_name)
+        if phase_key not in self.session_cost_tracking["phase_costs"]:
+            self.session_cost_tracking["phase_costs"][phase_key] = {
+                "tokens": 0,
+                "cost_usd": 0.0,
+                "call_count": 0
+            }
+        
+        phase_cost = self.session_cost_tracking["phase_costs"][phase_key]
+        phase_cost["tokens"] += token_usage["total_tokens"]
+        phase_cost["cost_usd"] += token_usage["estimated_cost_usd"]
+        phase_cost["call_count"] += 1
+        
+        # 记录详细调用信息
+        call_record = {
+            "operation": operation_name,
+            "phase": phase_key,
+            "timestamp": start_time,
+            "duration": time.time() - start_time,
+            **token_usage
+        }
+        self.session_cost_tracking["llm_calls"].append(call_record)
+    
+    def _map_operation_to_phase(self, operation_name: str) -> str:
+        """将操作名称映射到合成阶段"""
+        operation_lower = operation_name.lower()
+        
+        if "结论提取" in operation_name or "conclusion" in operation_lower:
+            return "seed_extraction"
+        elif "任务生成" in operation_name or "generate" in operation_lower or "atomic" in operation_lower:
+            return "task_expansion"
+        elif "验证" in operation_name or "validation" in operation_lower:
+            return "quality_validation"
+        elif "深度扩展" in operation_name or "depth" in operation_lower:
+            return "depth_extension"
+        elif "宽度扩展" in operation_name or "width" in operation_lower:
+            return "width_extension"
+        else:
+            return "other"
     
     async def synthesize_from_trajectories(self, trajectories_data: List[Dict], 
                                          generate_depth_extensions: bool = True,
@@ -211,12 +372,15 @@ class SynthesisEngine:
                     width_validations = await self.validator.batch_validate_tasks(filtered_width_tasks)
                     result.validation_results.extend(width_validations)
             
-            # 第四步：存储结果
-            logger.info("💾 第四步：存储合成结果")
-            await self._store_synthesis_results(result)
-            
             # 计算统计信息
             self._calculate_result_statistics(result)
+            
+            # 🆕 生成真实成本分析（在存储之前）
+            result.synthesis_cost_analysis = self._generate_synthesis_cost_analysis()
+            
+            # 第四步：存储结果（现在包含成本分析）
+            logger.info("💾 第四步：存储合成结果")
+            await self._store_synthesis_results(result)
             
             # 更新会话统计
             self._update_session_stats(result)
@@ -225,6 +389,13 @@ class SynthesisEngine:
             logger.info(f"🎉 Synthesis 合成完成: {session_id}, 耗时: {duration:.2f}s")
             logger.info(f"📊 生成统计: 原子{len(result.atomic_tasks)}, 深度{len(result.depth_extended_tasks)}, 宽度{len(result.width_extended_tasks)}")
             logger.info(f"✅ 有效任务: {result.valid_tasks_count}/{result.total_tasks_generated}")
+            
+            # 🆕 输出成本分析
+            if result.synthesis_cost_analysis:
+                cost_summary = result.synthesis_cost_analysis
+                logger.info(f"💰 合成成本: ${cost_summary['total_synthesis_cost_usd']:.6f}, "
+                           f"Token: {cost_summary['total_synthesis_tokens']}, "
+                           f"阶段数: {len(cost_summary.get('phases_executed', []))}")
             
             return result
             
@@ -1058,24 +1229,27 @@ class SynthesisEngine:
         logger.debug(f"💾 存储合成会话结果: {result.session_id}")
         
         try:
+            # 🆕 获取成本分析信息（如果可用）
+            synthesis_cost_analysis = result.synthesis_cost_analysis
+            
             # 存储原子任务
             for i, task in enumerate(result.atomic_tasks):
                 validation = result.validation_results[i] if i < len(result.validation_results) else None
-                await self.storage.store_atomic_task(task, validation)
+                await self.storage.store_atomic_task(task, validation, synthesis_cost_analysis)
             
             # 存储深度扩展任务
             depth_start_idx = len(result.atomic_tasks)
             for i, task in enumerate(result.depth_extended_tasks):
                 validation_idx = depth_start_idx + i
                 validation = result.validation_results[validation_idx] if validation_idx < len(result.validation_results) else None
-                await self.storage.store_depth_extended_task(task, validation)
+                await self.storage.store_depth_extended_task(task, validation, synthesis_cost_analysis)
             
             # 存储宽度扩展任务
             width_start_idx = depth_start_idx + len(result.depth_extended_tasks)
             for i, task in enumerate(result.width_extended_tasks):
                 validation_idx = width_start_idx + i
                 validation = result.validation_results[validation_idx] if validation_idx < len(result.validation_results) else None
-                await self.storage.store_width_extended_task(task, validation)
+                await self.storage.store_width_extended_task(task, validation, synthesis_cost_analysis)
             
             # 存储验证结果
             for validation in result.validation_results:
@@ -1227,6 +1401,72 @@ class SynthesisEngine:
         result.tool_required_count = sum(1 for v in result.validation_results if v.requires_tool)
         result.reasoning_only_count = result.valid_tasks_count - result.tool_required_count
     
+    def _generate_synthesis_cost_analysis(self) -> Optional[Dict[str, Any]]:
+        """生成真实的合成成本分析"""
+        if not self.session_cost_tracking:
+            logger.warning("⚠️ 未启用成本追踪，无法生成真实成本分析")
+            return None
+        
+        try:
+            cost_tracking = self.session_cost_tracking
+            
+            # 基础成本信息
+            total_cost_usd = cost_tracking["total_cost_usd"]
+            total_tokens = cost_tracking["total_prompt_tokens"] + cost_tracking["total_completion_tokens"]
+            
+            # 按阶段分解成本
+            phase_breakdown = {}
+            for phase, phase_data in cost_tracking["phase_costs"].items():
+                phase_breakdown[f"{phase}_cost_usd"] = phase_data["cost_usd"]
+                phase_breakdown[f"{phase}_tokens"] = phase_data["tokens"]
+                phase_breakdown[f"{phase}_calls"] = phase_data["call_count"]
+            
+            # 计算成本分解
+            cost_breakdown = {
+                "llm_cost_usd": total_cost_usd,
+                "prompt_cost_usd": (cost_tracking["total_prompt_tokens"] / 1_000_000) * 0.30,
+                "completion_cost_usd": (cost_tracking["total_completion_tokens"] / 1_000_000) * 2.50,
+                "phase_breakdown": phase_breakdown
+            }
+            
+            # 构建完整的成本分析
+            synthesis_cost_analysis = {
+                "total_synthesis_tokens": total_tokens,
+                "total_synthesis_cost_usd": total_cost_usd,
+                "synthesis_breakdown": cost_breakdown,
+                "prompt_tokens": cost_tracking["total_prompt_tokens"],
+                "completion_tokens": cost_tracking["total_completion_tokens"],
+                "model_used": "gemini-2.5-flash",
+                "pricing_per_million": {
+                    "input": 0.30,
+                    "output": 2.50
+                },
+                "llm_calls_count": len(cost_tracking["llm_calls"]),
+                "phases_executed": list(cost_tracking["phase_costs"].keys()),
+                "cost_efficiency": self._calculate_cost_efficiency(total_cost_usd, total_tokens),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"✅ 生成真实成本分析: ${total_cost_usd:.6f}, {total_tokens} tokens")
+            return synthesis_cost_analysis
+            
+        except Exception as e:
+            logger.error(f"❌ 生成成本分析失败: {e}")
+            return None
+    
+    def _calculate_cost_efficiency(self, total_cost: float, total_tokens: int) -> Dict[str, float]:
+        """计算成本效率指标"""
+        if total_tokens == 0:
+            return {"cost_per_token": 0.0, "tokens_per_dollar": 0.0}
+        
+        cost_per_token = total_cost / total_tokens
+        tokens_per_dollar = total_tokens / total_cost if total_cost > 0 else 0
+        
+        return {
+            "cost_per_token": cost_per_token,
+            "tokens_per_dollar": tokens_per_dollar
+        }
+
     def _update_session_stats(self, result: SynthesisResult) -> None:
         """更新会话统计"""
         self.session_stats["sessions_completed"] += 1

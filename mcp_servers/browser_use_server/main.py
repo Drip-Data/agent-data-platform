@@ -59,7 +59,32 @@ from core.llm_client import LLMClient
 from core.unified_tool_manager import UnifiedToolManager
 from core.shared_workspace import get_workspace_manager
 
+# 导入本地工具模块，解决重复导入问题
+try:
+    from utils import JSONExtractor, ResponseValidator, ConfigHelper
+except ImportError:
+    # 如果相对导入失败，尝试绝对导入
+    from mcp_servers.browser_use_server.utils import JSONExtractor, ResponseValidator, ConfigHelper
+
 logger = logging.getLogger(__name__)
+
+
+def safe_tool_execution(func):
+    """安全的工具执行装饰器"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            import traceback
+            error_msg = f"Tool execution failed: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"TRACEBACK: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "tool_execution_error"
+            }
+    return wrapper
 
 
 class StructuredOutputWrapper:
@@ -81,34 +106,9 @@ class StructuredOutputWrapper:
             else:
                 content = str(response)
             
-            # Try to parse as JSON for structured output
-            import json
-            import re  # 🔧 修复：在同步函数内部导入re模块，避免作用域问题
-            try:
-                # First try to parse directly
-                parsed = json.loads(content)
-                return StructuredResponse(parsed)
-            except (json.JSONDecodeError, TypeError):
-                # Try to extract JSON from markdown code blocks
-                try:
-                    # Look for JSON wrapped in markdown code blocks
-                    json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL)
-                    if json_match:
-                        json_content = json_match.group(1).strip()
-                        parsed = json.loads(json_content)
-                        return StructuredResponse(parsed)
-                    else:
-                        # Try to find JSON-like content without code blocks
-                        json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                        if json_match:
-                            json_content = json_match.group(0)
-                            parsed = json.loads(json_content)
-                            return StructuredResponse(parsed)
-                        else:
-                            raise ValueError("No JSON content found")
-                except (json.JSONDecodeError, ValueError):
-                    # If not valid JSON, wrap the string response
-                    return StructuredResponse({"response": content})
+            # 使用工具类解析结构化内容，避免重复导入
+            parsed = JSONExtractor.parse_structured_content(content)
+            return StructuredResponse(parsed)
                 
         except Exception as e:
             logger.error(f"Structured output wrapper error: {e}")
@@ -117,7 +117,6 @@ class StructuredOutputWrapper:
     
     async def ainvoke(self, input_data, config=None, **kwargs):
         """Async invoke the wrapped LLM and return structured response"""
-        import re  # 🔧 修复：在异步函数内部导入re模块，避免作用域问题
         try:
             # Get response from the LLM using apredict_messages if available
             if hasattr(self.llm_adapter, 'apredict_messages') and isinstance(input_data, list):
@@ -141,43 +140,15 @@ class StructuredOutputWrapper:
             
             logger.info(f"Structured wrapper response content: {content[:200]}...")
             
-            # Try to parse as JSON for structured output
-            import json
-            try:
-                # First try to parse directly
-                parsed = json.loads(content)
-                structured_resp = StructuredResponse(parsed)
-                logger.info(f"Created StructuredResponse with keys: {list(structured_resp.keys())}")
-                return structured_resp
-            except (json.JSONDecodeError, TypeError):
-                # Try to extract JSON from markdown code blocks
-                try:
-                    # Look for JSON wrapped in markdown code blocks
-                    json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL)
-                    if json_match:
-                        json_content = json_match.group(1).strip()
-                        parsed = json.loads(json_content)
-                        structured_resp = StructuredResponse(parsed)
-                        logger.info(f"Extracted JSON from markdown, created StructuredResponse with keys: {list(structured_resp.keys())}")
-                        logger.info(f"StructuredResponse type: {type(structured_resp)}, has action: {hasattr(structured_resp, 'action')}")
-                        if hasattr(structured_resp, 'action'):
-                            logger.info(f"Action attribute type: {type(structured_resp.action)}, value: {structured_resp.action}")
-                        return structured_resp
-                    else:
-                        # Try to find JSON-like content without code blocks
-                        json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                        if json_match:
-                            json_content = json_match.group(0)
-                            parsed = json.loads(json_content)
-                            structured_resp = StructuredResponse(parsed)
-                            logger.info(f"Extracted JSON pattern, created StructuredResponse with keys: {list(structured_resp.keys())}")
-                            return structured_resp
-                        else:
-                            raise ValueError("No JSON content found")
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"Failed to parse JSON even after extraction: {e}, returning raw content")
-                    # If not valid JSON, wrap the string response
-                    return StructuredResponse({"response": content})
+            # 使用工具类解析结构化内容，避免重复导入
+            parsed = JSONExtractor.parse_structured_content(content)
+            structured_resp = StructuredResponse(parsed)
+            logger.info(f"Created StructuredResponse with keys: {list(structured_resp.keys())}")
+            
+            if hasattr(structured_resp, 'action'):
+                logger.info(f"Action attribute type: {type(structured_resp.action)}, value: {structured_resp.action}")
+            
+            return structured_resp
                 
         except Exception as e:
             logger.error(f"Structured output wrapper async error: {e}")
@@ -837,43 +808,19 @@ class BrowserUseLLMAdapter(BaseChatModel):
     
     def _parse_structured_response(self, content):
         """Parse structured response from LLM content"""
-        import json
-        import re  # 🔧 修复：在函数内部导入re模块，确保在所有执行上下文中都可用
         try:
-            # First try to parse directly
-            parsed = json.loads(content)
+            # 🔧 修复：使用JSONExtractor工具类，彻底避免re作用域问题
+            parsed = JSONExtractor.parse_structured_content(content)
             structured_resp = StructuredResponse(parsed)
-            logger.info(f"Direct JSON parse successful, created StructuredResponse with keys: {list(structured_resp.keys())}")
+            logger.info(f"JSONExtractor parse successful, created StructuredResponse with keys: {list(structured_resp.keys())}")
+            
+            if hasattr(structured_resp, 'action'):
+                logger.info(f"Action attribute type: {type(structured_resp.action)}, value: {structured_resp.action}")
+            
             return structured_resp
-        except (json.JSONDecodeError, TypeError):
-            # Try to extract JSON from markdown code blocks
-            try:
-                # Look for JSON wrapped in markdown code blocks
-                json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL)
-                if json_match:
-                    json_content = json_match.group(1).strip()
-                    parsed = json.loads(json_content)
-                    structured_resp = StructuredResponse(parsed)
-                    logger.info(f"Extracted JSON from markdown, created StructuredResponse with keys: {list(structured_resp.keys())}")
-                    logger.info(f"StructuredResponse type: {type(structured_resp)}, has action: {hasattr(structured_resp, 'action')}")
-                    if hasattr(structured_resp, 'action'):
-                        logger.info(f"Action attribute type: {type(structured_resp.action)}, value: {structured_resp.action}")
-                    return structured_resp
-                else:
-                    # Try to find JSON-like content without code blocks
-                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                    if json_match:
-                        json_content = json_match.group(0)
-                        parsed = json.loads(json_content)
-                        structured_resp = StructuredResponse(parsed)
-                        logger.info(f"Extracted JSON pattern, created StructuredResponse")
-                        return structured_resp
-                    else:
-                        logger.warning("No JSON content found in response")
-                        return None
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"Failed to parse JSON even after extraction: {e}")
-                return None
+        except Exception as e:
+            logger.error(f"Error in structured response parsing: {e}")
+            return StructuredResponse({"error": str(e), "response": content})
 
 
 from core.unified_tool_manager import UnifiedToolManager

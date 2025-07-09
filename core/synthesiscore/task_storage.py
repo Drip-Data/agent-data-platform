@@ -58,7 +58,8 @@ class TaskStorage:
             if not file_path.exists():
                 file_path.touch()  # 只创建JSONL文件
     
-    async def store_atomic_task(self, task: AtomicTask, validation_result: Optional[TaskValidationResult] = None) -> bool:
+    async def store_atomic_task(self, task: AtomicTask, validation_result: Optional[TaskValidationResult] = None, 
+                              synthesis_cost_analysis: Optional[Dict[str, Any]] = None) -> bool:
         """存储原子任务"""
         try:
             # 所有原子任务存储到同一个文件
@@ -73,6 +74,41 @@ class TaskStorage:
             task_data["task_type"] = task.task_type.value
             task_data["complexity"] = task.complexity.value
             
+            # 🆕 注入合成成本信息
+            if synthesis_cost_analysis:
+                try:
+                    from core.cost_analyzer import get_cost_analyzer
+                    cost_analyzer = get_cost_analyzer()
+                    
+                    # 从synthesis_cost_analysis提取真实成本阶段
+                    synthesis_phases = []
+                    breakdown = synthesis_cost_analysis.get('synthesis_breakdown', {})
+                    phase_breakdown = breakdown.get('phase_breakdown', {})
+                    
+                    for key, value in phase_breakdown.items():
+                        if key.endswith('_cost_usd'):
+                            phase_name = key.replace('_cost_usd', '')
+                            tokens_key = f"{phase_name}_tokens"
+                            tokens = phase_breakdown.get(tokens_key, 0)
+                            
+                            synthesis_phases.append({
+                                'phase_name': phase_name,
+                                'tokens': tokens,
+                                'cost_usd': value
+                            })
+                    
+                    # 注入成本信息
+                    task_data = cost_analyzer.inject_synthesis_cost(
+                        task_data,
+                        synthesis_phases=synthesis_phases,
+                        source_trajectory_cost=0.0  # 可以根据需要调整
+                    )
+                    
+                    logger.debug(f"✅ 成本信息已注入到原子任务: {task.task_id}")
+                    
+                except Exception as cost_error:
+                    logger.warning(f"⚠️ 成本注入失败，但任务存储继续: {cost_error}")
+            
             # 异步写入
             async with aiofiles.open(file_path, 'a', encoding='utf-8') as f:
                 await f.write(json.dumps(task_data, ensure_ascii=False) + '\n')
@@ -84,7 +120,8 @@ class TaskStorage:
             logger.error(f"❌ 存储原子任务失败 {task.task_id}: {e}")
             return False
     
-    async def store_depth_extended_task(self, task: DepthExtendedTask, validation_result: Optional[TaskValidationResult] = None) -> bool:
+    async def store_depth_extended_task(self, task: DepthExtendedTask, validation_result: Optional[TaskValidationResult] = None,
+                                      synthesis_cost_analysis: Optional[Dict[str, Any]] = None) -> bool:
         """存储深度扩展任务"""
         try:
             # 所有综合任务存储到同一个文件
@@ -113,6 +150,41 @@ class TaskStorage:
             task_data["intermediate_task"]["task_type"] = task.intermediate_task.task_type.value
             task_data["intermediate_task"]["complexity"] = task.intermediate_task.complexity.value
             
+            # 🆕 注入合成成本信息（与原子任务相同的逻辑）
+            if synthesis_cost_analysis:
+                try:
+                    from core.cost_analyzer import get_cost_analyzer
+                    cost_analyzer = get_cost_analyzer()
+                    
+                    # 从synthesis_cost_analysis提取真实成本阶段
+                    synthesis_phases = []
+                    breakdown = synthesis_cost_analysis.get('synthesis_breakdown', {})
+                    phase_breakdown = breakdown.get('phase_breakdown', {})
+                    
+                    for key, value in phase_breakdown.items():
+                        if key.endswith('_cost_usd'):
+                            phase_name = key.replace('_cost_usd', '')
+                            tokens_key = f"{phase_name}_tokens"
+                            tokens = phase_breakdown.get(tokens_key, 0)
+                            
+                            synthesis_phases.append({
+                                'phase_name': phase_name,
+                                'tokens': tokens,
+                                'cost_usd': value
+                            })
+                    
+                    # 注入成本信息
+                    task_data = cost_analyzer.inject_synthesis_cost(
+                        task_data,
+                        synthesis_phases=synthesis_phases,
+                        source_trajectory_cost=0.0
+                    )
+                    
+                    logger.debug(f"✅ 成本信息已注入到深度扩展任务: {task.task_id}")
+                    
+                except Exception as cost_error:
+                    logger.warning(f"⚠️ 深度扩展任务成本注入失败，但任务存储继续: {cost_error}")
+            
             # 异步写入
             async with aiofiles.open(file_path, 'a', encoding='utf-8') as f:
                 await f.write(json.dumps(task_data, ensure_ascii=False) + '\n')
@@ -124,7 +196,8 @@ class TaskStorage:
             logger.error(f"❌ 存储深度扩展任务失败 {task.task_id}: {e}")
             return False
     
-    async def store_width_extended_task(self, task: WidthExtendedTask, validation_result: Optional[TaskValidationResult] = None) -> bool:
+    async def store_width_extended_task(self, task: WidthExtendedTask, validation_result: Optional[TaskValidationResult] = None,
+                                      synthesis_cost_analysis: Optional[Dict[str, Any]] = None) -> bool:
         """存储宽度扩展任务"""
         try:
             # 所有综合任务存储到同一个文件
@@ -147,6 +220,41 @@ class TaskStorage:
                 comp_task_data["created_at"] = task.component_tasks[i].created_at.isoformat()
                 comp_task_data["task_type"] = task.component_tasks[i].task_type.value
                 comp_task_data["complexity"] = task.component_tasks[i].complexity.value
+            
+            # 🆕 注入合成成本信息（与原子任务相同的逻辑）
+            if synthesis_cost_analysis:
+                try:
+                    from core.cost_analyzer import get_cost_analyzer
+                    cost_analyzer = get_cost_analyzer()
+                    
+                    # 从synthesis_cost_analysis提取真实成本阶段
+                    synthesis_phases = []
+                    breakdown = synthesis_cost_analysis.get('synthesis_breakdown', {})
+                    phase_breakdown = breakdown.get('phase_breakdown', {})
+                    
+                    for key, value in phase_breakdown.items():
+                        if key.endswith('_cost_usd'):
+                            phase_name = key.replace('_cost_usd', '')
+                            tokens_key = f"{phase_name}_tokens"
+                            tokens = phase_breakdown.get(tokens_key, 0)
+                            
+                            synthesis_phases.append({
+                                'phase_name': phase_name,
+                                'tokens': tokens,
+                                'cost_usd': value
+                            })
+                    
+                    # 注入成本信息
+                    task_data = cost_analyzer.inject_synthesis_cost(
+                        task_data,
+                        synthesis_phases=synthesis_phases,
+                        source_trajectory_cost=0.0
+                    )
+                    
+                    logger.debug(f"✅ 成本信息已注入到宽度扩展任务: {task.task_id}")
+                    
+                except Exception as cost_error:
+                    logger.warning(f"⚠️ 宽度扩展任务成本注入失败，但任务存储继续: {cost_error}")
             
             # 异步写入
             async with aiofiles.open(file_path, 'a', encoding='utf-8') as f:

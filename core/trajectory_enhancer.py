@@ -173,10 +173,46 @@ class TrajectoryEnhancer:
             return {"error": str(e)}
     
     def enhance_trajectory(self, trajectory: TrajectoryResult) -> TrajectoryResult:
-        """增强轨迹，添加详细元数据"""
+        """增强轨迹，添加详细元数据和成本信息"""
         try:
             # 计算LLM指标
             trajectory.llm_metrics = self.calculate_llm_metrics(trajectory)
+            
+            # 🆕 注入成本分析信息
+            from core.cost_analyzer import get_cost_analyzer
+            cost_analyzer = get_cost_analyzer()
+            
+            # 构建步骤日志用于成本分析
+            step_logs = []
+            for step in trajectory.steps:
+                step_log = {
+                    'step_id': step.step_id,
+                    'token_usage': {},
+                    'cost_info': {},
+                    'tools_used': [step.action_params.get('tool', 'unknown')] if step.action_params else []
+                }
+                
+                # 从LLM交互中收集token和成本信息
+                for interaction in step.llm_interactions:
+                    if interaction.token_usage:
+                        step_log['token_usage'] = interaction.token_usage
+                    if interaction.cost_info:
+                        step_log['cost_info'] = interaction.cost_info
+                
+                step_logs.append(step_log)
+            
+            # 将轨迹数据转换为字典格式用于成本分析
+            trajectory_dict = {
+                'task_id': trajectory.task_id,
+                'task_type': getattr(trajectory, 'task_type', 'unknown'),
+                'success': trajectory.success,
+                'execution_time': trajectory.total_duration,
+                'step_logs': step_logs
+            }
+            
+            # 分析并设置成本信息
+            cost_analysis = cost_analyzer.analyze_trajectory_cost(trajectory_dict, step_logs)
+            trajectory.cost_analysis = cost_analysis
             
             # 添加执行环境信息
             trajectory.execution_environment = self.get_execution_environment()
@@ -189,9 +225,9 @@ class TrajectoryEnhancer:
                 trajectory.metadata['session_id'] = f"session_{trajectory.task_id}_{int(trajectory.created_at)}"
             
             trajectory.metadata['enhanced_at'] = time.time()
-            trajectory.metadata['enhancer_version'] = "1.0.0"
+            trajectory.metadata['enhancer_version'] = "1.1.0"  # 版本号更新，表示加入了成本分析
             
-            logger.info(f"轨迹增强完成: {trajectory.task_id}")
+            logger.info(f"轨迹增强完成 (含成本分析): {trajectory.task_id}, 成本: ${cost_analysis.total_cost_usd:.4f}")
             return trajectory
             
         except Exception as e:

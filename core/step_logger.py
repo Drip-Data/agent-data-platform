@@ -609,13 +609,43 @@ class StepDiagnosticLogger:
         else:
             return "Poor"
     
+    def _get_current_model_from_config(self) -> str:
+        """从配置文件获取当前使用的模型名称"""
+        try:
+            from core.config_manager import ConfigManager
+            config_manager = ConfigManager()
+            llm_config = config_manager.get_llm_config()
+            
+            # 获取默认提供商
+            default_provider = llm_config.get('default_provider', 'gemini')
+            
+            # 获取提供商配置
+            provider_config = llm_config.get('llm_providers', {}).get(default_provider, {})
+            
+            # 返回实际模型名称
+            actual_model = provider_config.get('model', 'gemini-2.5-flash')
+            
+            # 将配置文件中的模型名称映射到成本计算中使用的标准名称
+            model_mapping = {
+                'gemini-2.5-flash-lite-preview-06-17': 'gemini-2.5-flash-lite',
+                'gemini-2.5-flash-preview-05-20': 'gemini-2.5-flash',
+                'gemini-2.5-pro': 'gemini-2.5-pro'
+            }
+            
+            return model_mapping.get(actual_model, 'gemini-2.5-flash')
+        except Exception as e:
+            logger.error(f"Failed to get model from config: {e}")
+            return 'gemini-2.5-flash'  # 回退到默认值
+    
     def _calculate_cost_metrics(self, token_usage: Dict, duration: float) -> Dict:
         """💰 基于Gemini 2.5实际定价的精确成本计算"""
         
         prompt_tokens = token_usage.get('prompt_tokens', 0)
         completion_tokens = token_usage.get('completion_tokens', 0)
         cached_tokens = token_usage.get('cached_tokens', 0)
-        model = token_usage.get('model', 'gemini-2.5-flash')
+        
+        # 🔧 修复：从配置文件获取实际模型，而不是硬编码
+        model = token_usage.get('model', self._get_current_model_from_config())
         
         # 确保token数为数字类型
         if isinstance(prompt_tokens, str) or isinstance(completion_tokens, str):

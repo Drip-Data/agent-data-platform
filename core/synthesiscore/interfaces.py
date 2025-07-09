@@ -237,6 +237,9 @@ class SynthesisResult:
     tool_required_count: int = 0
     reasoning_only_count: int = 0
     
+    # 🆕 真实成本分析信息
+    synthesis_cost_analysis: Optional[Dict[str, Any]] = None
+    
     # 元数据
     created_at: datetime = field(default_factory=datetime.now)
     source_trajectories: List[str] = field(default_factory=list)

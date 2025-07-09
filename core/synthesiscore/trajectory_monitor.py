@@ -248,9 +248,13 @@ class SimpleTrajectoryMonitor:
             return None
     
     async def _load_trajectories_data(self, file_path: str) -> List[Dict]:
-        """加载轨迹数据 - 支持JSONL格式"""
+        """加载轨迹数据 - 支持JSONL格式，并注入成本信息"""
         try:
             trajectories = []
+            
+            # 导入成本分析器
+            from core.cost_analyzer import get_cost_analyzer
+            cost_analyzer = get_cost_analyzer()
             
             # 检查是否是JSONL文件
             if file_path.endswith('.jsonl'):
@@ -260,6 +264,14 @@ class SimpleTrajectoryMonitor:
                         if line:
                             try:
                                 trajectory = json.loads(line)
+                                
+                                # 🆕 注入成本信息（如果尚未存在）
+                                if 'cost_analysis' not in trajectory:
+                                    trajectory = cost_analyzer.inject_trajectory_cost(
+                                        trajectory, 
+                                        step_logs=trajectory.get('step_logs', [])
+                                    )
+                                
                                 trajectories.append(trajectory)
                             except json.JSONDecodeError as e:
                                 logger.warning(f"⚠️ 跳过无效的JSONL行: {e}")
@@ -270,12 +282,21 @@ class SimpleTrajectoryMonitor:
                     data = json.load(f)
                 
                 if isinstance(data, dict) and 'trajectories' in data:
-                    trajectories = data['trajectories']
+                    raw_trajectories = data['trajectories']
                 elif isinstance(data, list):
-                    trajectories = data
+                    raw_trajectories = data
                 else:
                     logger.error("❌ 轨迹文件格式无效")
                     return []
+                
+                # 🆕 为JSON格式的轨迹注入成本信息
+                for trajectory in raw_trajectories:
+                    if 'cost_analysis' not in trajectory:
+                        trajectory = cost_analyzer.inject_trajectory_cost(
+                            trajectory,
+                            step_logs=trajectory.get('step_logs', [])
+                        )
+                    trajectories.append(trajectory)
             
             # 过滤出未处理的轨迹
             new_trajectories = []
@@ -313,12 +334,18 @@ class SimpleTrajectoryMonitor:
             logger.error(f"❌ 更新已处理轨迹记录失败: {e}")
     
     async def _export_to_seed_tasks(self, synthesis_result):
-        """导出任务为传统的seed_tasks.jsonl格式（向后兼容）"""
+        """导出任务为传统的seed_tasks.jsonl格式（向后兼容），并注入合成成本信息"""
         try:
             from datetime import datetime
+            from core.cost_analyzer import get_cost_analyzer
+            
+            cost_analyzer = get_cost_analyzer()
             
             # 合并所有任务
             all_tasks = []
+            
+            # 🆕 从synthesis_result中获取真实成本信息
+            synthesis_phases = self._extract_real_synthesis_phases(synthesis_result)
             
             # 导出原子任务
             for task in synthesis_result.atomic_tasks:
@@ -334,6 +361,14 @@ class SimpleTrajectoryMonitor:
                     "source": "synthesis_engine",
                     "created_at": task.created_at.isoformat()
                 }
+                
+                # 🆕 注入合成成本信息
+                seed_task = cost_analyzer.inject_synthesis_cost(
+                    seed_task, 
+                    synthesis_phases=synthesis_phases,
+                    source_trajectory_cost=0.05  # 假设源轨迹成本
+                )
+                
                 all_tasks.append(seed_task)
             
             # 导出深度扩展任务
@@ -351,6 +386,14 @@ class SimpleTrajectoryMonitor:
                     "source": "synthesis_engine",
                     "created_at": task.created_at.isoformat()
                 }
+                
+                # 🆕 注入合成成本信息
+                seed_task = cost_analyzer.inject_synthesis_cost(
+                    seed_task, 
+                    synthesis_phases=synthesis_phases,
+                    source_trajectory_cost=0.05
+                )
+                
                 all_tasks.append(seed_task)
             
             # 导出宽度扩展任务
@@ -368,6 +411,14 @@ class SimpleTrajectoryMonitor:
                     "source": "synthesis_engine",
                     "created_at": task.created_at.isoformat()
                 }
+                
+                # 🆕 注入合成成本信息
+                seed_task = cost_analyzer.inject_synthesis_cost(
+                    seed_task, 
+                    synthesis_phases=synthesis_phases,
+                    source_trajectory_cost=0.05
+                )
+                
                 all_tasks.append(seed_task)
             
             # 追加写入seed_tasks.jsonl文件
@@ -379,6 +430,154 @@ class SimpleTrajectoryMonitor:
             
         except Exception as e:
             logger.error(f"❌ 导出seed_tasks失败: {e}")
+    
+    def _extract_real_synthesis_phases(self, synthesis_result) -> List[Dict[str, Any]]:
+        """从synthesis_result中提取真实的合成阶段成本信息"""
+        try:
+            # 检查synthesis_result是否包含真实成本分析
+            if not hasattr(synthesis_result, 'synthesis_cost_analysis') or not synthesis_result.synthesis_cost_analysis:
+                logger.warning("⚠️ synthesis_result中没有真实成本分析，使用回退方法")
+                return self._generate_fallback_synthesis_phases(synthesis_result)
+            
+            cost_analysis = synthesis_result.synthesis_cost_analysis
+            synthesis_breakdown = cost_analysis.get("synthesis_breakdown", {})
+            phase_breakdown = synthesis_breakdown.get("phase_breakdown", {})
+            
+            # 构建真实的阶段成本列表
+            real_phases = []
+            
+            # 提取各个阶段的真实数据
+            phase_mappings = {
+                "seed_extraction": "种子提取",
+                "task_expansion": "任务扩展", 
+                "quality_validation": "质量验证",
+                "depth_extension": "深度扩展",
+                "width_extension": "宽度扩展"
+            }
+            
+            for phase_key, phase_name in phase_mappings.items():
+                tokens_key = f"{phase_key}_tokens"
+                cost_key = f"{phase_key}_cost_usd"
+                
+                if tokens_key in phase_breakdown and cost_key in phase_breakdown:
+                    phase_tokens = phase_breakdown[tokens_key]
+                    phase_cost = phase_breakdown[cost_key]
+                    
+                    if phase_tokens > 0:  # 只包含实际使用的阶段
+                        real_phases.append({
+                            "phase": phase_key,
+                            "phase_name": phase_name,
+                            "tokens": phase_tokens,
+                            "cost_usd": phase_cost
+                        })
+                        logger.debug(f"✅ 提取真实阶段成本: {phase_name} - {phase_tokens} tokens, ${phase_cost:.6f}")
+            
+            # 如果没有提取到任何阶段，使用总计数据
+            if not real_phases:
+                total_tokens = cost_analysis.get("total_synthesis_tokens", 0)
+                total_cost = cost_analysis.get("total_synthesis_cost_usd", 0.0)
+                
+                if total_tokens > 0:
+                    real_phases.append({
+                        "phase": "total_synthesis",
+                        "phase_name": "合成总计",
+                        "tokens": total_tokens,
+                        "cost_usd": total_cost
+                    })
+                    logger.info(f"✅ 使用合成总计成本: {total_tokens} tokens, ${total_cost:.6f}")
+            
+            if real_phases:
+                total_real_cost = sum(phase["cost_usd"] for phase in real_phases)
+                total_real_tokens = sum(phase["tokens"] for phase in real_phases)
+                logger.info(f"✅ 提取到 {len(real_phases)} 个真实合成阶段，总计: {total_real_tokens} tokens, ${total_real_cost:.6f}")
+                return real_phases
+            else:
+                logger.warning("⚠️ 未找到有效的真实成本数据，使用回退方法")
+                return self._generate_fallback_synthesis_phases(synthesis_result)
+                
+        except Exception as e:
+            logger.error(f"❌ 提取真实合成阶段失败: {e}")
+            return self._generate_fallback_synthesis_phases(synthesis_result)
+    
+    def _generate_fallback_synthesis_phases(self, synthesis_result) -> List[Dict[str, Any]]:
+        """当无法获取真实成本时的回退方法 - 基于任务数量进行估算"""
+        try:
+            # 基于生成的任务数量进行成本估算
+            atomic_count = len(synthesis_result.atomic_tasks) if synthesis_result.atomic_tasks else 0
+            depth_count = len(synthesis_result.depth_extended_tasks) if synthesis_result.depth_extended_tasks else 0
+            width_count = len(synthesis_result.width_extended_tasks) if synthesis_result.width_extended_tasks else 0
+            
+            # 基于Gemini 2.5 Flash定价进行估算
+            # 输入: $0.30/百万tokens, 输出: $2.50/百万tokens
+            base_tokens_per_task = 500  # 每个任务的基础token估算
+            base_cost_per_1k_tokens = (0.30 + 2.50) / 1000  # 约$0.0028/1k tokens
+            
+            fallback_phases = []
+            
+            if atomic_count > 0:
+                estimated_tokens = atomic_count * base_tokens_per_task
+                estimated_cost = (estimated_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "task_expansion",
+                    "phase_name": "任务扩展(估算)",
+                    "tokens": estimated_tokens,
+                    "cost_usd": estimated_cost
+                })
+            
+            if depth_count > 0:
+                estimated_tokens = depth_count * base_tokens_per_task * 1.5  # 深度扩展成本更高
+                estimated_cost = (estimated_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "depth_extension", 
+                    "phase_name": "深度扩展(估算)",
+                    "tokens": estimated_tokens,
+                    "cost_usd": estimated_cost
+                })
+            
+            if width_count > 0:
+                estimated_tokens = width_count * base_tokens_per_task * 1.2  # 宽度扩展成本适中
+                estimated_cost = (estimated_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "width_extension",
+                    "phase_name": "宽度扩展(估算)", 
+                    "tokens": estimated_tokens,
+                    "cost_usd": estimated_cost
+                })
+            
+            # 添加基础验证成本
+            if atomic_count > 0 or depth_count > 0 or width_count > 0:
+                validation_tokens = max(200, (atomic_count + depth_count + width_count) * 100)
+                validation_cost = (validation_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "quality_validation",
+                    "phase_name": "质量验证(估算)",
+                    "tokens": validation_tokens,
+                    "cost_usd": validation_cost
+                })
+            
+            if fallback_phases:
+                total_est_cost = sum(phase["cost_usd"] for phase in fallback_phases)
+                total_est_tokens = sum(phase["tokens"] for phase in fallback_phases)
+                logger.warning(f"⚠️ 使用回退成本估算: {total_est_tokens} tokens, ${total_est_cost:.6f} (基于{atomic_count}原子+{depth_count}深度+{width_count}宽度任务)")
+                return fallback_phases
+            else:
+                # 最终回退：使用最小成本
+                return [{
+                    "phase": "minimal_synthesis",
+                    "phase_name": "最小合成成本",
+                    "tokens": 100,
+                    "cost_usd": 0.0003  # 约100 tokens的成本
+                }]
+                
+        except Exception as e:
+            logger.error(f"❌ 生成回退合成阶段失败: {e}")
+            # 最终最小回退
+            return [{
+                "phase": "error_fallback",
+                "phase_name": "错误回退",
+                "tokens": 50,
+                "cost_usd": 0.0001
+            }]
     
     def _load_processed_trajectories(self) -> set:
         """加载已处理轨迹记录"""
