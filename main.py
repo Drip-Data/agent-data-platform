@@ -239,27 +239,72 @@ def parse_arguments():
     parser.add_argument('--config-dir', type=str, default="config", help='配置文件目录路径')
     parser.add_argument('--debug', action='store_true', help='启用调试模式')
     parser.add_argument('--start-services', action='store_true', help='启动所有服务（默认行为）')
+    parser.add_argument('--xml-streaming', action='store_true', default=True, help='启用XML streaming输出格式（显示原始的<think>、<search>、<answer>标签）[默认启用]')
+    parser.add_argument('--simple-runtime', action='store_true', default=True, help='使用简化运行时（减少冗余代码，专注核心功能）[默认启用]')
+    parser.add_argument('--trajectory-storage', type=str, default='daily_grouped', 
+                       choices=['individual', 'daily_grouped', 'weekly_grouped', 'monthly_grouped'],
+                       help='轨迹存储模式：individual(单独文件), daily_grouped(按日分组), weekly_grouped(按周分组), monthly_grouped(按月分组)')
     return parser.parse_args()
 
 def setup_signal_handlers(service_manager):
     """设置信号处理器以优雅关闭"""
+    shutdown_requested = False
+    
     def signal_handler(sig, frame):
-        logger.info(f"收到信号 {sig}，正在强制关闭所有服务...")
+        nonlocal shutdown_requested
         
-        # 设置一个短超时来尝试优雅关闭
+        if shutdown_requested:
+            logger.warning("⚠️ 收到第二次中断信号，强制退出...")
+            force_cleanup()
+            os._exit(1)
+        
+        shutdown_requested = True
+        logger.info(f"🛑 收到信号 {sig} (Ctrl+C)，正在优雅关闭服务...")
+        logger.info("💡 提示：再次按 Ctrl+C 可强制退出")
+        
+        # 创建异步任务来优雅关闭
         try:
-            # 尝试使用服务管理器的强制停止
-            service_manager.force_stop_all()
-            logger.info("服务管理器强制停止完成")
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果事件循环正在运行，安排优雅关闭任务
+                asyncio.create_task(graceful_shutdown(service_manager))
+            else:
+                # 如果没有事件循环，直接同步关闭
+                sync_graceful_shutdown(service_manager)
         except Exception as e:
-            logger.warning(f"服务管理器强制停止失败: {e}")
-        
-        # 无论如何都执行强制清理
-        force_cleanup()
-        
-        # 强制退出
-        logger.info("强制退出系统")
-        os._exit(0)
+            logger.error(f"❌ 优雅关闭失败，执行强制关闭: {e}")
+            force_cleanup()
+            os._exit(1)
+    
+    async def graceful_shutdown(service_manager):
+        """异步优雅关闭"""
+        try:
+            logger.info("🔄 开始优雅关闭所有服务...")
+            await asyncio.wait_for(service_manager.stop_all(), timeout=15)
+            logger.info("✅ 所有服务已优雅关闭")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ 服务关闭超时，执行强制清理")
+            force_cleanup()
+        except Exception as e:
+            logger.error(f"❌ 优雅关闭失败: {e}")
+            force_cleanup()
+        finally:
+            logger.info("👋 Agent Data Platform 已安全退出")
+            os._exit(0)
+    
+    def sync_graceful_shutdown(service_manager):
+        """同步优雅关闭"""
+        try:
+            logger.info("🔄 开始优雅关闭所有服务...")
+            service_manager.force_stop_all()  # 同步停止
+            logger.info("✅ 所有服务已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭失败: {e}")
+            force_cleanup()
+        finally:
+            logger.info("👋 Agent Data Platform 已退出")
+            os._exit(0)
     
     async def emergency_shutdown(service_manager):
         """紧急关闭流程"""
@@ -335,9 +380,9 @@ def setup_signal_handlers(service_manager):
             except:
                 pass
     
-    # 注册信号处理器
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # 信号处理器已暂时移除 - 避免误退出
+    # signal.signal(signal.SIGINT, signal_handler)
+    # signal.signal(signal.SIGTERM, signal_handler)
 
 async def main_async():
     """异步主函数，应用入口点"""
@@ -385,55 +430,48 @@ async def main_async():
     logger.debug("✅ RedisManager初始化完成")
     
     # ToolScore服务启动后，获取其实际端口
-    # 注意：ToolScore MCP服务器和HTTP监控API可能使用不同的端口
-    # 根据日志，ToolScore MCP服务器动态分配的端口是8092
-    # ToolScore HTTP监控API的端口是8091 (来自ports_config.yaml)
-    # 确保这里使用正确的端口来初始化客户端
-    
-    # 假设ToolScore MCP服务器的实际端口由toolscore_service管理
-    # 在toolscore_service启动后，可以从其内部获取实际端口
-    # 从ports_config.yaml获取ToolScore MCP和HTTP API的端口
     ports_config = config_manager.get_ports_config()
-    
-    # ToolScore MCP服务器的端口
-    # 优先使用配置的端口，如果配置了auto_detect，则ToolScore服务内部会动态分配
-    # 这里我们直接从配置中读取，因为ToolScore服务会确保它监听的是这个端口或动态分配的端口
     toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
-    
-    # ToolScore HTTP监控API的端口
     toolscore_http_port = ports_config['mcp_servers']['toolscore_http']['port']
-    
     toolscore_http_endpoint = f"http://localhost:{toolscore_http_port}"
     toolscore_websocket_endpoint = f"ws://localhost:{toolscore_mcp_port}/websocket"
     
     # 为运行时实例化专用的ToolScore客户端
     runtime_toolscore_client = RuntimeToolScoreClient(toolscore_http_endpoint)
     
-    # 为其他核心组件实例化核心ToolScore客户端 (如果需要)
+    # 为其他核心组件实例化核心ToolScore客户端
     core_toolscore_client = CoreToolScoreClient(config_manager)
     
-    llm_client = LLMClient(config_manager.get_llm_config()) # LLMClient需要LLM配置
+    # 实例化统一工具管理器和LLM客户端
+    from core.unified_tool_manager import UnifiedToolManager
+    unified_tool_manager = UnifiedToolManager()
+    llm_client = LLMClient(config_manager.get_llm_config(), tool_manager=unified_tool_manager)
     
     # Task Processing Components
     task_loader = TaskLoader(task_file)
-    task_enhancer = TaskEnhancer(core_toolscore_client)
-    task_distributor = TaskDistributor(redis_url, metrics) # 注入metrics
+    task_enhancer = TaskEnhancer(core_toolscore_client, simple_mode=args.simple_runtime)
+    task_distributor = TaskDistributor(redis_url, metrics)
     
     # Monitoring Components
     queue_monitor = QueueMonitor(redis_url)
-    system_monitor = SystemMonitor(redis_url, config_manager) # 注入config_manager
+    system_monitor = SystemMonitor(redis_url, config_manager)
+
+    # 实例化Orchestrator
+    from core.orchestrator import Orchestrator
+    orchestrator = Orchestrator(
+        tool_manager=unified_tool_manager,
+        llm_client=llm_client,
+        redis_manager=redis_manager,
+        metrics_manager=metrics
+    )
 
     # 创建服务管理器
     service_manager = ServiceManager()
     
-    # 注册所有服务
-    # 注意：这里需要调整服务的initialize_fn和start_fn，以接收新实例化的组件
-    # 这部分需要根据实际的服务实现进行调整，目前只是占位
-    
-    # 示例：注册 TaskProcessingCoordinator 作为服务
+    # 注册TaskProcessingCoordinator
     service_manager.register_service(
         name="task_processing_coordinator",
-        initialize_fn=lambda config: None, # 实际初始化在main_async中完成
+        initialize_fn=lambda config: None,
         start_fn=lambda: asyncio.create_task(
             TaskProcessingCoordinator(
                 redis_url=redis_url,
@@ -443,18 +481,19 @@ async def main_async():
                 task_loader=task_loader,
                 task_enhancer=task_enhancer,
                 task_distributor=task_distributor,
+                orchestrator=orchestrator,
                 queue_mapping=queue_mapping
             ).start()
         ),
-        stop_fn=lambda: logger.info("TaskProcessingCoordinator 停止中..."), # 简单的停止逻辑
-        health_check_fn=lambda: True, # 简单的健康检查
-        dependencies=["redis", "toolscore"] # 依赖Redis和ToolScore
+        stop_fn=lambda: logger.info("TaskProcessingCoordinator 停止中..."),
+        health_check_fn=lambda: True,
+        dependencies=["redis", "toolscore"]
     )
 
-    # 注册其他现有服务 (需要调整其initialize_fn和start_fn以接收依赖)
+    # 注册其他服务
     service_manager.register_service(
         name="redis",
-        initialize_fn=lambda config: redis_service.initialize(redis_manager), # 传递redis_manager实例
+        initialize_fn=lambda config: redis_service.initialize(redis_manager),
         start_fn=redis_service.start,
         stop_fn=redis_service.stop,
         health_check_fn=redis_service.health_check,
@@ -463,7 +502,7 @@ async def main_async():
     
     service_manager.register_service(
         name="toolscore",
-        initialize_fn=lambda config: toolscore_service.initialize(config_manager), # 传递config_manager实例
+        initialize_fn=lambda config: toolscore_service.initialize(config_manager),
         start_fn=toolscore_service.start,
         stop_fn=toolscore_service.stop,
         health_check_fn=toolscore_service.health_check,
@@ -473,8 +512,7 @@ async def main_async():
     service_manager.register_service(
         name="mcp_servers",
         initialize_fn=lambda config: mcp_server_launcher.initialize(
-            config_manager, 
-            service_container=toolscore_service.get_service_container()
+            config_manager, service_manager, unified_tool_manager
         ),
         start_fn=mcp_server_launcher.start,
         stop_fn=mcp_server_launcher.stop,
@@ -498,8 +536,10 @@ async def main_async():
             config_manager,
             llm_client,
             runtime_toolscore_client,
-            toolscore_websocket_endpoint, # 传入WebSocket端点
-            redis_manager # 传入Redis管理器
+            unified_tool_manager,
+            toolscore_websocket_endpoint,
+            redis_manager,
+            args.trajectory_storage
         ),
         start_fn=runtime_service.start,
         stop_fn=runtime_service.stop,
@@ -517,14 +557,18 @@ async def main_async():
     
     service_manager.register_service(
         name="synthesis",
-        initialize_fn=lambda config: synthesis_service.initialize(synthesis_config), # 传入完整配置
+        initialize_fn=lambda config: synthesis_service.initialize(
+            synthesis_config, 
+            tool_manager=unified_tool_manager
+        ),
         start_fn=synthesis_service.start,
         stop_fn=synthesis_service.stop,
         health_check_fn=synthesis_service.health_check,
         dependencies=["redis"]
     )
     
-    setup_signal_handlers(service_manager)
+    # 信号处理器已暂时移除 - 用户可以通过重启main来自动清理进程
+    # setup_signal_handlers(service_manager)
     
     try:
         logger.debug("🔧 开始初始化所有服务...")
@@ -553,7 +597,7 @@ async def main_async():
 
 def main():
     # 设置统一日志捕获
-    unified_log_path = os.path.join('logs', 'unified.log')
+    unified_log_path = os.path.join('logs', 'System.log')
     
     # 在开始时写入分隔符
     os.makedirs('logs', exist_ok=True)

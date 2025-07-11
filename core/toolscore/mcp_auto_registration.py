@@ -47,26 +47,26 @@ class MCPAutoRegistration:
         self.mcp_servers_dir = self.project_root / "mcp_servers"
         self.tool_library: Optional[UnifiedToolLibrary] = None
         
-        # 内置服务器配置（作为备用）
+        # 内置服务器配置（作为备用）- 与config/mcp_servers.json保持一致
         self.builtin_servers = {
             'microsandbox_server': {
                 'service_id': 'microsandbox',
-                'port': 8081,
+                'port': 8090,
                 'description': '在隔离环境中安全执行Python代码'
             },
             'browser_use_server': {
                 'service_id': 'browser_use', 
-                'port': 8084,
+                'port': 8082,  # 修复：使用正确的端口8082
                 'description': 'AI驱动的浏览器自动化工具'
             },
             'deepsearch_server': {
                 'service_id': 'deepsearch',
-                'port': 8085,
+                'port': 8086,
                 'description': 'AI驱动的深度网络研究工具'
             },
             'search_tool_server': {
                 'service_id': 'mcp-search-tool',
-                'port': 8086,
+                'port': 8080,
                 'description': '项目文件内容搜索和工具需求分析器'
             }
         }

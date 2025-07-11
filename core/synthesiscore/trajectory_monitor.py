@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Trajectory Monitor - 轨迹监控器
-自动监控轨迹文件变化，使用SynthesisCore v2.0生成seed_task
+简化轨迹监控器 - 自动监控轨迹文件变化并生成种子任务
+绕过复杂的Redis配置，专注于核心功能
 """
 
 import asyncio
@@ -15,99 +15,72 @@ from typing import Dict, List, Optional, Any
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from core.interfaces import TrajectoryResult, TaskSpec, TaskType, ExecutionStep, ActionType
-from core.llm_client import LLMClient
-from core.toolscore.mcp_client import MCPToolClient
-from .enhanced_synthesis_engine import SynthesisCoreV2
-from .enhanced_interfaces import AtomicTask, ExtendedTask, CompositeTask
-
 logger = logging.getLogger(__name__)
 
 
-class TrajectoryFileHandler(FileSystemEventHandler):
-    """轨迹文件事件处理器"""
+class SimpleTrajectoryFileHandler(FileSystemEventHandler):
+    """简化的轨迹文件事件处理器"""
     
-    def __init__(self, trajectory_monitor):
-        self.trajectory_monitor = trajectory_monitor
+    def __init__(self, monitor):
+        self.monitor = monitor
         self.last_processed = {}
         
     def on_modified(self, event):
-        """文件修改事件"""
+        """文件修改事件 - 监控实际的轨迹文件格式"""
         if event.is_directory:
             return
             
-        if event.src_path.endswith('trajectories_collection.json'):
+        # 监控实际的轨迹文件：trajectories_YYYY-MM-DD.jsonl
+        if (event.src_path.endswith('.jsonl') and 
+            'trajectories_' in os.path.basename(event.src_path) and
+            os.path.basename(event.src_path).startswith('trajectories_')):
+            
             # 避免频繁触发，设置最小间隔
             current_time = time.time()
             last_time = self.last_processed.get(event.src_path, 0)
             
-            if current_time - last_time > 2.0:  # 2秒间隔
+            if current_time - last_time > 5.0:  # 5秒间隔，避免处理过于频繁
                 self.last_processed[event.src_path] = current_time
                 logger.info(f"📁 检测到轨迹文件变化: {event.src_path}")
+                logger.info(f"🚀 启动TaskCraft任务合成流程...")
                 
-                # 异步处理 - 使用线程安全的方式调度协程
+                # 使用线程池执行异步任务
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 try:
-                    # 尝试获取主线程的事件循环
-                    try:
-                        # 从监控器获取事件循环引用
-                        if hasattr(self.trajectory_monitor, '_main_loop') and self.trajectory_monitor._main_loop:
-                            loop = self.trajectory_monitor._main_loop
-                            if loop.is_running():
-                                # 使用call_soon_threadsafe从其他线程安全地调度协程
-                                asyncio.run_coroutine_threadsafe(
-                                    self.trajectory_monitor.process_trajectory_changes(event.src_path),
-                                    loop
-                                )
-                            else:
-                                logger.warning("⚠️ 主事件循环未运行，跳过轨迹处理")
-                        else:
-                            logger.warning("⚠️ 无法获取主事件循环引用，跳过轨迹处理")
-                    except RuntimeError as re:
-                        # 如果获取事件循环失败，记录但不抛出异常
-                        logger.warning(f"⚠️ 无法获取事件循环: {re}")
-                except Exception as e:
-                    logger.warning(f"⚠️ 处理轨迹变化时出错: {e}")
+                    loop.run_until_complete(
+                        self.monitor.process_trajectory_changes(event.src_path)
+                    )
+                finally:
+                    loop.close()
 
 
-class TrajectoryMonitor:
-    """轨迹监控器 - 集成SynthesisCore v2.0"""
+class SimpleTrajectoryMonitor:
+    """简化轨迹监控器 - 专注于文件监控和种子任务生成"""
     
-    def __init__(self, llm_client: LLMClient, mcp_client: Optional[MCPToolClient] = None,
-                 trajectories_dir: str = None, seed_tasks_file: str = None):
-        self.llm_client = llm_client
-        self.mcp_client = mcp_client
-        
+    def __init__(self, trajectories_dir: str = None, seed_tasks_file: str = None):
         # 路径配置 - 使用动态路径替代硬编码
         from core.utils.path_utils import get_output_dir
         
         self.trajectories_dir = trajectories_dir or str(get_output_dir("trajectories"))
         self.seed_tasks_file = seed_tasks_file or str(get_output_dir() / "seed_tasks.jsonl")
         self.trajectories_collection_file = os.path.join(self.trajectories_dir, "trajectories_collection.json")
-        self.processed_trajectories_file = os.path.join(self.trajectories_dir, "processed_trajectories.json")
-        
-        # 事件循环引用（用于线程安全调度）
-        self._main_loop = None
-        
-        # SynthesisCore v2.0
-        self.synthesis_core = SynthesisCoreV2(llm_client, mcp_client)
+        self.processed_trajectories_file = os.path.join(self.trajectories_dir, "..", "processed_trajectories.json")
         
         # 文件监控
         self.observer = Observer()
-        self.file_handler = TrajectoryFileHandler(self)
+        self.file_handler = SimpleTrajectoryFileHandler(self)
         
         # 已处理轨迹记录
         self.processed_trajectories = self._load_processed_trajectories()
         
-        logger.info(f"🔧 TrajectoryMonitor初始化完成")
+        logger.info(f"🔧 SimpleTrajectoryMonitor初始化完成")
         logger.info(f"📂 监控目录: {self.trajectories_dir}")
         logger.info(f"📝 种子文件: {self.seed_tasks_file}")
     
     async def initialize(self):
         """初始化监控器"""
         try:
-            # 初始化SynthesisCore v2.0
-            await self.synthesis_core.initialize()
-            
             # 确保目录和文件存在
             os.makedirs(os.path.dirname(self.seed_tasks_file), exist_ok=True)
             os.makedirs(self.trajectories_dir, exist_ok=True)
@@ -115,27 +88,20 @@ class TrajectoryMonitor:
             # 处理现有轨迹
             await self.process_existing_trajectories()
             
-            logger.info("✅ TrajectoryMonitor初始化完成")
+            logger.info("✅ SimpleTrajectoryMonitor初始化完成")
             
         except Exception as e:
-            logger.error(f"❌ TrajectoryMonitor初始化失败: {e}")
+            logger.error(f"❌ SimpleTrajectoryMonitor初始化失败: {e}")
             raise
     
     async def start_monitoring(self):
         """开始监控轨迹文件"""
         try:
-            # 获取当前事件循环引用（用于线程安全调度）
-            try:
-                self._main_loop = asyncio.get_running_loop()
-                logger.debug("✅ 获取主事件循环引用成功")
-            except RuntimeError:
-                logger.warning("⚠️ 无法获取当前事件循环，文件监控可能无法正常工作")
-            
-            # 设置文件监控
+            # 设置文件监控 - 递归监控包括grouped子目录
             self.observer.schedule(
                 self.file_handler,
                 path=self.trajectories_dir,
-                recursive=False
+                recursive=True  # 启用递归监控，监控grouped/YYYY-MM-DD/子目录
             )
             
             # 启动监控
@@ -154,385 +120,199 @@ class TrajectoryMonitor:
                 self.observer.join()
                 logger.info("🛑 轨迹文件监控已停止")
             
-            await self.synthesis_core.close()
-            logger.info("🔒 SynthesisCore已关闭")
-            
         except Exception as e:
             logger.error(f"❌ 停止监控失败: {e}")
     
     async def process_existing_trajectories(self):
-        """处理现有轨迹"""
+        """处理现有轨迹 - 扫描grouped目录下的所有.jsonl文件"""
         logger.info("🔄 检查并处理现有轨迹...")
         
-        if os.path.exists(self.trajectories_collection_file):
-            await self.process_trajectory_changes(self.trajectories_collection_file)
+        # 扫描grouped目录下的所有轨迹文件
+        grouped_dir = os.path.join(self.trajectories_dir, "grouped")
+        if os.path.exists(grouped_dir):
+            for date_dir in os.listdir(grouped_dir):
+                date_path = os.path.join(grouped_dir, date_dir)
+                if os.path.isdir(date_path):
+                    for file_name in os.listdir(date_path):
+                        if (file_name.startswith('trajectories_') and 
+                            file_name.endswith('.jsonl')):
+                            file_path = os.path.join(date_path, file_name)
+                            logger.info(f"📁 发现现有轨迹文件: {file_path}")
+                            await self.process_trajectory_changes(file_path)
         else:
             logger.info("📝 没有现有轨迹文件")
     
     async def process_trajectory_changes(self, file_path: str):
-        """处理轨迹文件变化"""
+        """处理轨迹文件变化 - 使用SynthesisEngine进行LLM驱动的任务生成"""
         logger.info(f"🔄 处理轨迹文件: {file_path}")
         
         try:
-            # 读取轨迹文件
-            trajectories = self._load_trajectories_from_file(file_path)
+            # 使用SynthesisEngine进行真正的TaskCraft算法处理
+            from .synthesis_engine import SynthesisEngine
+            from core.llm_client import LLMClient
             
-            if not trajectories:
-                logger.warning("⚠️ 轨迹文件为空或无效")
+            # 初始化LLM客户端
+            llm_client = await self._initialize_llm_client()
+            if not llm_client:
+                logger.error("❌ LLM客户端初始化失败，无法进行智能任务生成")
                 return
             
-            # 筛选未处理的轨迹
-            new_trajectories = self._filter_new_trajectories(trajectories)
-            
-            if not new_trajectories:
-                logger.info("✅ 没有新的轨迹需要处理")
-                return
-            
-            logger.info(f"🆕 发现 {len(new_trajectories)} 个新轨迹，开始处理...")
-            
-            # 调试：显示所有新轨迹的信息
-            logger.info("🔍 所有新轨迹详情:")
-            for i, trajectory in enumerate(new_trajectories):
-                logger.info(f"  {i+1}. task_id={trajectory.task_id}, runtime_id={trajectory.runtime_id}, success={trajectory.success}")
-            
-            # 过滤出值得处理的轨迹
-            valid_trajectories = []
-            for trajectory in new_trajectories:
-                if self._should_process_trajectory(trajectory):
-                    valid_trajectories.append(trajectory)
-                    logger.info(f"✅ 轨迹通过过滤: {trajectory.task_id} (runtime={trajectory.runtime_id}, success={trajectory.success})")
-                else:
-                    logger.debug(f"⏭️ 跳过轨迹: {trajectory.task_id}")
-            
-            logger.info(f"📊 轨迹过滤结果: {len(valid_trajectories)}/{len(new_trajectories)} 个轨迹通过过滤")
-            
-            if not valid_trajectories:
-                logger.warning("⚠️ 没有有效轨迹可处理")
-                return {"success": False, "message": "No valid trajectories to process"}
-            
-            # 使用SynthesisCore v2.0处理有效轨迹
-            result = await self.synthesis_core.synthesize_tasks(
-                trajectories=valid_trajectories,
-                mode="full",  # 生成所有类型的任务
-                verify_quality=True
+            # 创建 SynthesisEngine，使用专门的SynthesisTask目录
+            engine = SynthesisEngine(
+                llm_client=llm_client,
+                storage_dir="output/SynthesisTask"
             )
             
-            if result["success"]:
-                # 转换为种子任务并保存
-                await self._convert_and_save_seed_tasks(result)
+            # 加载轨迹数据
+            trajectories_data = await self._load_trajectories_data(file_path)
+            if not trajectories_data:
+                logger.warning("⚠️ 没有找到有效的轨迹数据")
+                return
+            
+            # 执行TaskCraft算法进行任务合成
+            logger.info(f"🤖 开始执行TaskCraft算法，处理 {len(trajectories_data)} 个轨迹")
+            result = await engine.synthesize_from_trajectories(
+                trajectories_data=trajectories_data,
+                generate_depth_extensions=True,
+                generate_width_extensions=True,
+                max_atomic_tasks=10
+            )
+            
+            if result and result.total_tasks_generated > 0:
+                logger.info(f"✅ TaskCraft任务合成完成:")
+                logger.info(f"  原子任务: {len(result.atomic_tasks)} 个")
+                logger.info(f"  深度扩展: {len(result.depth_extended_tasks)} 个")
+                logger.info(f"  宽度扩展: {len(result.width_extended_tasks)} 个")
+                logger.info(f"  有效任务: {result.valid_tasks_count}/{result.total_tasks_generated}")
                 
-                # 只标记成功处理的有效轨迹为已处理
-                self._update_processed_trajectories([t.task_id for t in valid_trajectories])
+                # 更新已处理记录
+                await self._update_processed_trajectories(result.source_trajectories)
                 
-                logger.info(f"✅ 轨迹处理完成，生成种子任务: 原子 {len(result['atomic_tasks'])}, 扩展 {len(result['extended_tasks'])}, 复合 {len(result['composite_tasks'])}")
-                logger.info(f"✅ 标记 {len(valid_trajectories)} 个有效轨迹为已处理")
+                # 导出为传统的seed_tasks.jsonl格式（向后兼容）
+                await self._export_to_seed_tasks(result)
             else:
-                logger.error(f"❌ SynthesisCore处理失败: {result.get('error', 'Unknown error')}")
-                logger.warning(f"⚠️ 不标记轨迹为已处理，以便下次重试")
+                logger.warning("⚠️ 没有生成有效的任务")
                 
         except Exception as e:
             logger.error(f"❌ 处理轨迹变化失败: {e}")
+            import traceback
+            traceback.print_exc()
     
-    def _load_trajectories_from_file(self, file_path: str) -> List[TrajectoryResult]:
-        """从文件加载轨迹"""
+    async def _initialize_llm_client(self):
+        """初始化LLM客户端"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            from core.llm_client import LLMClient
+            from core.unified_tool_manager import UnifiedToolManager
+            import yaml
+            import os
             
+            # 读取LLM配置
+            config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "llm_config.yaml")
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = yaml.safe_load(f)
+                    
+                    # 使用统一的LLM配置格式
+                    default_provider = config_data.get('default_provider', 'gemini')
+                    provider_config = config_data.get('llm_providers', {}).get(default_provider, {})
+                    
+                    llm_config = {
+                        'provider': default_provider,
+                        'model': provider_config.get('model', 'gemini-2.5-flash-lite-preview-06-17'),
+                        'api_key': provider_config.get('api_key', ''),
+                        'temperature': provider_config.get('temperature', 0.2),
+                        'max_tokens': provider_config.get('max_tokens', 8192)
+                    }
+                    
+                    if default_provider == 'gemini' and provider_config.get('api_base'):
+                        llm_config['api_base'] = provider_config['api_base']
+            else:
+                logger.warning("⚠️ LLM配置文件不存在，使用默认配置")
+                # 使用默认配置
+                llm_config = {
+                    'provider': 'gemini',
+                    'model': 'gemini-2.5-flash-lite-preview-06-17',
+                    'temperature': 0.2
+                }
+            
+            # 创建tool_manager实例
+            tool_manager = UnifiedToolManager()
+            
+            # 创建LLM客户端
+            client = LLMClient(config=llm_config, tool_manager=tool_manager)
+            logger.info("✅ LLM客户端初始化成功")
+            return client
+                
+        except Exception as e:
+            logger.error(f"❌ LLM客户端初始化失败: {e}")
+            return None
+    
+    async def _load_trajectories_data(self, file_path: str) -> List[Dict]:
+        """加载轨迹数据 - 支持JSONL格式，并注入成本信息"""
+        try:
             trajectories = []
-            trajectory_list = data.get('trajectories', []) if isinstance(data, dict) else data
             
-            for traj_data in trajectory_list:
-                try:
-                    trajectory = self._convert_to_trajectory_result(traj_data)
-                    if trajectory:
-                        trajectories.append(trajectory)
-                except Exception as e:
-                    logger.error(f"❌ 转换轨迹数据失败: {e}")
-                    continue
+            # 导入成本分析器
+            from core.cost_analyzer import get_cost_analyzer
+            cost_analyzer = get_cost_analyzer()
             
-            logger.info(f"📋 从文件加载 {len(trajectories)} 个轨迹")
-            return trajectories
+            # 检查是否是JSONL文件
+            if file_path.endswith('.jsonl'):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                trajectory = json.loads(line)
+                                
+                                # 🆕 注入成本信息（如果尚未存在）
+                                if 'cost_analysis' not in trajectory:
+                                    trajectory = cost_analyzer.inject_trajectory_cost(
+                                        trajectory, 
+                                        step_logs=trajectory.get('step_logs', [])
+                                    )
+                                
+                                trajectories.append(trajectory)
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"⚠️ 跳过无效的JSONL行: {e}")
+                                continue
+            else:
+                # 处理JSON格式
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                if isinstance(data, dict) and 'trajectories' in data:
+                    raw_trajectories = data['trajectories']
+                elif isinstance(data, list):
+                    raw_trajectories = data
+                else:
+                    logger.error("❌ 轨迹文件格式无效")
+                    return []
+                
+                # 🆕 为JSON格式的轨迹注入成本信息
+                for trajectory in raw_trajectories:
+                    if 'cost_analysis' not in trajectory:
+                        trajectory = cost_analyzer.inject_trajectory_cost(
+                            trajectory,
+                            step_logs=trajectory.get('step_logs', [])
+                        )
+                    trajectories.append(trajectory)
+            
+            # 过滤出未处理的轨迹
+            new_trajectories = []
+            for traj in trajectories:
+                traj_id = traj.get('task_id', f"traj_{hash(str(traj))}")
+                if traj_id not in self.processed_trajectories:
+                    new_trajectories.append(traj)
+            
+            logger.info(f"📊 加载轨迹数据: 总计{len(trajectories)}个，新增{len(new_trajectories)}个")
+            return new_trajectories
             
         except Exception as e:
-            logger.error(f"❌ 加载轨迹文件失败 {file_path}: {e}")
+            logger.error(f"❌ 加载轨迹数据失败: {e}")
             return []
     
-    def _convert_to_trajectory_result(self, traj_data: Dict) -> Optional[TrajectoryResult]:
-        """转换轨迹数据格式"""
-        try:
-            # 调试日志：检查数据结构
-            logger.debug(f"🔍 TM Converting trajectory: {traj_data.get('task_id', 'unknown')}")
-            
-            # 基础信息
-            task_id = traj_data.get('task_id', f"traj_{int(time.time())}")
-            task_description = traj_data.get('task_description', traj_data.get('description', ''))
-            runtime_id = traj_data.get('runtime_id', 'unknown')
-            
-            # 执行结果
-            success = traj_data.get('success', False)
-            final_result = traj_data.get('final_result', traj_data.get('result', ''))
-            total_duration = traj_data.get('total_duration', 0.0)
-            
-            # 步骤信息
-            steps = []
-            steps_data = traj_data.get('steps', traj_data.get('execution_steps', []))
-            
-            for i, step_data in enumerate(steps_data):
-                step = self._convert_step_data(step_data, i)
-                if step:
-                    steps.append(step)
-            
-            # 创建轨迹结果 
-            # 注意: TrajectoryResult使用created_at字段，不是completed_at
-            completed_at_str = traj_data.get('completed_at', datetime.now().isoformat())
-            try:
-                # 尝试解析ISO格式时间戳
-                if isinstance(completed_at_str, str):
-                    completed_at_time = datetime.fromisoformat(completed_at_str.replace('Z', '+00:00')).timestamp()
-                else:
-                    completed_at_time = float(completed_at_str)
-            except:
-                completed_at_time = time.time()
-            
-            trajectory = TrajectoryResult(
-                task_name=task_id,  # task_name字段
-                task_id=task_id,
-                task_description=task_description,
-                runtime_id=runtime_id,
-                success=success,
-                final_result=final_result,
-                steps=steps,
-                total_duration=total_duration,
-                created_at=completed_at_time  # 使用created_at而不是completed_at
-            )
-            
-            logger.debug(f"🔍 TM Created: {trajectory.task_id}")
-            return trajectory
-            
-        except Exception as e:
-            logger.error(f"❌ 轨迹数据转换失败: {e}")
-            return None
-    
-    def _should_process_trajectory(self, trajectory: TrajectoryResult) -> bool:
-        """判断轨迹是否值得处理"""
-        # 1. 成功的轨迹总是处理
-        if trajectory.success:
-            return True
-        
-        # 2. reasoning runtime的轨迹，即使失败也可能有价值（不要求有执行步骤）
-        runtime_id = trajectory.runtime_id.lower()
-        if 'reasoning' in runtime_id:
-            logger.info(f"🧠 Found reasoning trajectory: {trajectory.task_id}")
-            return True
-        
-        # 3. 有执行步骤的轨迹
-        if len(trajectory.steps) > 0:
-            # 有多个步骤的复杂任务，即使失败也可能有价值
-            if len(trajectory.steps) >= 2:
-                return True
-        
-        # 4. 任务描述包含特定关键词
-        task_desc = trajectory.task_description.lower()
-        valuable_keywords = ['reasoning', '推理', '分析', 'analysis', 'compare', '对比', '研究']
-        if any(keyword in task_desc for keyword in valuable_keywords):
-            logger.info(f"🔎 Found valuable keywords in task description: {trajectory.task_id}")
-            return True
-        
-        # 5. 有最终结果的轨迹，即使失败也可能有价值
-        if trajectory.final_result and len(trajectory.final_result.strip()) > 50:
-            logger.info(f"📝 Found trajectory with substantial final result: {trajectory.task_id}")
-            return True
-        
-        return False
-    
-    def _convert_step_data(self, step_data: Dict, step_index: int) -> Optional[ExecutionStep]:
-        """转换步骤数据"""
-        try:
-            
-            step_id = step_data.get('step_id', f"step_{step_index}")
-            thinking = step_data.get('thinking', '')
-            action_type = ActionType.TOOL_CALL  # 默认为工具调用
-            action_params = step_data.get('action_params', step_data.get('tool_call', {}))
-            observation = step_data.get('observation', step_data.get('result', ''))
-            success = step_data.get('success', True)
-            duration = step_data.get('duration', 0.0)
-            
-            step = ExecutionStep(
-                step_id=step_id,
-                thinking=thinking,
-                action_type=action_type,
-                action_params=action_params,
-                observation=observation,
-                success=success,
-                duration=duration
-            )
-            
-            return step
-            
-        except Exception as e:
-            logger.error(f"❌ 步骤数据转换失败: {e}")
-            return None
-    
-    def _filter_new_trajectories(self, trajectories: List[TrajectoryResult]) -> List[TrajectoryResult]:
-        """筛选未处理的轨迹"""
-        new_trajectories = []
-        
-        for trajectory in trajectories:
-            if trajectory.task_id not in self.processed_trajectories:
-                new_trajectories.append(trajectory)
-        
-        return new_trajectories
-    
-    async def _convert_and_save_seed_tasks(self, synthesis_result: Dict):
-        """转换任务结果为种子任务并保存"""
-        try:
-            seed_tasks = []
-            
-            # 处理原子任务
-            for atomic_task in synthesis_result.get('atomic_tasks', []):
-                seed_task = self._convert_atomic_task_to_seed(atomic_task)
-                if seed_task:
-                    seed_tasks.append(seed_task)
-            
-            # 处理深度扩展任务
-            for extended_task in synthesis_result.get('extended_tasks', []):
-                seed_task = self._convert_extended_task_to_seed(extended_task)
-                if seed_task:
-                    seed_tasks.append(seed_task)
-            
-            # 处理宽度扩展任务
-            for composite_task in synthesis_result.get('composite_tasks', []):
-                seed_task = self._convert_composite_task_to_seed(composite_task)
-                if seed_task:
-                    seed_tasks.append(seed_task)
-            
-            # 保存到seed_tasks.jsonl
-            if seed_tasks:
-                await self._append_seed_tasks_to_file(seed_tasks)
-                logger.info(f"💾 保存 {len(seed_tasks)} 个种子任务到 {self.seed_tasks_file}")
-            
-        except Exception as e:
-            logger.error(f"❌ 转换和保存种子任务失败: {e}")
-    
-    def _convert_atomic_task_to_seed(self, atomic_task: AtomicTask) -> Dict:
-        """转换原子任务为种子任务"""
-        return {
-            "task_id": f"seed_atomic_{atomic_task.task_id}",
-            "task_type": self._map_task_type(atomic_task.required_tools),
-            "description": atomic_task.question,
-            "expected_tools": atomic_task.required_tools,
-            "max_steps": self._estimate_max_steps(atomic_task.difficulty_level.value),
-            "success_criteria": {
-                "contains": [atomic_task.golden_answer],
-                "accuracy_threshold": 0.8
-            },
-            "metadata": {
-                "source": "atomic_task",
-                "original_task_id": atomic_task.task_id,
-                "difficulty": atomic_task.difficulty_level.value,
-                "verification_score": atomic_task.verification_score,
-                "created_at": datetime.now().isoformat()
-            }
-        }
-    
-    def _convert_extended_task_to_seed(self, extended_task: ExtendedTask) -> Dict:
-        """转换扩展任务为种子任务"""
-        return {
-            "task_id": f"seed_extended_{extended_task.task_id}",
-            "task_type": self._map_task_type(extended_task.expected_tools),
-            "description": extended_task.question,
-            "expected_tools": extended_task.expected_tools,
-            "max_steps": self._estimate_max_steps(extended_task.difficulty_level.value) + extended_task.hop_level,
-            "success_criteria": {
-                "contains": [extended_task.golden_answer],
-                "accuracy_threshold": 0.7
-            },
-            "metadata": {
-                "source": "extended_task",
-                "original_task_id": extended_task.task_id,
-                "hop_level": extended_task.hop_level,
-                "source_atomic_task": extended_task.source_atomic_task,
-                "difficulty": extended_task.difficulty_level.value,
-                "complexity_score": extended_task.complexity_score,
-                "created_at": datetime.now().isoformat()
-            }
-        }
-    
-    def _convert_composite_task_to_seed(self, composite_task: CompositeTask) -> Dict:
-        """转换复合任务为种子任务"""
-        return {
-            "task_id": f"seed_composite_{composite_task.task_id}",
-            "task_type": self._map_task_type(composite_task.expected_tools),
-            "description": composite_task.question,
-            "expected_tools": composite_task.expected_tools,
-            "max_steps": self._estimate_max_steps(composite_task.difficulty_level.value) + len(composite_task.source_atomic_tasks),
-            "success_criteria": {
-                "contains": composite_task.golden_answers,
-                "accuracy_threshold": 0.6
-            },
-            "metadata": {
-                "source": "composite_task",
-                "original_task_id": composite_task.task_id,
-                "source_atomic_tasks": composite_task.source_atomic_tasks,
-                "original_questions": composite_task.original_questions,
-                "difficulty": composite_task.difficulty_level.value,
-                "merge_strategy": composite_task.merge_strategy,
-                "created_at": datetime.now().isoformat()
-            }
-        }
-    
-    def _map_task_type(self, tools: List[str]) -> str:
-        """根据工具推断任务类型"""
-        if not tools:
-            return "reasoning"
-        
-        tool_lower = [tool.lower() for tool in tools]
-        
-        if any("browser" in tool or "web" in tool for tool in tool_lower):
-            return "web"
-        elif any("python" in tool or "code" in tool for tool in tool_lower):
-            return "code"
-        elif any("search" in tool for tool in tool_lower):
-            return "research"
-        else:
-            return "reasoning"
-    
-    def _estimate_max_steps(self, difficulty: str) -> int:
-        """估算最大步数"""
-        mapping = {
-            "simple": 3,
-            "medium": 6,
-            "complex": 10
-        }
-        return mapping.get(difficulty, 5)
-    
-    async def _append_seed_tasks_to_file(self, seed_tasks: List[Dict]):
-        """追加种子任务到JSONL文件"""
-        try:
-            with open(self.seed_tasks_file, 'a', encoding='utf-8') as f:
-                for task in seed_tasks:
-                    f.write(json.dumps(task, ensure_ascii=False) + '\n')
-            
-            logger.info(f"📝 追加 {len(seed_tasks)} 个种子任务到文件")
-            
-        except Exception as e:
-            logger.error(f"❌ 写入种子任务文件失败: {e}")
-    
-    def _load_processed_trajectories(self) -> set:
-        """加载已处理轨迹记录"""
-        try:
-            if os.path.exists(self.processed_trajectories_file):
-                with open(self.processed_trajectories_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return set(data.get('processed', []))
-            return set()
-            
-        except Exception as e:
-            logger.error(f"❌ 加载已处理轨迹记录失败: {e}")
-            return set()
-    
-    def _update_processed_trajectories(self, trajectory_ids: List[str]):
+    async def _update_processed_trajectories(self, trajectory_ids: List[str]):
         """更新已处理轨迹记录"""
         try:
             # 更新内存记录
@@ -547,11 +327,273 @@ class TrajectoryMonitor:
             
             with open(self.processed_trajectories_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"📊 更新已处理轨迹记录: +{len(trajectory_ids)}, 总计: {len(self.processed_trajectories)}")
+                
+            logger.debug(f"📝 更新已处理轨迹记录: {len(trajectory_ids)} 个新增")
             
         except Exception as e:
             logger.error(f"❌ 更新已处理轨迹记录失败: {e}")
+    
+    async def _export_to_seed_tasks(self, synthesis_result):
+        """导出任务为传统的seed_tasks.jsonl格式（向后兼容），并注入合成成本信息"""
+        try:
+            from datetime import datetime
+            from core.cost_analyzer import get_cost_analyzer
+            
+            cost_analyzer = get_cost_analyzer()
+            
+            # 合并所有任务
+            all_tasks = []
+            
+            # 🆕 从synthesis_result中获取真实成本信息
+            synthesis_phases = self._extract_real_synthesis_phases(synthesis_result)
+            
+            # 导出原子任务
+            for task in synthesis_result.atomic_tasks:
+                seed_task = {
+                    "task_id": task.task_id,
+                    "question": task.question,
+                    "expected_answer": task.answer.answer,
+                    "task_type": task.task_type.value,
+                    "domain": task.domain,
+                    "requires_tool": task.requires_tool,
+                    "expected_tools": task.expected_tools,
+                    "complexity": "atomic",
+                    "source": "synthesis_engine",
+                    "created_at": task.created_at.isoformat()
+                }
+                
+                # 🆕 注入合成成本信息
+                seed_task = cost_analyzer.inject_synthesis_cost(
+                    seed_task, 
+                    synthesis_phases=synthesis_phases,
+                    source_trajectory_cost=0.05  # 假设源轨迹成本
+                )
+                
+                all_tasks.append(seed_task)
+            
+            # 导出深度扩展任务
+            for task in synthesis_result.depth_extended_tasks:
+                seed_task = {
+                    "task_id": task.task_id,
+                    "question": task.combined_question,
+                    "expected_answer": task.combined_answer,
+                    "task_type": task.base_task.task_type.value,
+                    "domain": task.base_task.domain,
+                    "requires_tool": True,
+                    "expected_tools": task.base_task.expected_tools,
+                    "complexity": "depth_extended",
+                    "base_task_id": task.base_task.task_id,
+                    "source": "synthesis_engine",
+                    "created_at": task.created_at.isoformat()
+                }
+                
+                # 🆕 注入合成成本信息
+                seed_task = cost_analyzer.inject_synthesis_cost(
+                    seed_task, 
+                    synthesis_phases=synthesis_phases,
+                    source_trajectory_cost=0.05
+                )
+                
+                all_tasks.append(seed_task)
+            
+            # 导出宽度扩展任务
+            for task in synthesis_result.width_extended_tasks:
+                seed_task = {
+                    "task_id": task.task_id,
+                    "question": task.merged_question,
+                    "expected_answer": task.merged_answer,
+                    "task_type": "composite",
+                    "domain": "multi_domain",
+                    "requires_tool": True,
+                    "expected_tools": list(set(tool for comp_task in task.component_tasks for tool in comp_task.expected_tools)),
+                    "complexity": "width_extended",
+                    "component_task_ids": [comp_task.task_id for comp_task in task.component_tasks],
+                    "source": "synthesis_engine",
+                    "created_at": task.created_at.isoformat()
+                }
+                
+                # 🆕 注入合成成本信息
+                seed_task = cost_analyzer.inject_synthesis_cost(
+                    seed_task, 
+                    synthesis_phases=synthesis_phases,
+                    source_trajectory_cost=0.05
+                )
+                
+                all_tasks.append(seed_task)
+            
+            # 追加写入seed_tasks.jsonl文件
+            with open(self.seed_tasks_file, 'a', encoding='utf-8') as f:
+                for task in all_tasks:
+                    f.write(json.dumps(task, ensure_ascii=False) + '\n')
+            
+            logger.info(f"📄 导出 {len(all_tasks)} 个任务到 seed_tasks.jsonl")
+            
+        except Exception as e:
+            logger.error(f"❌ 导出seed_tasks失败: {e}")
+    
+    def _extract_real_synthesis_phases(self, synthesis_result) -> List[Dict[str, Any]]:
+        """从synthesis_result中提取真实的合成阶段成本信息"""
+        try:
+            # 检查synthesis_result是否包含真实成本分析
+            if not hasattr(synthesis_result, 'synthesis_cost_analysis') or not synthesis_result.synthesis_cost_analysis:
+                logger.warning("⚠️ synthesis_result中没有真实成本分析，使用回退方法")
+                return self._generate_fallback_synthesis_phases(synthesis_result)
+            
+            cost_analysis = synthesis_result.synthesis_cost_analysis
+            synthesis_breakdown = cost_analysis.get("synthesis_breakdown", {})
+            phase_breakdown = synthesis_breakdown.get("phase_breakdown", {})
+            
+            # 构建真实的阶段成本列表
+            real_phases = []
+            
+            # 提取各个阶段的真实数据
+            phase_mappings = {
+                "seed_extraction": "种子提取",
+                "task_expansion": "任务扩展", 
+                "quality_validation": "质量验证",
+                "depth_extension": "深度扩展",
+                "width_extension": "宽度扩展"
+            }
+            
+            for phase_key, phase_name in phase_mappings.items():
+                tokens_key = f"{phase_key}_tokens"
+                cost_key = f"{phase_key}_cost_usd"
+                
+                if tokens_key in phase_breakdown and cost_key in phase_breakdown:
+                    phase_tokens = phase_breakdown[tokens_key]
+                    phase_cost = phase_breakdown[cost_key]
+                    
+                    if phase_tokens > 0:  # 只包含实际使用的阶段
+                        real_phases.append({
+                            "phase": phase_key,
+                            "phase_name": phase_name,
+                            "tokens": phase_tokens,
+                            "cost_usd": phase_cost
+                        })
+                        logger.debug(f"✅ 提取真实阶段成本: {phase_name} - {phase_tokens} tokens, ${phase_cost:.6f}")
+            
+            # 如果没有提取到任何阶段，使用总计数据
+            if not real_phases:
+                total_tokens = cost_analysis.get("total_synthesis_tokens", 0)
+                total_cost = cost_analysis.get("total_synthesis_cost_usd", 0.0)
+                
+                if total_tokens > 0:
+                    real_phases.append({
+                        "phase": "total_synthesis",
+                        "phase_name": "合成总计",
+                        "tokens": total_tokens,
+                        "cost_usd": total_cost
+                    })
+                    logger.info(f"✅ 使用合成总计成本: {total_tokens} tokens, ${total_cost:.6f}")
+            
+            if real_phases:
+                total_real_cost = sum(phase["cost_usd"] for phase in real_phases)
+                total_real_tokens = sum(phase["tokens"] for phase in real_phases)
+                logger.info(f"✅ 提取到 {len(real_phases)} 个真实合成阶段，总计: {total_real_tokens} tokens, ${total_real_cost:.6f}")
+                return real_phases
+            else:
+                logger.warning("⚠️ 未找到有效的真实成本数据，使用回退方法")
+                return self._generate_fallback_synthesis_phases(synthesis_result)
+                
+        except Exception as e:
+            logger.error(f"❌ 提取真实合成阶段失败: {e}")
+            return self._generate_fallback_synthesis_phases(synthesis_result)
+    
+    def _generate_fallback_synthesis_phases(self, synthesis_result) -> List[Dict[str, Any]]:
+        """当无法获取真实成本时的回退方法 - 基于任务数量进行估算"""
+        try:
+            # 基于生成的任务数量进行成本估算
+            atomic_count = len(synthesis_result.atomic_tasks) if synthesis_result.atomic_tasks else 0
+            depth_count = len(synthesis_result.depth_extended_tasks) if synthesis_result.depth_extended_tasks else 0
+            width_count = len(synthesis_result.width_extended_tasks) if synthesis_result.width_extended_tasks else 0
+            
+            # 基于Gemini 2.5 Flash定价进行估算
+            # 输入: $0.30/百万tokens, 输出: $2.50/百万tokens
+            base_tokens_per_task = 500  # 每个任务的基础token估算
+            base_cost_per_1k_tokens = (0.30 + 2.50) / 1000  # 约$0.0028/1k tokens
+            
+            fallback_phases = []
+            
+            if atomic_count > 0:
+                estimated_tokens = atomic_count * base_tokens_per_task
+                estimated_cost = (estimated_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "task_expansion",
+                    "phase_name": "任务扩展(估算)",
+                    "tokens": estimated_tokens,
+                    "cost_usd": estimated_cost
+                })
+            
+            if depth_count > 0:
+                estimated_tokens = depth_count * base_tokens_per_task * 1.5  # 深度扩展成本更高
+                estimated_cost = (estimated_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "depth_extension", 
+                    "phase_name": "深度扩展(估算)",
+                    "tokens": estimated_tokens,
+                    "cost_usd": estimated_cost
+                })
+            
+            if width_count > 0:
+                estimated_tokens = width_count * base_tokens_per_task * 1.2  # 宽度扩展成本适中
+                estimated_cost = (estimated_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "width_extension",
+                    "phase_name": "宽度扩展(估算)", 
+                    "tokens": estimated_tokens,
+                    "cost_usd": estimated_cost
+                })
+            
+            # 添加基础验证成本
+            if atomic_count > 0 or depth_count > 0 or width_count > 0:
+                validation_tokens = max(200, (atomic_count + depth_count + width_count) * 100)
+                validation_cost = (validation_tokens / 1000) * base_cost_per_1k_tokens
+                fallback_phases.append({
+                    "phase": "quality_validation",
+                    "phase_name": "质量验证(估算)",
+                    "tokens": validation_tokens,
+                    "cost_usd": validation_cost
+                })
+            
+            if fallback_phases:
+                total_est_cost = sum(phase["cost_usd"] for phase in fallback_phases)
+                total_est_tokens = sum(phase["tokens"] for phase in fallback_phases)
+                logger.warning(f"⚠️ 使用回退成本估算: {total_est_tokens} tokens, ${total_est_cost:.6f} (基于{atomic_count}原子+{depth_count}深度+{width_count}宽度任务)")
+                return fallback_phases
+            else:
+                # 最终回退：使用最小成本
+                return [{
+                    "phase": "minimal_synthesis",
+                    "phase_name": "最小合成成本",
+                    "tokens": 100,
+                    "cost_usd": 0.0003  # 约100 tokens的成本
+                }]
+                
+        except Exception as e:
+            logger.error(f"❌ 生成回退合成阶段失败: {e}")
+            # 最终最小回退
+            return [{
+                "phase": "error_fallback",
+                "phase_name": "错误回退",
+                "tokens": 50,
+                "cost_usd": 0.0001
+            }]
+    
+    def _load_processed_trajectories(self) -> set:
+        """加载已处理轨迹记录"""
+        try:
+            if os.path.exists(self.processed_trajectories_file):
+                with open(self.processed_trajectories_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and 'processed' in data:
+                        return set(data['processed'])
+                    elif isinstance(data, list):
+                        return set(data)
+            return set()
+            
+        except Exception as e:
+            logger.error(f"❌ 加载已处理轨迹记录失败: {e}")
+            return set()
     
     async def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
@@ -562,13 +604,9 @@ class TrajectoryMonitor:
                 with open(self.seed_tasks_file, 'r', encoding='utf-8') as f:
                     seed_count = sum(1 for line in f if line.strip())
             
-            # 获取SynthesisCore指标
-            synthesis_metrics = await self.synthesis_core.get_metrics("global")
-            
             return {
                 "processed_trajectories": len(self.processed_trajectories),
                 "total_seed_tasks": seed_count,
-                "synthesis_metrics": synthesis_metrics,
                 "files": {
                     "trajectories_file": self.trajectories_collection_file,
                     "seed_tasks_file": self.seed_tasks_file,
@@ -580,3 +618,27 @@ class TrajectoryMonitor:
         except Exception as e:
             logger.error(f"❌ 获取统计信息失败: {e}")
             return {}
+
+
+# 全局监控器实例
+_simple_monitor = None
+
+def get_simple_monitor():
+    """获取全局简化监控器实例"""
+    global _simple_monitor
+    if _simple_monitor is None:
+        _simple_monitor = SimpleTrajectoryMonitor()
+    return _simple_monitor
+
+async def initialize_simple_monitor():
+    """初始化并启动简化监控器"""
+    monitor = get_simple_monitor()
+    await monitor.initialize()
+    await monitor.start_monitoring()
+    return monitor
+
+async def stop_simple_monitor():
+    """停止简化监控器"""
+    global _simple_monitor
+    if _simple_monitor:
+        await _simple_monitor.stop_monitoring()

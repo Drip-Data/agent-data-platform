@@ -1,13 +1,29 @@
 {
+  "microsandbox": {
+    "module": "mcp_servers.microsandbox_server.main",
+    "class": "MicroSandboxMCPServer",
+    "description": "安全的代码执行沙箱服务",
+    "auto_start": true,
+    "type": "internal",
+    "port": 8090,
+    "capabilities": [
+      "code_execution",
+      "package_installation"
+    ],
+    "dependencies": [
+      "microsandbox"
+    ]
+  },
   "deepsearch_server": {
     "module": "mcp_servers.deepsearch_server.main",
     "class": "DeepSearchMCPServer",
-    "description": "专业级深度搜索和研究工具服务器，基于LangGraph实现的多轮迭代搜索代理",
+    "description": "专业级深度搜索和研究工具服务器",
     "auto_start": true,
     "type": "internal",
+    "port": 8086,
     "capabilities": [
       "research",
-      "quick_research", 
+      "quick_research",
       "comprehensive_research"
     ],
     "dependencies": [
@@ -17,6 +33,54 @@
     ],
     "environment_variables": [
       "GEMINI_API_KEY"
+    ]
+  },
+  "browser_use_server": {
+    "module": "mcp_servers.browser_use_server.main",
+    "class": "BrowserUseMCPServer",
+    "description": "基于Browser-Use的AI浏览器自动化服务",
+    "auto_start": true,
+    "type": "internal",
+    "port": 8082,
+    "capabilities": [
+      "browser_automation",
+      "web_scraping"
+    ]
+  },
+  "search_tool_server": {
+    "module": "mcp_servers.search_tool_server.main",
+    "class": "SearchToolMCPServer",
+    "description": "文件内容和代码定义搜索服务",
+    "auto_start": true,
+    "type": "internal",
+    "port": 8080,
+    "capabilities": [
+      "file_search",
+      "code_search"
+    ]
+  },
+  "toolscore_mcp": {
+    "module": "core.toolscore",
+    "class": "ToolScoreMCPServer",
+    "description": "工具评分和管理MCP服务",
+    "auto_start": true,
+    "type": "internal",
+    "port": 8081,
+    "capabilities": [
+      "tool_scoring",
+      "tool_management"
+    ]
+  },
+  "toolscore_http": {
+    "module": "core.toolscore",
+    "class": "ToolScoreHTTPServer",
+    "description": "工具评分HTTP监控API服务",
+    "auto_start": true,
+    "type": "internal",
+    "port": 8088,
+    "capabilities": [
+      "http_monitoring",
+      "tool_metrics"
     ]
   }
 }

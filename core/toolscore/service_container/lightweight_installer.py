@@ -24,9 +24,15 @@ logger = logging.getLogger(__name__)
 class LightweightInstaller:
     """轻量级服务安装器"""
     
-    def __init__(self, install_base_dir: str = "installed_services"):
-        self.install_base_dir = Path(install_base_dir)
-        self.install_base_dir.mkdir(exist_ok=True)
+    def __init__(self, install_base_dir: str = None):
+        # 使用临时目录或用户指定目录，避免在项目根目录创建文件夹
+        if install_base_dir is None:
+            self.install_base_dir = Path(tempfile.gettempdir()) / "mcp_services"
+        else:
+            self.install_base_dir = Path(install_base_dir)
+        
+        # 只有在需要时才创建目录（延迟创建）
+        self._ensure_install_dir_exists()
         
         # 支持的安装方法
         self.installers = {
@@ -35,6 +41,12 @@ class LightweightInstaller:
             InstallMethod.FULL_CLONE: self._install_full_clone,
             InstallMethod.DOCKER_PULL: self._install_docker
         }
+    
+    def _ensure_install_dir_exists(self):
+        """确保安装目录存在（延迟创建）"""
+        if not self.install_base_dir.exists():
+            self.install_base_dir.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"📁 创建安装目录: {self.install_base_dir}")
     
     async def install_service(self, service_spec: Dict[str, Any]) -> InstallationResult:
         """安装服务的主入口"""
@@ -144,6 +156,7 @@ class LightweightInstaller:
     async def _install_config_only(self, service_config: ServiceConfig) -> InstallationResult:
         """仅配置安装 - 最轻量级的安装方式"""
         try:
+            self._ensure_install_dir_exists()
             install_dir = self.install_base_dir / service_config.service_id
             install_dir.mkdir(exist_ok=True)
             
@@ -175,6 +188,7 @@ class LightweightInstaller:
     async def _install_lightweight(self, service_config: ServiceConfig) -> InstallationResult:
         """轻量级安装 - 只下载必要文件"""
         try:
+            self._ensure_install_dir_exists()
             install_dir = self.install_base_dir / service_config.service_id
             install_dir.mkdir(exist_ok=True)
             
@@ -219,6 +233,7 @@ class LightweightInstaller:
     async def _install_full_clone(self, service_config: ServiceConfig) -> InstallationResult:
         """完整克隆安装 - 传统的克隆方式"""
         try:
+            self._ensure_install_dir_exists()
             install_dir = self.install_base_dir / service_config.service_id
             
             # 使用git克隆
@@ -301,6 +316,7 @@ class LightweightInstaller:
                 )
             
             # 创建配置目录
+            self._ensure_install_dir_exists()
             install_dir = self.install_base_dir / service_config.service_id
             install_dir.mkdir(exist_ok=True)
             
@@ -406,6 +422,7 @@ class LightweightInstaller:
     
     async def _is_already_installed(self, service_config: ServiceConfig) -> bool:
         """检查服务是否已安装"""
+        self._ensure_install_dir_exists()
         install_dir = self.install_base_dir / service_config.service_id
         config_file = install_dir / "installation_config.json"
         return config_file.exists()
@@ -413,6 +430,7 @@ class LightweightInstaller:
     async def _load_existing_config(self, service_config: ServiceConfig) -> Optional[ServiceConfig]:
         """加载已安装的服务配置"""
         try:
+            self._ensure_install_dir_exists()
             install_dir = self.install_base_dir / service_config.service_id
             config_file = install_dir / "installation_config.json"
             
@@ -456,6 +474,7 @@ class LightweightInstaller:
     async def uninstall_service(self, service_id: str) -> bool:
         """卸载服务"""
         try:
+            self._ensure_install_dir_exists()
             install_dir = self.install_base_dir / service_id
             
             if install_dir.exists():
@@ -473,6 +492,7 @@ class LightweightInstaller:
     def list_installed_services(self) -> List[str]:
         """列出已安装的服务"""
         try:
+            self._ensure_install_dir_exists()
             return [
                 dir_name for dir_name in self.install_base_dir.iterdir()
                 if dir_name.is_dir() and (dir_name / "installation_config.json").exists()

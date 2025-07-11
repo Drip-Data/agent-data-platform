@@ -10,7 +10,9 @@ logger = logging.getLogger(__name__)
 # 全局变量
 runtime_instances = []
 
-def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None):
+from core.unified_tool_manager import UnifiedToolManager
+
+def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, tool_manager: UnifiedToolManager = None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, trajectory_storage_mode: str = "daily_grouped"):
     """初始化推理运行时服务"""
     global runtime_instances
     
@@ -20,8 +22,8 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
     logger.info("正在初始化推理运行时服务...")
     
     # 如果没有传入依赖，尝试从全局或者延迟到运行时创建
-    if not all([config_manager, llm_client, toolscore_client]):
-        logger.warning("运行时服务未收到必要的依赖，将延迟到启动时创建运行时实例")
+    if not all([config_manager, llm_client, toolscore_client, tool_manager]):
+        logger.error("运行时服务初始化失败：缺少必要的依赖（config_manager, llm_client, toolscore_client, tool_manager）")
         return
     
     # 清空现有实例列表
@@ -30,17 +32,22 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
     # 从环境变量中获取运行时实例数量
     instance_count = int(os.getenv('RUNTIME_INSTANCES', 1))
     
-    # 创建指定数量的运行时实例
+    # 创建指定数量的运行时实例 (默认启用XML streaming模式)
     for i in range(instance_count):
         instance_name = f"enhanced-runtime-{i+1}"
-        logger.info(f"创建运行时实例: {instance_name}")
-        # 创建运行时实例并传入依赖，包括新的websocket端点和redis_manager
-        runtime = EnhancedReasoningRuntime(config_manager, llm_client, toolscore_client, redis_manager, toolscore_websocket_endpoint)
-        
-        # 设置实例名称（如果运行时支持的话）
-        # 始终使用_runtime_id作为标识
+        logger.info(f"创建增强运行时实例: {instance_name} (存储模式: {trajectory_storage_mode})")
+        # 创建运行时实例并传入依赖，默认启用XML streaming模式
+        runtime = EnhancedReasoningRuntime(
+            config_manager=config_manager, 
+            llm_client=llm_client, 
+            toolscore_client=toolscore_client,
+            tool_manager=tool_manager,
+            redis_manager=redis_manager, 
+            toolscore_websocket_endpoint=toolscore_websocket_endpoint, 
+            xml_streaming_mode=True,  # 默认启用XML streaming
+            trajectory_storage_mode=trajectory_storage_mode
+        )
         runtime._runtime_id = f"enhanced-reasoning-{i+1}"
-        
         runtime_instances.append(runtime)
     
     logger.info(f"推理运行时服务初始化完成，创建了 {len(runtime_instances)} 个实例")
@@ -91,7 +98,16 @@ def start():
         
         # 等待所有任务消费协程
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except (asyncio.CancelledError, GeneratorExit):
+                logger.info("运行时服务正常停止，取消所有任务")
+                # 取消所有剩余任务
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                # 等待任务真正取消
+                await asyncio.gather(*tasks, return_exceptions=True)
     
     # 在新的事件循环中启动所有运行时
     asyncio.create_task(start_all_runtimes())
@@ -151,7 +167,7 @@ def health_check():
         'instance_count': len(runtime_instances)
     }
 
-def get_runtime_instances() -> List[EnhancedReasoningRuntime]:
+def get_runtime_instances():
     """获取所有运行时实例"""
     if not runtime_instances:
         raise RuntimeError("推理运行时未初始化，请先调用initialize()")

@@ -16,8 +16,7 @@ from core.utils.path_utils import (
     get_project_root, 
     get_output_dir, 
     get_trajectories_dir,
-    get_python_execution_dir,
-    get_screenshots_dir,
+    get_synthesis_task_dir,
     get_logs_dir,
     get_config_dir,
     get_data_dir,
@@ -32,8 +31,7 @@ def test_path_functions():
         "项目根目录": get_project_root(),
         "输出目录": get_output_dir(),
         "轨迹目录": get_trajectories_dir(),
-        "Python执行目录": get_python_execution_dir(),
-        "截图目录": get_screenshots_dir(),
+        "合成任务目录": get_synthesis_task_dir(),
         "日志目录": get_logs_dir(),
         "配置目录": get_config_dir(),
         "数据目录": get_data_dir()
@@ -154,17 +152,11 @@ def create_test_output():
             json.dump(test_trajectory, f, ensure_ascii=False, indent=2)
         print(f"✅ 测试轨迹文件创建: {trajectory_file}")
         
-        # 测试Python执行目录
-        python_test_file = Path(get_python_execution_dir()) / "test_output.txt"
-        with open(python_test_file, 'w', encoding='utf-8') as f:
-            f.write("路径验证测试输出\n")
-        print(f"✅ 测试Python执行文件创建: {python_test_file}")
-        
-        # 测试截图目录
-        screenshot_test_file = Path(get_screenshots_dir()) / "test_screenshot_path.txt"
-        with open(screenshot_test_file, 'w', encoding='utf-8') as f:
-            f.write("截图路径测试\n")
-        print(f"✅ 测试截图路径文件创建: {screenshot_test_file}")
+        # 测试合成任务目录
+        synthesis_test_file = Path(get_synthesis_task_dir()) / "test_synthesis.txt"
+        with open(synthesis_test_file, 'w', encoding='utf-8') as f:
+            f.write("合成任务路径验证测试\n")
+        print(f"✅ 测试合成任务文件创建: {synthesis_test_file}")
         
         print("✅ 所有测试输出文件创建成功")
         
@@ -178,8 +170,7 @@ def cleanup_test_files():
     
     test_files = [
         Path(get_trajectories_dir()) / "test_trajectory.json",
-        Path(get_python_execution_dir()) / "test_output.txt",
-        Path(get_screenshots_dir()) / "test_screenshot_path.txt"
+        Path(get_synthesis_task_dir()) / "test_synthesis.txt"
     ]
     
     for file_path in test_files:

@@ -9,6 +9,7 @@ import json
 import socket # 导入socket模块
 from core.config_manager import ConfigManager
 from core.toolscore.service_container import MCPServiceContainer
+from core.toolscore.mcp_auto_registration import get_auto_registrar
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,8 @@ mcp_processes: Dict[str, subprocess.Popen] = {}
 server_statuses: Dict[str, Dict[str, Any]] = {}
 _config_manager: Optional[ConfigManager] = None
 _service_container: Optional['MCPServiceContainer'] = None
+_is_shutting_down = False
+_restart_timers: Dict[str, threading.Timer] = {}
 
 def find_available_port(start_port: int, end_port: int) -> Optional[int]:
     """
@@ -32,12 +35,13 @@ def find_available_port(start_port: int, end_port: int) -> Optional[int]:
                 continue
     return None
 
-def initialize(config_manager: ConfigManager, service_container: 'MCPServiceContainer' = None):
+def initialize(config_manager: ConfigManager, service_manager: 'ServiceManager', service_container: 'MCPServiceContainer' = None):
     """初始化MCP服务器启动器"""
-    global mcp_servers, _config_manager, _service_container
+    global mcp_servers, _config_manager, _service_container, _service_manager
     
     _config_manager = config_manager
     _service_container = service_container
+    _service_manager = service_manager
     
     logger.info("正在初始化MCP服务器启动器...")
     
@@ -118,6 +122,7 @@ async def start():
     
     logger.info(f"✅ 成功启动 {len(successful_servers)}/{len(mcp_servers)} 个MCP服务器: {successful_servers}")
 
+
 async def _start_server(server_name: str):
     """启动单个MCP服务器"""
     global mcp_processes, server_statuses
@@ -195,12 +200,7 @@ async def _start_server(server_name: str):
     try:
         env = os.environ.copy() # 将env初始化移到try块的开头
 
-        # 为microsandbox_server设置一个特定的环境变量
-        if server_name == 'microsandbox_server':
-            agent_runtime_dir = os.path.join(project_root, 'agent_runtime')
-            os.makedirs(agent_runtime_dir, exist_ok=True)
-            env['AGENT_RUNTIME_DIR'] = agent_runtime_dir
-            logger.info(f"[MCP启动器] 为microsandbox_server设置AGENT_RUNTIME_DIR: {agent_runtime_dir}")
+        # microsandbox_server无需特殊环境变量配置
 
         # Determine the project root to add to PYTHONPATH
         project_root_for_pythonpath = os.path.abspath(os.path.join(server_dir_absolute, '..', '..'))
@@ -343,6 +343,44 @@ async def _start_server(server_name: str):
         logger.error(f"启动MCP服务器时出错: {server_name} - {str(e)}")
         server_statuses[server_name] = {'status': 'error', 'message': str(e)}
 
+async def _check_registration_readiness(server_name: str) -> bool:
+    """检查服务器是否已在ToolScore中注册"""
+    global _service_manager
+    if not _service_manager:
+        logger.debug(f"Service manager not available, cannot check registration status for {server_name}")
+        return False
+
+    try:
+        toolscore_service = _service_manager.get_service('toolscore')
+        if not toolscore_service:
+            logger.debug(f"ToolScore service not available, cannot check registration status for {server_name}")
+            return False
+
+        tool_library = toolscore_service.get_tool_library()
+        if not tool_library:
+            logger.debug(f"Unable to get tool library from ToolScore service, skipping registration check for {server_name}")
+            return False
+
+        auto_registrar = get_auto_registrar()
+        service_id = auto_registrar.builtin_servers.get(server_name, {}).get('service_id')
+
+        if not service_id:
+            logger.warning(f"Could not determine service_id for {server_name}, skipping registration check")
+            return False
+
+        tool_spec = await tool_library.get_tool_by_id(service_id)
+        
+        if tool_spec:
+            logger.info(f"✅ {server_name} (ID: {service_id}) is registered in ToolScore")
+            return True
+        else:
+            logger.debug(f"⏳ {server_name} (ID: {service_id}) is not yet registered in ToolScore")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"Error checking registration status for {server_name}: {e}")
+        return False
+
 async def _wait_for_server_ready(server_name: str, process: subprocess.Popen, timeout: int = 30) -> bool:
     """智能等待MCP服务器就绪"""
     start_time = time.time()
@@ -359,22 +397,27 @@ async def _wait_for_server_ready(server_name: str, process: subprocess.Popen, ti
             return False
         
         try:
+            # 🔍 最终检查：确认在ToolScore中注册
+            if await _check_registration_readiness(server_name):
+                logger.info(f"✅ {server_name} 已在ToolScore中注册，确认就绪")
+                return True
+
             # 🔍 基于服务器类型的特定就绪检查
             if await _check_server_specific_readiness(server_name):
                 logger.debug(f"✅ {server_name} 特定就绪检查通过")
-                return True
-            
+                # return True # 特定检查通过后，仍需等待注册
+
             # 🔍 通用端口就绪检查
             if await _check_port_readiness(server_name):
                 logger.debug(f"✅ {server_name} 端口就绪检查通过")
                 # 端口就绪后额外等待一点时间确保服务完全初始化
-                await asyncio.sleep(1)
-                return True
+                # await asyncio.sleep(1)
+                # return True # 端口就绪不代表完全就绪
             
             # 📋 日志输出分析（检查成功启动的标志）
             if _check_startup_logs(server_name, process):
                 logger.debug(f"✅ {server_name} 启动日志检查通过")
-                return True
+                # return True # 日志显示启动不代表完全就绪
             
         except Exception as e:
             logger.debug(f"⚠️ {server_name} 就绪检查异常: {e}")
@@ -388,24 +431,31 @@ async def _wait_for_server_ready(server_name: str, process: subprocess.Popen, ti
 
 async def _check_server_specific_readiness(server_name: str) -> bool:
     """基于服务器类型的特定就绪检查"""
+    global _config_manager
+    if not _config_manager:
+        return False
+
     try:
+        mcp_servers_config = _config_manager.get_mcp_servers_config()
+        server_config = mcp_servers_config.get(server_name)
+
+        if not server_config or 'port' not in server_config:
+            logger.debug(f"`{server_name}` a un `port` manquant dans la configuration, sautant la vérification de préparation spécifique.")
+            return False
+
+        port = server_config['port']
+        
         if server_name == 'deepsearch_server':
-            # DeepSearch特定的就绪检查
-            # 可以尝试连接其健康检查端点
-            return await _check_http_endpoint_health(f"http://localhost:8083/health")
-            
+            return await _check_http_endpoint_health(f"http://localhost:{port}/health")
         elif server_name == 'microsandbox_server':
-            # MicroSandbox特定的就绪检查
-            return await _check_http_endpoint_health(f"http://localhost:8082/health")
-            
+            return await _check_http_endpoint_health(f"http://localhost:{port}/health")
         elif server_name == 'browser_use_server':
             # Browser Use特定的就绪检查
-            return await _check_websocket_health(f"ws://localhost:8084")
-            
+            return await _check_websocket_health(f"ws://localhost:{port}")
         elif server_name == 'search_tool_server':
             # Search Tool特定的就绪检查
-            return await _check_websocket_health(f"ws://localhost:8085")
-            
+            return await _check_websocket_health(f"ws://localhost:{port}")
+
     except Exception as e:
         logger.debug(f"⚠️ {server_name} 特定就绪检查失败: {e}")
     
@@ -425,11 +475,23 @@ async def _check_websocket_health(url: str) -> bool:
     """检查WebSocket端点健康状态"""
     try:
         import websockets
-        async with websockets.connect(url, ping_timeout=3, close_timeout=3) as websocket:
+        # 修复: 使用更严格的超时设置和错误处理
+        async with websockets.connect(
+            url, 
+            ping_timeout=3, 
+            close_timeout=3,
+            open_timeout=5
+        ) as websocket:
             # 简单的ping检查
             await websocket.send('{"type": "ping"}')
+            # 等待响应以确保连接正常工作
+            response = await asyncio.wait_for(websocket.recv(), timeout=2)
             return True
-    except Exception:
+    except asyncio.TimeoutError:
+        logger.debug(f"WebSocket健康检查超时: {url}")
+        return False
+    except Exception as e:
+        logger.debug(f"WebSocket健康检查失败: {url}, 错误: {e}")
         return False
 
 async def _check_port_readiness(server_name: str) -> bool:
@@ -440,7 +502,13 @@ async def _check_port_readiness(server_name: str) -> bool:
         
     try:
         ports_config = _config_manager.get_ports_config()
-        server_config = ports_config.get('mcp_servers', {}).get(server_name, {})
+        
+        # 🔧 修复：添加服务器名称映射
+        server_config_key = server_name
+        if server_name == 'microsandbox_server':
+            server_config_key = 'microsandbox'
+        
+        server_config = ports_config.get('mcp_servers', {}).get(server_config_key, {})
         port = server_config.get('port')
         
         if not port:
@@ -650,6 +718,12 @@ def _monitor_server(server_name, process):
     
     # 进程结束
     exit_code = process.wait()
+
+    # 如果正在关闭系统，则不执行重启逻辑
+    if _is_shutting_down:
+        logger.info(f"MCP服务器在系统关闭期间退出: {server_name} (退出码: {exit_code})")
+        server_statuses[server_name] = {'status': 'stopped_on_shutdown', 'exit_code': exit_code}
+        return
     
     if exit_code != 0:
         logger.warning(f"❌ MCP服务器异常退出: {server_name} (退出码: {exit_code})")
@@ -678,6 +752,7 @@ def _monitor_server(server_name, process):
             restart_timer = threading.Timer(restart_delay, _auto_restart_server, args=(server_name,))
             restart_timer.daemon = True
             restart_timer.start()
+            _restart_timers[server_name] = restart_timer
         else:
             logger.error(f"❌ {server_name} 已达最大重启次数 ({max_restart_attempts})，停止自动重启")
             server_statuses[server_name]['status'] = 'failed'
@@ -754,6 +829,14 @@ def _check_port_health(port: int) -> bool:
 
 def _auto_restart_server(server_name: str):
     """自动重启服务器"""
+    if _is_shutting_down:
+        logger.info(f"自动重启 {server_name} 已取消，因为系统正在关闭。")
+        return
+
+    # 从定时器字典中移除
+    if server_name in _restart_timers:
+        del _restart_timers[server_name]
+        
     try:
         logger.info(f"🔄 开始自动重启 MCP 服务器: {server_name}")
         
@@ -785,9 +868,16 @@ def _auto_restart_server(server_name: str):
 
 def stop():
     """停止所有MCP服务器"""
-    global mcp_processes, server_statuses
+    global mcp_processes, server_statuses, _is_shutting_down, _restart_timers
     
+    _is_shutting_down = True
     logger.info("正在停止MCP服务器...")
+
+    # 取消所有计划中的重启任务
+    for server, timer in list(_restart_timers.items()):
+        timer.cancel()
+        logger.info(f"已取消计划中的重启任务: {server}")
+    _restart_timers.clear()
     
     for server_name, process in list(mcp_processes.items()):
         logger.info(f"停止MCP服务器: {server_name}")

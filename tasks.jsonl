@@ -1,0 +1,6 @@
+{"task_id": "test_1", "task_type": "reasoning", "description": "从python写一个冒泡排序算法, 然后执行2个测试集"}
+{"task_id": "test_2", "task_type": "reasoning", "description": "新加坡国立大学iora是什么?"}
+{"task_id": "test_reasoning_combo", "task_type": "reasoning", "description": "The quantum efficiency of the PIN photodiode is 0.9, lambda = 1.3 micrometers. Calculate: the photocurrent when the incident optical power is -30 dBm is?"}
+{"task_id": "complex_data_analysis", "task_type": "code", "description": "使用Python对一个包含股票数据的CSV文件进行分析：1) 使用web搜索找到最新的苹果公司股票价格信息，2) 创建一个包含历史数据的CSV文件模拟，3) 使用pandas进行数据清洗和分析，4) 计算移动平均线和RSI指标，5) 生成可视化图表，6) 基于分析结果提供投资建议"}
+{"task_id": "web_research_synthesis", "task_type": "research", "description": "进行一项综合性的技术研究任务：1) 使用浏览器搜索并收集关于量子计算在机器学习中应用的最新研究论文，2) 从至少5个不同来源提取关键信息，3) 使用代码工具创建一个结构化的研究报告，4) 生成一个包含引用链接的markdown文档，5) 创建一个技术术语词汇表，6) 提供该领域的未来发展趋势预测"}
+{"task_id": "automated_testing_pipeline", "task_type": "code", "description": "构建一个自动化测试流水线系统：1) 创建一个包含多个函数的Python模块，2) 为每个函数编写单元测试，3) 使用文件系统工具创建测试数据文件，4) 实现一个测试运行器，5) 生成HTML格式的测试报告，6) 创建一个CI/CD配置文件模板，7) 模拟运行整个测试流水线并输出详细日志"}

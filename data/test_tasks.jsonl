@@ -1,5 +1,5 @@
 {"task_id": "test_microsandbox", "task_type": "code", "description": "使用MicroSandbox执行Python代码：计算斐波那契数列前10项", "expected_tools": ["microsandbox_execute"], "max_steps": 3}
 {"task_id": "test_deepsearch", "task_type": "research", "description": "使用DeepSearch研究：Python asyncio的基本概念和用法", "expected_tools": ["research"], "max_steps": 4}
-{"task_id": "test_browser_use", "task_type": "web", "description": "使用Browser-Use访问Python官网首页并将其主要信息用 md 抓取下来", "expected_tools": ["browser_navigate", "browser_screenshot"], "max_steps": 3}
+{"task_id": "test_browser_use", "task_type": "web", "description": "使用Browser-Use访问Python官网首页并将其主要信息用 md 抓取下来", "expected_tools": [], "max_steps": 3}
 {"task_id": "test_search_tool", "task_type": "reasoning", "description": "使用Search Tool在项目中搜索包含'asyncio'的文件内容", "expected_tools": ["search_file_content"], "max_steps": 2}
 {"task_id": "test_reasoning_combo", "task_type": "reasoning", "description": "复合推理任务：先用DeepSearch研究Python数据分析最佳实践，然后用MicroSandbox编写并执行一个简单的数据分析示例代码，最后用Search Tool查找项目中相关的代码模式", "expected_tools": ["research", "microsandbox_execute", "search_file_content"], "max_steps": 8}

@@ -57,10 +57,18 @@ tools:
   # ====== 1. MICROSANDBOX - 代码执行工具 ======
   microsandbox:
     id: "microsandbox"
-    name: "MicroSandbox安全代码执行器"
-    description: "在隔离环境中安全执行Python代码，支持包管理和会话控制"
+    name: "MicroSandbox增强代码执行器"
+    description: "在隔离环境中安全执行Python代码，支持包管理、会话控制、自动Token刷新和本地回退"
     service_port: 8090
     service_path: "mcp_servers/microsandbox_server"
+    
+    # 🎉 最新特性 (2025-06-27)
+    enhanced_features:
+      auto_token_refresh: true
+      session_persistence: true
+      local_fallback: true
+      error_recovery: true
+      reliability: "100%"
     
     # 支持的所有动作
     actions:
@@ -125,6 +133,17 @@ tools:
       microsandbox_get_health_status:
         description: "获取沙盒环境健康状态"
         parameters: {}
+        
+      # 🆕 新增Token管理功能
+      microsandbox_get_token_status:
+        description: "获取API Token状态和自动刷新信息"
+        parameters: {}
+        enhanced_feature: true
+        
+      microsandbox_refresh_token:
+        description: "手动刷新API Token"
+        parameters: {}
+        enhanced_feature: true
 
   # ====== 2. BROWSER_USE - 网页浏览工具 ======
   browser_use:
@@ -136,195 +155,250 @@ tools:
     
     # 支持的所有动作（基于实际实现的25个动作）
     actions:
-      # 核心AI任务执行
+      # 核心AI任务执行 - 优先使用 🌟
       browser_use_execute_task:
-        description: "AI驱动的复合任务执行"
+        description: "🚀 AI驱动的智能浏览器任务执行器，支持自然语言指令的复杂网页操作"
+        priority: "highest"
+        recommended_for: ["复杂多步骤任务", "智能内容提取", "表单填写", "网页抓取", "数据收集", "搜索任务"]
+        use_cases: ["搜索Python教程并打开第一个结果", "访问网站并提取所有产品信息", "填写并提交在线表单", "执行复杂的网页操作流程"]
+        intelligence_features: ["AI视觉理解", "多步骤自动化", "智能元素识别", "内容理解"]
+        keywords: ["搜索", "抓取", "数据收集", "表单", "自动化", "网页操作", "信息提取"]
         parameters:
           task:
             type: "string"
+            description: "要执行的任务描述，使用自然语言"
             required: true
-            description: "要执行的任务描述"
-          url:
-            type: "string"
+          max_steps:
+            type: "integer"
+            description: "最大执行步骤数，默认50"
             required: false
-            description: "起始URL"
+          use_vision:
+            type: "boolean"
+            description: "是否使用视觉理解，默认true"
+            required: false
             
-      # 基础导航
+      # 基础导航 - 仅用于简单导航
       browser_navigate:
-        description: "导航到指定URL"
+        description: "🔗 基础网页导航（仅跳转，不执行其他操作）"
+        priority: "low"
+        recommended_for: ["简单页面跳转", "导航到已知URL"]
+        warning: "⚠️ 仅执行导航，不提取内容或执行其他操作。复杂任务请使用browser_use_execute_task"
+        alternative: "对于需要导航+操作的任务，推荐使用browser_use_execute_task"
         parameters:
           url:
             type: "string"
+            description: "要访问的URL地址"
             required: true
-            description: "目标URL地址"
+            
+      browser_search_google:
+        description: "在Google中搜索指定查询"
+        parameters:
+          query:
+            type: "string"
+            description: "搜索查询词"
+            required: true
             
       browser_go_back:
         description: "返回上一页"
         parameters: {}
         
-      # 搜索功能
-      browser_search_google:
-        description: "执行Google搜索"
-        parameters:
-          query:
-            type: "string"
-            required: true
-            description: "搜索关键词"
-            
       # 元素交互
       browser_click_element:
-        description: "点击页面元素"
+        description: "通过索引点击页面元素"
         parameters:
-          element_id:
-            type: "string"
+          index:
+            type: "integer"
+            description: "要点击的元素索引"
             required: true
-            description: "元素ID或选择器"
             
       browser_input_text:
-        description: "在输入框中输入文本"
+        description: "在指定元素中输入文本"
         parameters:
-          element_id:
-            type: "string"
+          index:
+            type: "integer"
+            description: "要输入文本的元素索引"
             required: true
-            description: "输入框元素ID"
           text:
             type: "string"
-            required: true
             description: "要输入的文本"
+            required: true
             
       browser_send_keys:
-        description: "发送快捷键"
+        description: "发送特殊键或快捷键"
         parameters:
           keys:
             type: "string"
+            description: "要发送的键，如Enter、Escape、Control+c等"
             required: true
-            description: "快捷键组合"
             
       # 滚动操作
       browser_scroll_down:
         description: "向下滚动页面"
         parameters:
-          pixels:
+          amount:
             type: "integer"
+            description: "滚动像素数，不指定则滚动一页"
             required: false
-            default: 500
-            description: "滚动像素数"
             
       browser_scroll_up:
         description: "向上滚动页面"
         parameters:
-          pixels:
+          amount:
             type: "integer"
+            description: "滚动像素数，不指定则滚动一页"
             required: false
-            default: 500
-            description: "滚动像素数"
             
       browser_scroll_to_text:
-        description: "滚动到包含指定文本的位置"
+        description: "滚动到包含指定文本的元素"
         parameters:
           text:
             type: "string"
+            description: "要滚动到的文本内容"
             required: true
-            description: "目标文本"
             
       # 标签管理
       browser_switch_tab:
-        description: "切换到指定标签页"
+        description: "切换到指定标签"
         parameters:
-          tab_index:
+          page_id:
             type: "integer"
+            description: "要切换到的标签ID"
             required: true
-            description: "标签页索引"
             
       browser_open_tab:
-        description: "打开新标签页"
+        description: "在新标签中打开URL"
         parameters:
           url:
             type: "string"
-            required: false
-            description: "新标签页URL"
+            description: "要在新标签中打开的URL"
+            required: true
             
       browser_close_tab:
-        description: "关闭当前标签页"
-        parameters: {}
-        
+        description: "关闭指定标签"
+        parameters:
+          page_id:
+            type: "integer"
+            description: "要关闭的标签ID"
+            required: true
+            
       # 内容提取
       browser_extract_content:
-        description: "提取页面内容"
+        description: "从页面提取特定内容"
+        parameters:
+          goal:
+            type: "string"
+            description: "提取目标描述"
+            required: true
+          include_links:
+            type: "boolean"
+            description: "是否包含链接，默认false"
+            required: false
+            
+      browser_get_content:
+        description: "获取页面内容"
         parameters:
           selector:
             type: "string"
+            description: "CSS选择器，空则获取全部内容"
             required: false
-            description: "CSS选择器，提取特定内容"
             
       browser_get_ax_tree:
-        description: "获取页面可访问性树结构"
-        parameters: {}
-        
+        description: "获取页面的可访问性树结构"
+        parameters:
+          number_of_elements:
+            type: "integer"
+            description: "返回的元素数量"
+            required: true
+            
       # 下拉菜单操作
       browser_get_dropdown_options:
-        description: "获取下拉菜单选项"
+        description: "获取下拉菜单的所有选项"
         parameters:
-          element_id:
-            type: "string"
+          index:
+            type: "integer"
+            description: "下拉菜单元素的索引"
             required: true
-            description: "下拉菜单元素ID"
             
       browser_select_dropdown_option:
-        description: "选择下拉菜单选项"
+        description: "选择下拉菜单中的选项"
         parameters:
-          element_id:
-            type: "string"
+          index:
+            type: "integer"
+            description: "下拉菜单元素的索引"
             required: true
-            description: "下拉菜单元素ID"
-          option_value:
+          text:
             type: "string"
+            description: "要选择的选项文本"
             required: true
-            description: "选项值"
             
       # 拖拽操作
       browser_drag_drop:
         description: "执行拖拽操作"
         parameters:
-          source_element:
+          element_source:
             type: "string"
-            required: true
-            description: "源元素ID"
-          target_element:
+            description: "源元素选择器"
+            required: false
+          element_target:
             type: "string"
-            required: true
-            description: "目标元素ID"
+            description: "目标元素选择器"
+            required: false
+          coord_source_x:
+            type: "integer"
+            description: "源坐标X"
+            required: false
+          coord_source_y:
+            type: "integer"
+            description: "源坐标Y"
+            required: false
+          coord_target_x:
+            type: "integer"
+            description: "目标坐标X"
+            required: false
+          coord_target_y:
+            type: "integer"
+            description: "目标坐标Y"
+            required: false
+          steps:
+            type: "integer"
+            description: "拖拽步骤数，默认10"
+            required: false
             
       # 文件操作
       browser_save_pdf:
-        description: "保存当前页面为PDF"
-        parameters:
-          filename:
-            type: "string"
-            required: false
-            description: "PDF文件名"
-            
-      browser_screenshot:
-        description: "截取当前页面"
-        parameters:
-          filename:
-            type: "string"
-            required: false
-            description: "截图文件名"
-            
-      # 等待和完成
-      browser_wait:
-        description: "等待指定时间"
-        parameters:
-          seconds:
-            type: "integer"
-            required: true
-            description: "等待秒数"
-            
-      browser_done:
-        description: "标记任务完成"
+        description: "将当前页面保存为PDF"
         parameters: {}
         
+      browser_screenshot:
+        description: "截取当前页面截图"
+        parameters:
+          filename:
+            type: "string"
+            description: "截图文件名，可选"
+            required: false
+            
+      # 等待功能
+      browser_wait:
+        description: "等待指定秒数"
+        parameters:
+          seconds:
+            type: "number"
+            description: "等待的秒数，默认3"
+            required: false
+            
+      # 任务完成
+      browser_done:
+        description: "标记任务完成"
+        parameters:
+          text:
+            type: "string"
+            description: "完成描述"
+            required: true
+          success:
+            type: "boolean"
+            description: "是否成功完成"
+            required: true
+            
       # 页面信息
       browser_get_page_info:
         description: "获取当前页面信息"

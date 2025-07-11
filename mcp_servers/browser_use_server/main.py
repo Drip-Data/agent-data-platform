@@ -11,14 +11,42 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import logging
 import os
 import json
+import time
+import re  # 🔧 修复：将re模块移到全局导入，避免作用域问题
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 
 from browser_use import Agent, Browser, BrowserConfig, Controller, ActionModel, ActionResult
 from langchain_core.language_models.base import BaseLanguageModel
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from langchain_core.outputs import LLMResult, Generation
+from langchain_core.outputs import LLMResult, Generation, ChatResult, ChatGeneration
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
+
+# Custom generation class that behaves like both Generation and ChatGeneration
+class BrowserUseGeneration(ChatGeneration):
+    """Custom generation class for browser-use compatibility"""
+    
+    def __getitem__(self, key):
+        """Support subscript access for compatibility"""
+        if isinstance(key, int):
+            if key == 0:
+                return self
+            else:
+                raise IndexError("Generation index out of range")
+        elif key == "text":
+            return self.text
+        else:
+            return getattr(self, key, None)
+    
+    def __iter__(self):
+        """Support iteration"""
+        yield self
+    
+    def __len__(self):
+        """Support len()"""
+        return 1
 
 try:
     from core.toolscore.interfaces import ToolCapability, ToolType, ExecutionResult
@@ -28,10 +56,518 @@ except ImportError as e:
     print(f'Import error: {e}')
     sys.exit(1)
 from core.llm_client import LLMClient
+from core.unified_tool_manager import UnifiedToolManager
+from core.shared_workspace import get_workspace_manager
+
+# 导入本地工具模块，解决重复导入问题
+try:
+    from utils import JSONExtractor, ResponseValidator, ConfigHelper
+except ImportError:
+    # 如果相对导入失败，尝试绝对导入
+    from mcp_servers.browser_use_server.utils import JSONExtractor, ResponseValidator, ConfigHelper
 
 logger = logging.getLogger(__name__)
 
-class BrowserUseLLMAdapter(BaseLanguageModel):
+
+def safe_tool_execution(func):
+    """安全的工具执行装饰器"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            import traceback
+            error_msg = f"Tool execution failed: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"TRACEBACK: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "tool_execution_error"
+            }
+    return wrapper
+
+
+class StructuredOutputWrapper:
+    """Wrapper to provide structured output interface for browser-use compatibility"""
+    
+    def __init__(self, llm_adapter, schema):
+        self.llm_adapter = llm_adapter
+        self.schema = schema
+    
+    def invoke(self, input_data, config=None, **kwargs):
+        """Invoke the wrapped LLM and return structured response"""
+        try:
+            # Get response from the LLM
+            response = self.llm_adapter.invoke(input_data, config, **kwargs)
+            
+            # If response is an AIMessage, get its content
+            if hasattr(response, 'content'):
+                content = response.content
+            else:
+                content = str(response)
+            
+            # 使用工具类解析结构化内容，避免重复导入
+            parsed = JSONExtractor.parse_structured_content(content)
+            return StructuredResponse(parsed)
+                
+        except Exception as e:
+            logger.error(f"Structured output wrapper error: {e}")
+            # Return a fallback structured response
+            return StructuredResponse({"error": str(e), "response": ""})
+    
+    async def ainvoke(self, input_data, config=None, **kwargs):
+        """Async invoke the wrapped LLM and return structured response"""
+        try:
+            # Get response from the LLM using apredict_messages if available
+            if hasattr(self.llm_adapter, 'apredict_messages') and isinstance(input_data, list):
+                response = await self.llm_adapter.apredict_messages(input_data, **kwargs)
+            elif hasattr(self.llm_adapter, 'apredict'):
+                if isinstance(input_data, list):
+                    # Convert messages to text
+                    text_input = "\n".join([str(msg.content) if hasattr(msg, 'content') else str(msg) for msg in input_data])
+                else:
+                    text_input = str(input_data)
+                response = await self.llm_adapter.apredict(text_input, **kwargs)
+            else:
+                # Fallback to sync invoke
+                response = self.llm_adapter.invoke(input_data, config, **kwargs)
+            
+            # If response is an AIMessage, get its content
+            if hasattr(response, 'content'):
+                content = response.content
+            else:
+                content = str(response)
+            
+            logger.info(f"Structured wrapper response content: {content[:200]}...")
+            
+            # 使用工具类解析结构化内容，避免重复导入
+            parsed = JSONExtractor.parse_structured_content(content)
+            structured_resp = StructuredResponse(parsed)
+            logger.info(f"Created StructuredResponse with keys: {list(structured_resp.keys())}")
+            
+            if hasattr(structured_resp, 'action'):
+                logger.info(f"Action attribute type: {type(structured_resp.action)}, value: {structured_resp.action}")
+            
+            return structured_resp
+                
+        except Exception as e:
+            logger.error(f"Structured output wrapper async error: {e}")
+            # Return a fallback structured response
+            return StructuredResponse({"error": str(e), "response": ""})
+
+
+class MockActionModel:
+    """Mock ActionModel to satisfy browser-use expectations"""
+    def __init__(self, action_data):
+        self.action_data = action_data
+        # Set the action as an attribute
+        for key, value in action_data.items():
+            setattr(self, key, value)
+    
+    def model_dump(self, exclude_unset=True):
+        """Mimic Pydantic model_dump method"""
+        return self.action_data
+    
+    def get_index(self):
+        """Get index from action parameters"""
+        for action_params in self.action_data.values():
+            if isinstance(action_params, dict) and 'index' in action_params:
+                return action_params['index']
+        return None
+    
+    def set_index(self, index):
+        """Set index in action parameters"""
+        for action_params in self.action_data.values():
+            if isinstance(action_params, dict):
+                action_params['index'] = index
+
+
+class BrowserUseResultAnalyzer:
+    """Browser-Use风格的结果分析器 - 模仿AgentHistoryList的功能"""
+    
+    def __init__(self, agent_history):
+        self.history = agent_history
+    
+    def extract_comprehensive_result(self, task: str) -> Dict[str, Any]:
+        """全面的结果提取 - 模仿Browser-Use的逻辑"""
+        
+        # 1. 基础状态检查
+        if not self.history or not hasattr(self.history, 'history') or not self.history.history:
+            return self._create_error_result("No execution history found", task)
+        
+        # 2. 获取Browser-Use的原生方法结果
+        final_result = self._get_final_result()
+        is_done = self._is_done()
+        is_successful = self._is_successful()
+        has_errors = self._has_errors()
+        
+        # 3. 提取执行统计
+        steps_taken = len(self.history.history)
+        total_duration = self._get_total_duration()
+        error_list = self._get_errors()
+        
+        # 4. 获取最后一步的详细信息
+        last_step = self.history.history[-1] if self.history.history else None
+        
+        # 5. 构建综合结果
+        result_data = {
+            "success": self._determine_overall_success(is_done, is_successful, has_errors),
+            "data": {
+                "task": task,
+                "result": final_result or self._extract_fallback_content(),
+                "is_done": is_done,
+                "is_successful": is_successful,
+                "steps_taken": steps_taken,
+                "total_duration_seconds": total_duration,
+                "has_errors": has_errors,
+                "error_count": len([e for e in error_list if e is not None]),
+                "last_action": self._get_last_action(),
+                "extracted_contents": self._get_extracted_content(),
+                "urls_visited": self._get_unique_urls(),
+                "attachments": self._extract_attachments(),
+                "execution_summary": self._create_execution_summary(),
+                "action_breakdown": self._get_action_breakdown()
+            },
+            "error_message": self._get_primary_error_message(),
+            "error_type": self._classify_error_type(),
+            "debug_info": {
+                "browser_use_version": getattr(self.history, 'version', 'unknown'),
+                "raw_final_result": final_result,
+                "history_length": steps_taken,
+                "last_step_details": self._get_last_step_debug_info()
+            }
+        }
+        
+        # 确保结果是JSON可序列化的
+        return self._ensure_json_serializable(result_data)
+    
+    def _get_final_result(self):
+        """模仿Browser-Use的final_result()方法"""
+        try:
+            return self.history.final_result() if hasattr(self.history, 'final_result') else None
+        except Exception as e:
+            logger.debug(f"Error getting final_result: {e}")
+            return None
+    
+    def _is_done(self):
+        """模仿Browser-Use的is_done()方法"""
+        try:
+            return self.history.is_done() if hasattr(self.history, 'is_done') else False
+        except Exception as e:
+            logger.debug(f"Error checking is_done: {e}")
+            return False
+    
+    def _is_successful(self):
+        """模仿Browser-Use的is_successful()方法"""
+        try:
+            return self.history.is_successful() if hasattr(self.history, 'is_successful') else None
+        except Exception as e:
+            logger.debug(f"Error checking is_successful: {e}")
+            return None
+    
+    def _has_errors(self):
+        """模仿Browser-Use的has_errors()方法"""
+        try:
+            return self.history.has_errors() if hasattr(self.history, 'has_errors') else False
+        except Exception as e:
+            logger.debug(f"Error checking has_errors: {e}")
+            return False
+    
+    def _get_total_duration(self):
+        """获取总执行时间"""
+        try:
+            return self.history.total_duration_seconds() if hasattr(self.history, 'total_duration_seconds') else 0.0
+        except Exception as e:
+            logger.debug(f"Error getting total_duration: {e}")
+            return 0.0
+    
+    def _get_errors(self):
+        """获取错误列表"""
+        try:
+            return self.history.errors() if hasattr(self.history, 'errors') else []
+        except Exception as e:
+            logger.debug(f"Error getting errors: {e}")
+            return []
+    
+    def _get_last_action(self):
+        """获取最后一个动作"""
+        try:
+            if hasattr(self.history, 'last_action'):
+                action = self.history.last_action()
+                # 确保action是可序列化的
+                if hasattr(action, 'model_dump'):
+                    return action.model_dump()
+                elif isinstance(action, dict):
+                    return action
+                else:
+                    return str(action) if action is not None else None
+            return None
+        except Exception as e:
+            logger.debug(f"Error getting last_action: {e}")
+            return None
+    
+    def _get_extracted_content(self):
+        """获取所有提取的内容"""
+        try:
+            return self.history.extracted_content() if hasattr(self.history, 'extracted_content') else []
+        except Exception as e:
+            logger.debug(f"Error getting extracted_content: {e}")
+            return []
+    
+    def _get_unique_urls(self):
+        """获取访问的URL列表"""
+        try:
+            urls = self.history.urls() if hasattr(self.history, 'urls') else []
+            return list(set([url for url in urls if url]))
+        except Exception as e:
+            logger.debug(f"Error getting URLs: {e}")
+            return []
+    
+    def _get_action_breakdown(self):
+        """获取动作分解"""
+        try:
+            if hasattr(self.history, 'action_names'):
+                action_names = self.history.action_names()
+                action_counts = {}
+                for action in action_names:
+                    action_counts[action] = action_counts.get(action, 0) + 1
+                return action_counts
+            return {}
+        except Exception as e:
+            logger.debug(f"Error getting action breakdown: {e}")
+            return {}
+    
+    def _determine_overall_success(self, is_done: bool, is_successful: bool | None, has_errors: bool) -> bool:
+        """模仿Browser-Use的成功判断逻辑"""
+        if not is_done:
+            return False
+        if is_successful is not None:
+            return is_successful
+        return not has_errors
+    
+    def _extract_fallback_content(self) -> str:
+        """当没有final_result时的回退内容提取"""
+        # 1. 尝试从提取内容获取
+        contents = self._get_extracted_content()
+        if contents:
+            return contents[-1]
+        
+        # 2. 尝试从最后一步的结果获取
+        if self.history.history:
+            last_step = self.history.history[-1]
+            if hasattr(last_step, 'result') and last_step.result:
+                for result in reversed(last_step.result):
+                    if hasattr(result, 'extracted_content') and result.extracted_content:
+                        return result.extracted_content
+        
+        # 3. 尝试从model输出获取
+        try:
+            if hasattr(self.history, 'model_outputs'):
+                model_outputs = self.history.model_outputs()
+                if model_outputs:
+                    last_output = model_outputs[-1]
+                    if hasattr(last_output, 'next_goal') and hasattr(last_output, 'memory'):
+                        return f"Goal: {last_output.next_goal}, Memory: {last_output.memory}"
+        except Exception as e:
+            logger.debug(f"Error extracting from model outputs: {e}")
+        
+        # 4. 最后的回退
+        return "Task executed but no specific content extracted"
+    
+    def _extract_attachments(self) -> List[str]:
+        """提取所有附件"""
+        attachments = []
+        try:
+            if hasattr(self.history, 'action_results'):
+                for result in self.history.action_results():
+                    if hasattr(result, 'attachments') and result.attachments:
+                        attachments.extend(result.attachments)
+        except Exception as e:
+            logger.debug(f"Error extracting attachments: {e}")
+        return attachments
+    
+    def _create_execution_summary(self) -> Dict[str, Any]:
+        """创建执行摘要"""
+        action_counts = self._get_action_breakdown()
+        return {
+            "total_actions": sum(action_counts.values()),
+            "action_breakdown": action_counts,
+            "unique_actions": len(action_counts),
+            "most_used_action": max(action_counts.items(), key=lambda x: x[1])[0] if action_counts else None
+        }
+    
+    def _get_primary_error_message(self) -> str:
+        """获取主要错误信息"""
+        errors = self._get_errors()
+        error_messages = [e for e in errors if e is not None]
+        if error_messages:
+            return error_messages[-1]
+        return ""
+    
+    def _classify_error_type(self) -> str:
+        """错误类型分类"""
+        error_msg = self._get_primary_error_message().lower()
+        if not error_msg:
+            return ""
+        
+        if "network" in error_msg or "connection" in error_msg:
+            return "NetworkError"
+        elif "element" in error_msg or "selector" in error_msg:
+            return "ElementError"
+        elif "timeout" in error_msg:
+            return "TimeoutError"
+        elif "validation" in error_msg:
+            return "ValidationError"
+        elif "llm" in error_msg or "api" in error_msg:
+            return "LLMError"
+        else:
+            return "UnknownError"
+    
+    def _get_last_step_debug_info(self) -> Dict[str, Any]:
+        """获取最后一步的调试信息"""
+        if not self.history.history:
+            return {}
+        
+        try:
+            last_step = self.history.history[-1]
+            debug_info = {
+                "has_model_output": hasattr(last_step, 'model_output') and last_step.model_output is not None,
+                "has_result": hasattr(last_step, 'result') and bool(last_step.result),
+                "result_count": len(last_step.result) if hasattr(last_step, 'result') and last_step.result else 0
+            }
+            
+            if hasattr(last_step, 'result') and last_step.result:
+                last_result = last_step.result[-1]
+                debug_info.update({
+                    "last_result_is_done": getattr(last_result, 'is_done', None),
+                    "last_result_success": getattr(last_result, 'success', None),
+                    "last_result_error": getattr(last_result, 'error', None),
+                    "last_result_has_content": bool(getattr(last_result, 'extracted_content', None))
+                })
+            
+            # 确保所有值都是JSON可序列化的
+            serializable_debug_info = {}
+            for key, value in debug_info.items():
+                if value is None or isinstance(value, (bool, int, float, str)):
+                    serializable_debug_info[key] = value
+                else:
+                    serializable_debug_info[key] = str(value)
+            
+            return serializable_debug_info
+        except Exception as e:
+            logger.debug(f"Error getting debug info: {e}")
+            return {"debug_info_error": str(e)}
+    
+    def _create_error_result(self, error_msg: str, task: str) -> Dict[str, Any]:
+        """创建错误结果"""
+        return {
+            "success": False,
+            "data": {
+                "task": task,
+                "result": "",
+                "is_done": False,
+                "steps_taken": 0,
+                "error_details": error_msg
+            },
+            "error_message": error_msg,
+            "error_type": "SystemError"
+        }
+    
+    def _ensure_json_serializable(self, data: Any) -> Any:
+        """确保数据是JSON可序列化的"""
+        try:
+            if data is None:
+                return None
+            elif isinstance(data, (bool, int, float, str)):
+                return data
+            elif isinstance(data, (list, tuple)):
+                return [self._ensure_json_serializable(item) for item in data]
+            elif isinstance(data, dict):
+                return {key: self._ensure_json_serializable(value) for key, value in data.items()}
+            else:
+                # 对于Mock对象或其他不可序列化的对象，转换为字符串
+                return str(data)
+        except Exception as e:
+            logger.debug(f"Error serializing data: {e}")
+            return str(data)
+
+
+class StructuredResponse:
+    """Response object that supports subscript access for browser-use compatibility"""
+    
+    def __init__(self, data):
+        self.data = data if isinstance(data, dict) else {"response": str(data)}
+        
+        # Set attributes dynamically for direct attribute access
+        for key, value in self.data.items():
+            if key == 'action' and isinstance(value, list):
+                # Convert action list to MockActionModel instances
+                mock_actions = []
+                for action_item in value:
+                    if isinstance(action_item, dict):
+                        mock_actions.append(MockActionModel(action_item))
+                    else:
+                        mock_actions.append(action_item)
+                setattr(self, key, mock_actions)
+            else:
+                setattr(self, key, value)
+    
+    def __getitem__(self, key):
+        """Support subscript access"""
+        return self.data.get(key, "")
+    
+    def __setitem__(self, key, value):
+        """Support subscript assignment"""
+        self.data[key] = value
+        setattr(self, key, value)
+    
+    def __contains__(self, key):
+        """Support 'in' operator"""
+        return key in self.data
+    
+    def get(self, key, default=None):
+        """Support dictionary-like get method"""
+        return self.data.get(key, default)
+    
+    def keys(self):
+        """Support keys() method"""
+        return self.data.keys()
+    
+    def values(self):
+        """Support values() method"""
+        return self.data.values()
+    
+    def items(self):
+        """Support items() method"""
+        return self.data.items()
+    
+    def __getattr__(self, name):
+        """Support dynamic attribute access"""
+        if name == 'data':
+            return object.__getattribute__(self, name)
+        if name in self.data:
+            value = self.data[name]
+            if name == 'action' and isinstance(value, list):
+                # Return MockActionModel instances for actions
+                mock_actions = []
+                for action_item in value:
+                    if isinstance(action_item, dict):
+                        mock_actions.append(MockActionModel(action_item))
+                    else:
+                        mock_actions.append(action_item)
+                return mock_actions
+            return value
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+    
+    def __str__(self):
+        """String representation"""
+        return str(self.data)
+    
+    def __repr__(self):
+        """Representation"""
+        return f"StructuredResponse({self.data})"
+
+class BrowserUseLLMAdapter(BaseChatModel):
     """
     Adapter to make our LLMClient compatible with browser-use's LangChain interface
     """
@@ -40,6 +576,10 @@ class BrowserUseLLMAdapter(BaseLanguageModel):
         super().__init__(**kwargs)
         # Use object.__setattr__ to bypass Pydantic validation
         object.__setattr__(self, 'llm_client', llm_client)
+    
+    def get(self, key: str, default=None):
+        """Support for dictionary-like access needed by LangChain"""
+        return getattr(self, key, default)
     
     @property
     def _llm_type(self) -> str:
@@ -52,18 +592,54 @@ class BrowserUseLLMAdapter(BaseLanguageModel):
         stop: Optional[List[str]] = None,
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
-    ) -> LLMResult:
-        """Generate LLM result from messages."""
-        # Convert LangChain messages to our format
+    ) -> ChatResult:
+        """Generate chat result from messages."""
+        # Convert LangChain messages to our format with filtering
         formatted_messages = []
         for msg in messages:
+            content = str(msg.content).strip() if msg.content else ""
+            
+            # Skip empty messages
+            if not content:
+                continue
+                
             if isinstance(msg, HumanMessage):
-                formatted_messages.append({"role": "user", "content": msg.content})
+                formatted_messages.append({"role": "user", "content": content})
             elif isinstance(msg, AIMessage):
-                formatted_messages.append({"role": "assistant", "content": msg.content})
+                formatted_messages.append({"role": "assistant", "content": content})
             else:
-                # Handle other message types as system messages
-                formatted_messages.append({"role": "system", "content": str(msg.content)})
+                # For Gemini, convert system messages to user messages with prefix
+                formatted_messages.append({"role": "user", "content": f"System: {content}"})
+        
+        # Ensure we have at least one message and merge consecutive user messages for Gemini
+        if not formatted_messages:
+            formatted_messages = [{"role": "user", "content": "Hello"}]
+        else:
+            # Merge consecutive user messages to avoid Gemini API issues
+            merged_messages = []
+            current_user_content = []
+            
+            for msg in formatted_messages:
+                if msg["role"] == "user":
+                    current_user_content.append(msg["content"])
+                else:
+                    # Flush any accumulated user content first
+                    if current_user_content:
+                        merged_messages.append({
+                            "role": "user", 
+                            "content": "\n\n".join(current_user_content)
+                        })
+                        current_user_content = []
+                    merged_messages.append(msg)
+            
+            # Flush any remaining user content
+            if current_user_content:
+                merged_messages.append({
+                    "role": "user", 
+                    "content": "\n\n".join(current_user_content)
+                })
+            
+            formatted_messages = merged_messages
         
         # Use our LLM client to get response (this needs to be synchronous for LangChain)
         import asyncio
@@ -80,9 +656,18 @@ class BrowserUseLLMAdapter(BaseLanguageModel):
             logger.error(f"LLM adapter call failed: {e}")
             response = f"Error: {e}"
         
-        # Return LangChain format result
-        generation = Generation(text=response)
-        return LLMResult(generations=[[generation]])
+        # Handle structured output if requested
+        if hasattr(self, '_structured_schema') and self._structured_schema:
+            logger.info("Processing structured output response (sync)")
+            structured_response = self._parse_structured_response(response)
+            if structured_response:
+                # Return the structured response directly as the message content
+                generation = BrowserUseGeneration(message=AIMessage(content=structured_response))
+                return ChatResult(generations=[generation])
+        
+        # Return LangChain format result for chat models with browser-use compatibility
+        generation = BrowserUseGeneration(message=AIMessage(content=response))
+        return ChatResult(generations=[generation])
     
     async def _agenerate(
         self,
@@ -90,18 +675,54 @@ class BrowserUseLLMAdapter(BaseLanguageModel):
         stop: Optional[List[str]] = None,
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
-    ) -> LLMResult:
-        """Async generate LLM result from messages."""
-        # Convert LangChain messages to our format
+    ) -> ChatResult:
+        """Async generate chat result from messages."""
+        # Convert LangChain messages to our format with filtering
         formatted_messages = []
         for msg in messages:
+            content = str(msg.content).strip() if msg.content else ""
+            
+            # Skip empty messages
+            if not content:
+                continue
+                
             if isinstance(msg, HumanMessage):
-                formatted_messages.append({"role": "user", "content": msg.content})
+                formatted_messages.append({"role": "user", "content": content})
             elif isinstance(msg, AIMessage):
-                formatted_messages.append({"role": "assistant", "content": msg.content})
+                formatted_messages.append({"role": "assistant", "content": content})
             else:
-                # Handle other message types as system messages
-                formatted_messages.append({"role": "system", "content": str(msg.content)})
+                # For Gemini, convert system messages to user messages with prefix
+                formatted_messages.append({"role": "user", "content": f"System: {content}"})
+        
+        # Ensure we have at least one message and merge consecutive user messages for Gemini
+        if not formatted_messages:
+            formatted_messages = [{"role": "user", "content": "Hello"}]
+        else:
+            # Merge consecutive user messages to avoid Gemini API issues
+            merged_messages = []
+            current_user_content = []
+            
+            for msg in formatted_messages:
+                if msg["role"] == "user":
+                    current_user_content.append(msg["content"])
+                else:
+                    # Flush any accumulated user content first
+                    if current_user_content:
+                        merged_messages.append({
+                            "role": "user", 
+                            "content": "\n\n".join(current_user_content)
+                        })
+                        current_user_content = []
+                    merged_messages.append(msg)
+            
+            # Flush any remaining user content
+            if current_user_content:
+                merged_messages.append({
+                    "role": "user", 
+                    "content": "\n\n".join(current_user_content)
+                })
+            
+            formatted_messages = merged_messages
         
         try:
             response = await self.llm_client._call_api(formatted_messages)
@@ -109,19 +730,28 @@ class BrowserUseLLMAdapter(BaseLanguageModel):
             logger.error(f"LLM adapter async call failed: {e}")
             response = f"Error: {e}"
         
-        # Return LangChain format result
-        generation = Generation(text=response)
-        return LLMResult(generations=[[generation]])
+        # Handle structured output if requested
+        if hasattr(self, '_structured_schema') and self._structured_schema:
+            logger.info("Processing structured output response")
+            structured_response = self._parse_structured_response(response)
+            if structured_response:
+                # Return the structured response directly as the message content
+                generation = BrowserUseGeneration(message=AIMessage(content=structured_response))
+                return ChatResult(generations=[generation])
+        
+        # Return LangChain format result for chat models with browser-use compatibility
+        generation = BrowserUseGeneration(message=AIMessage(content=response))
+        return ChatResult(generations=[generation])
     
-    # Required abstract methods from BaseLanguageModel
+    # Required abstract methods from BaseChatModel
     def generate_prompt(self, prompts, stop=None, callbacks=None, **kwargs):
         """Generate completions for multiple prompts."""
         generations = []
         for prompt in prompts:
             messages = prompt.to_messages()
             result = self._generate(messages, stop=stop, **kwargs)
-            generations.append(result.generations[0])
-        return LLMResult(generations=generations)
+            generations.extend(result.generations)  # Use extend instead of append
+        return ChatResult(generations=generations)
     
     async def agenerate_prompt(self, prompts, stop=None, callbacks=None, **kwargs):
         """Async generate completions for multiple prompts."""
@@ -129,30 +759,30 @@ class BrowserUseLLMAdapter(BaseLanguageModel):
         for prompt in prompts:
             messages = prompt.to_messages()
             result = await self._agenerate(messages, stop=stop, **kwargs)
-            generations.append(result.generations[0])
-        return LLMResult(generations=generations)
+            generations.extend(result.generations)  # Use extend instead of append
+        return ChatResult(generations=generations)
     
     def predict(self, text: str, *, stop: Optional[List[str]] = None, **kwargs) -> str:
         """Predict text completion."""
         messages = [HumanMessage(content=text)]
         result = self._generate(messages, stop=stop, **kwargs)
-        return result.generations[0][0].text
+        return result.generations[0].message.content
     
     async def apredict(self, text: str, *, stop: Optional[List[str]] = None, **kwargs) -> str:
         """Async predict text completion."""
         messages = [HumanMessage(content=text)]
         result = await self._agenerate(messages, stop=stop, **kwargs)
-        return result.generations[0][0].text
+        return result.generations[0].message.content
     
     def predict_messages(self, messages: List[BaseMessage], *, stop: Optional[List[str]] = None, **kwargs) -> BaseMessage:
         """Predict message response."""
         result = self._generate(messages, stop=stop, **kwargs)
-        return AIMessage(content=result.generations[0][0].text)
+        return result.generations[0].message
     
     async def apredict_messages(self, messages: List[BaseMessage], *, stop: Optional[List[str]] = None, **kwargs) -> BaseMessage:
         """Async predict message response."""
         result = await self._agenerate(messages, stop=stop, **kwargs)
-        return AIMessage(content=result.generations[0][0].text)
+        return result.generations[0].message
     
     def invoke(self, input_data, config=None, **kwargs):
         """Invoke the language model."""
@@ -162,19 +792,51 @@ class BrowserUseLLMAdapter(BaseLanguageModel):
             return self.predict_messages(input_data, **kwargs)
         else:
             raise ValueError(f"Unsupported input type: {type(input_data)}")
+    
+    def with_structured_output(self, schema, **kwargs):
+        """Return a new model with structured output capability."""
+        logger.warning("with_structured_output called - returning direct adapter")
+        # Instead of wrapping, modify the current instance to handle structured output
+        self._structured_schema = schema
+        self._structured_kwargs = kwargs
+        return self
+    
+    def bind(self, **kwargs):
+        """Bind additional parameters to the model."""
+        # Return self for simplicity - browser-use may call this
+        return self
+    
+    def _parse_structured_response(self, content):
+        """Parse structured response from LLM content"""
+        try:
+            # 🔧 修复：使用JSONExtractor工具类，彻底避免re作用域问题
+            parsed = JSONExtractor.parse_structured_content(content)
+            structured_resp = StructuredResponse(parsed)
+            logger.info(f"JSONExtractor parse successful, created StructuredResponse with keys: {list(structured_resp.keys())}")
+            
+            if hasattr(structured_resp, 'action'):
+                logger.info(f"Action attribute type: {type(structured_resp.action)}, value: {structured_resp.action}")
+            
+            return structured_resp
+        except Exception as e:
+            logger.error(f"Error in structured response parsing: {e}")
+            return StructuredResponse({"error": str(e), "response": content})
 
+
+from core.unified_tool_manager import UnifiedToolManager
 
 class BrowserUseMCPServer:
     """Browser-Use AI浏览器MCP服务器 - 完整实现browser-use功能"""
     
-    def __init__(self, config_manager: ConfigManager):
+    def __init__(self, config_manager: ConfigManager, tool_manager: UnifiedToolManager):
         self.server_name = "browser_use_server"
-        self.server_id = "browser-use-mcp-server"
+        self.server_id = "browser_use"
         self.config_manager = config_manager
+        self.tool_manager = tool_manager
         
-        # 初始化统一LLM客户端
+        # 初始化统一LLM��户端
         llm_config = config_manager.get_llm_config()
-        self.llm_client = LLMClient(llm_config)
+        self.llm_client = LLMClient(llm_config, tool_manager=tool_manager)
         logger.info(f"Browser-Use server initialized with LLM provider: {self.llm_client.provider.value}")
         
         # 从配置中获取端口
@@ -186,7 +848,7 @@ class BrowserUseMCPServer:
             browser_use_port = int(dynamic_port)
             logger.info(f"使用动态分配端口: {browser_use_port}")
         else:
-            browser_use_port = ports_config['mcp_servers'].get('browser_use', {}).get('port', 8003)
+            browser_use_port = ports_config['mcp_servers'].get('browser_use_server', {}).get('port', 8082)
             logger.info(f"使用配置文件端口: {browser_use_port}")
         
         toolscore_mcp_port = ports_config['mcp_servers']['toolscore_mcp']['port']
@@ -201,9 +863,44 @@ class BrowserUseMCPServer:
         
         self.toolscore_endpoint = os.getenv('TOOLSCORE_ENDPOINT', f'ws://localhost:{toolscore_mcp_port}/websocket')
         
-        # 初始化browser和controller
+        # 初始化browser、context和controller
         self.browser = None
+        self.browser_context = None
         self.controller = None
+
+        # 动作分发映射
+        self._action_handlers = {
+            "browser_use_execute_task": self._execute_task_wrapper,
+            "browser_navigate": self._navigate_wrapper,
+            "browser_search_google": self._search_google_wrapper,
+            "browser_go_back": lambda params: self._execute_action("go_back", {}),
+            "browser_click_element": lambda params: self._execute_action("click_element_by_index", {"index": params["index"]}),
+            "browser_input_text": lambda params: self._execute_action("input_text", {"index": params["index"], "text": params["text"]}),
+            "browser_send_keys": lambda params: self._execute_action("send_keys", {"keys": params["keys"]}),
+            "browser_scroll_down": lambda params: self._execute_action("scroll_down", {"amount": params.get("amount")}),
+            "browser_scroll_up": lambda params: self._execute_action("scroll_up", {"amount": params.get("amount")}),
+            "browser_scroll_to_text": lambda params: self._execute_action("scroll_to_text", {"text": params["text"]}),
+            "browser_switch_tab": lambda params: self._execute_action("switch_tab", {"page_id": params["page_id"]}),
+            "browser_open_tab": lambda params: self._execute_action("open_tab", {"url": params["url"]}),
+            "browser_close_tab": lambda params: self._execute_action("close_tab", {"page_id": params["page_id"]}),
+            "browser_extract_content": self._extract_page_content,
+            "browser_get_content": self._get_content_wrapper,
+            "browser_get_ax_tree": lambda params: self._execute_action("get_ax_tree", {"number_of_elements": params["number_of_elements"]}),
+            "browser_get_dropdown_options": lambda params: self._execute_action("get_dropdown_options", {"index": params["index"]}),
+            "browser_select_dropdown_option": lambda params: self._execute_action("select_dropdown_option", {"index": params["index"], "text": params["text"]}),
+            "browser_drag_drop": self._drag_drop_wrapper,
+            "browser_save_pdf": lambda params: self._execute_action("save_pdf", {}),
+            "browser_screenshot": self._screenshot,
+            "browser_wait": lambda params: self._execute_action("wait", {"seconds": params.get("seconds", 3)}),
+            "browser_done": lambda params: self._execute_action("done", {"text": params["text"], "success": params["success"]}),
+            "browser_get_page_info": self._get_page_info,
+            "browser_get_current_url": self._get_current_url,
+            "browser_close_session": self._close_session,
+        }
+        try:
+            self._validate_actions()
+        except Exception as e:
+            logger.warning(f"Action validation failed: {e}, continuing with startup")
         
         logger.info(f"BrowserUseMCPServer initialized:")
         logger.info(f"  Server Name: {self.server_name}")
@@ -212,12 +909,222 @@ class BrowserUseMCPServer:
         logger.info(f"  Listen Port: {self._listen_port}")
         logger.info(f"  Public Endpoint: {self.endpoint}")
         logger.info(f"  ToolScore Endpoint: {self.toolscore_endpoint}")
+
+    def _validate_actions(self):
+        """验证所有在配置中声明的动作都有对应的处理函数。"""
+        try:
+            declared_actions = set(self.tool_manager.get_tool_actions(self.server_name))
+            implemented_actions = set(self._action_handlers.keys())
+
+            missing = declared_actions - implemented_actions
+            if missing:
+                raise NotImplementedError(f"服务器 {self.server_name} 在配置中声明了动作 {missing}，但没有实现对应的处理函数！")
+
+            extra = implemented_actions - declared_actions
+            if extra:
+                logging.warning(f"服务器 {self.server_name} 实现了多余的动作 {extra}，这些动作未在配置中声明。")
+            
+            logger.info(f"✅ {self.server_name} 的所有动作已验证。")
+        except Exception as e:
+            logger.error(f"动作验证失败: {e}", exc_info=True)
+            raise
+
+    async def _execute_task_wrapper(self, parameters):
+        result = await self._execute_task_with_retry(parameters)
+        result['execution_time'] = time.time() - (result.get('start_time', time.time()))
+        return result
+
+    async def _navigate_wrapper(self, parameters):
+        if "url" not in parameters:
+            return {"success": False, "error_message": "Missing 'url' parameter."}
+        url = parameters["url"]
+        if not isinstance(url, str) or not url.strip():
+            return {"success": False, "error_message": "Invalid 'url' parameter."}
+        return await self._navigate_to_url(url)
+
+    async def _search_google_wrapper(self, parameters):
+        query = parameters.get("query", "")
+        if not query:
+            return {"success": False, "error_message": "Missing 'query' parameter."}
+        return await self._handle_google_search(query)
+
+    async def _drag_drop_wrapper(self, parameters):
+        drag_params = {key: parameters[key] for key in ["element_source", "element_target", "coord_source_x", "coord_source_y", "coord_target_x", "coord_target_y", "steps"] if key in parameters}
+        return await self._execute_action("drag_drop", drag_params)
+    
+    async def _get_content_wrapper(self, parameters):
+        """获取页面内容，支持通过CSS选择器获取特定内容"""
+        try:
+            selector = parameters.get("selector", "")
+            
+            # 获取当前页面
+            if not self.browser_context:
+                return {"success": False, "error_message": "浏览器上下文不可用"}
+            
+            page = await self.browser_context.get_current_page()
+            if not page:
+                return {"success": False, "error_message": "当前没有活动页面"}
+            
+            # 根据选择器获取内容
+            if not selector or selector == "entire page":
+                # 获取整个页面的HTML内容
+                content = await page.content()
+            else:
+                # 使用CSS选择器获取特定元素的内容
+                try:
+                    element = await page.query_selector(selector)
+                    if element:
+                        # 获取元素的文本内容
+                        content = await element.text_content()
+                        if not content:
+                            # 如果没有文本内容，尝试获取innerHTML
+                            content = await element.inner_html()
+                    else:
+                        return {"success": False, "error_message": f"未找到匹配选择器 '{selector}' 的元素"}
+                except Exception as e:
+                    return {"success": False, "error_message": f"选择器 '{selector}' 无效: {str(e)}"}
+            
+            return {
+                "success": True, 
+                "data": {
+                    "content": content or "",
+                    "selector": selector,
+                    "url": page.url if hasattr(page, 'url') else "未知"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"获取页面内容失败: {e}")
+            return {"success": False, "error_message": f"获取内容时发生错误: {str(e)}"}
+
+    async def _handle_google_search(self, query: str):
+        """增强的Google搜索处理，包含强化的内容提取和回退机制"""
+        try:
+            # 第一步：尝试browser-use的内置搜索
+            action_model = ActionModel(search_google=query)
+            result = await self.controller.act(action=action_model, browser_context=self.browser_context)
+            
+            if isinstance(result, ActionResult):
+                # 🔧 关键修复：检查内容是否真的有用
+                if result.extracted_content and result.extracted_content.strip() and len(result.extracted_content.strip()) > 10:
+                    logger.info(f"✅ Browser-use搜索成功，内容长度: {len(result.extracted_content)}")
+                    return {"success": True, "data": {"content": result.extracted_content, "is_done": result.is_done, "query": query}, "error_message": result.error or ""}
+                else:
+                    # 内容为空或太短，使用回退方案
+                    logger.warning(f"⚠️ Browser-use返回空内容，使用手动提取回退方案")
+                    return await self._manual_google_search_extraction(query)
+            else:
+                return {"success": True, "data": {"content": str(result), "query": query}}
+                
+        except Exception as e1:
+            logger.warning(f"🔧 search_google with ActionModel failed: {e1}")
+            return await self._manual_google_search_extraction(query)
+    
+    async def _manual_google_search_extraction(self, query: str):
+        """🔧 手动Google搜索和内容提取 - 强化的回退机制"""
+        try:
+            import urllib.parse
+            import asyncio
+            
+            search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+            page = await self.browser_context.get_current_page()
+            
+            # 导航到搜索页面
+            await page.goto(search_url, wait_until='networkidle', timeout=30000)
+            
+            # 等待页面完全加载
+            await asyncio.sleep(3)
+            
+            # 尝试多种策略提取搜索结果
+            search_results = []
+            extraction_methods = [
+                # 方法1：标准Google搜索结果
+                {'selector': 'div[data-ved] h3', 'name': 'data-ved标题'},
+                {'selector': '.g h3', 'name': 'g类标题'},
+                {'selector': 'h3', 'name': '所有h3标题'},
+                {'selector': '.LC20lb', 'name': 'LC20lb类'},
+                {'selector': '[role="heading"]', 'name': 'heading角色'},
+                # 方法2：链接文本
+                {'selector': 'a h3', 'name': '链接中的h3'},
+                {'selector': 'cite', 'name': '引用文本'},
+            ]
+            
+            for method in extraction_methods:
+                try:
+                    elements = await page.query_selector_all(method['selector'])
+                    if elements:
+                        logger.info(f"📋 使用 {method['name']} 提取到 {len(elements)} 个元素")
+                        for element in elements[:8]:  # 取前8个结果
+                            text = await element.text_content()
+                            if text and text.strip() and len(text.strip()) > 3:
+                                search_results.append(text.strip())
+                        
+                        if search_results:
+                            break  # 找到结果就停止尝试其他方法
+                            
+                except Exception as e:
+                    logger.debug(f"提取方法 {method['name']} 失败: {e}")
+                    continue
+            
+            # 如果仍然没有结果，尝试获取页面摘要
+            if not search_results:
+                try:
+                    # 获取页面标题和一些文本内容
+                    title = await page.title()
+                    body_text = await page.evaluate('() => document.body.innerText')
+                    
+                    if body_text and len(body_text) > 50:
+                        # 从body文本中提取前几行有意义的内容
+                        lines = [line.strip() for line in body_text.split('\n') if line.strip() and len(line.strip()) > 10]
+                        search_results = lines[:5]
+                        logger.info(f"📝 从页面文本提取到 {len(search_results)} 行内容")
+                    
+                except Exception as e:
+                    logger.debug(f"页面文本提取失败: {e}")
+            
+            # 构建最终结果
+            if search_results:
+                content = f"Google搜索查询: {query}\n\n搜索结果:\n"
+                for i, result in enumerate(search_results, 1):
+                    content += f"{i}. {result}\n"
+                
+                logger.info(f"✅ 手动搜索成功，提取到 {len(search_results)} 个结果")
+                return {
+                    "success": True, 
+                    "data": {
+                        "content": content,
+                        "query": query,
+                        "results_count": len(search_results),
+                        "extraction_method": "manual_fallback"
+                    }
+                }
+            else:
+                # 最后的回退：至少返回一些基本信息
+                page_title = await page.title()
+                logger.warning(f"⚠️ 无法提取搜索结果，返回基本信息")
+                return {
+                    "success": True,
+                    "data": {
+                        "content": f"Google搜索已完成查询: {query}\n页面标题: {page_title}\n注意: 由于页面结构限制，无法提取具体搜索结果，但搜索操作已成功执行。",
+                        "query": query,
+                        "page_title": page_title,
+                        "extraction_method": "basic_fallback"
+                    }
+                }
+                
+        except Exception as e2:
+            logger.error(f"❌ 手动Google搜索失败: {e2}")
+            return {
+                "success": False, 
+                "error_message": f"Google search failed: {str(e2)}",
+                "query": query
+            }
     
     async def _ensure_browser_session(self):
-        """确保browser已初始化"""
+        """确保browser和context已初始化"""
         if self.browser is None:
             try:
-                # 增强的浏览器配置 - 移除不支持的chrome_path参数
+                # 🔧 增强的反检测浏览器配置
                 browser_config = BrowserConfig(
                     headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
                     disable_security=True,     # 允许跨域访问
@@ -225,18 +1132,33 @@ class BrowserUseMCPServer:
                         "--no-sandbox",
                         "--disable-dev-shm-usage", 
                         "--disable-gpu",
+                        # 🚀 核心反检测参数
                         "--disable-blink-features=AutomationControlled",
+                        "--disable-web-security",
+                        "--disable-features=VizDisplayCompositor",
+                        "--disable-ipc-flooding-protection",
+                        # 🔧 反爬虫对抗
+                        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                         "--disable-extensions",
                         "--no-first-run",
                         "--disable-default-apps",
                         "--disable-background-timer-throttling",
                         "--disable-backgrounding-occluded-windows",
-                        "--disable-renderer-backgrounding"
+                        "--disable-renderer-backgrounding",
+                        # 🎭 隐身模式增强
+                        "--disable-plugins",
+                        "--disable-images",  # 加快加载速度
+                        "--no-default-browser-check",
+                        "--disable-translate",
+                        "--disable-sync",
+                        # 🔐 额外反检测措施
+                        "--disable-component-extensions-with-background-pages",
+                        "--disable-background-networking",
+                        "--disable-domain-reliability"
                     ]
                 )
                 
                 self.browser = Browser(config=browser_config)
-                # Browser对象不需要显式调用start()，会在使用时自动启动
                 logger.info("Browser initialized with enhanced configuration")
                 
             except Exception as e:
@@ -247,558 +1169,44 @@ class BrowserUseMCPServer:
                     disable_security=True
                 )
                 self.browser = Browser(config=browser_config)
-                # Browser对象不需要显式调用start()，会在使用时自动启动
                 logger.info("Browser initialized with basic configuration")
+        
+        # 确保browser context已创建
+        if self.browser_context is None:
+            self.browser_context = await self.browser.new_context()
+            logger.info("Browser context created")
             
         if self.controller is None:
+            # Controller需要与当前页面关联
+            page = await self.browser_context.get_current_page()
             self.controller = Controller()
             logger.info("Controller initialized")
     
     def get_capabilities(self) -> List[ToolCapability]:
         """获取Browser-Use工具的所有能力"""
-        return [
-            # 高级AI任务执行
-            ToolCapability(
-                name="browser_use_execute_task",
-                description="使用AI执行复杂的浏览器任务，支持自然语言描述",
-                parameters={
-                    "task": {
-                        "type": "string",
-                        "description": "要执行的任务描述，使用自然语言",
-                        "required": True
-                    },
-                    "max_steps": {
-                        "type": "integer",
-                        "description": "最大执行步骤数，默认50",
-                        "required": False
-                    },
-                    "use_vision": {
-                        "type": "boolean",
-                        "description": "是否使用视觉理解，默认true",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {"task": "搜索Python教程并打开第一个结果"},
-                    {"task": "在GitHub上搜索browser-use项目并查看README"},
-                    {"task": "登录网站并填写表单", "use_vision": True}
-                ]
-            ),
-            
-            # 基础导航功能
-            ToolCapability(
-                name="browser_navigate",
-                description="导航到指定网址",
-                parameters={
-                    "url": {
-                        "type": "string",
-                        "description": "要访问的URL地址",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"url": "https://www.google.com"},
-                    {"url": "https://github.com"}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_search_google",
-                description="在Google中搜索指定查询",
-                parameters={
-                    "query": {
-                        "type": "string",
-                        "description": "搜索查询词",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"query": "Python machine learning tutorial"},
-                    {"query": "browser automation tools"}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_go_back",
-                description="返回上一页",
-                parameters={},
-                examples=[{}]
-            ),
-            
-            # 元素交互功能
-            ToolCapability(
-                name="browser_click_element",
-                description="通过索引点击页面元素",
-                parameters={
-                    "index": {
-                        "type": "integer",
-                        "description": "要点击的元素索引",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"index": 1},
-                    {"index": 5}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_input_text",
-                description="在指定元素中输入文本",
-                parameters={
-                    "index": {
-                        "type": "integer",
-                        "description": "要输入文本的元素索引",
-                        "required": True
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "要输入的文本",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"index": 2, "text": "hello world"},
-                    {"index": 0, "text": "test@example.com"}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_send_keys",
-                description="发送特殊键或快捷键",
-                parameters={
-                    "keys": {
-                        "type": "string",
-                        "description": "要发送的键，如Enter、Escape、Control+c等",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"keys": "Enter"},
-                    {"keys": "Control+c"},
-                    {"keys": "Escape"}
-                ]
-            ),
-            
-            # 滚动功能
-            ToolCapability(
-                name="browser_scroll_down",
-                description="向下滚动页面",
-                parameters={
-                    "amount": {
-                        "type": "integer",
-                        "description": "滚动像素数，不指定则滚动一页",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {},
-                    {"amount": 500}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_scroll_up",
-                description="向上滚动页面",
-                parameters={
-                    "amount": {
-                        "type": "integer",
-                        "description": "滚动像素数，不指定则滚动一页",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {},
-                    {"amount": 300}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_scroll_to_text",
-                description="滚动到包含指定文本的元素",
-                parameters={
-                    "text": {
-                        "type": "string",
-                        "description": "要滚动到的文本内容",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"text": "Sign up"},
-                    {"text": "Contact us"}
-                ]
-            ),
-            
-            # 标签管理
-            ToolCapability(
-                name="browser_switch_tab",
-                description="切换到指定标签",
-                parameters={
-                    "page_id": {
-                        "type": "integer",
-                        "description": "要切换到的标签ID",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"page_id": 0},
-                    {"page_id": 1}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_open_tab",
-                description="在新标签中打开URL",
-                parameters={
-                    "url": {
-                        "type": "string",
-                        "description": "要在新标签中打开的URL",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"url": "https://www.example.com"}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_close_tab",
-                description="关闭指定标签",
-                parameters={
-                    "page_id": {
-                        "type": "integer",
-                        "description": "要关闭的标签ID",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"page_id": 1}
-                ]
-            ),
-            
-            # 内容提取
-            ToolCapability(
-                name="browser_extract_content",
-                description="从页面提取特定内容",
-                parameters={
-                    "goal": {
-                        "type": "string",
-                        "description": "提取目标描述",
-                        "required": True
-                    },
-                    "include_links": {
-                        "type": "boolean",
-                        "description": "是否包含链接，默认false",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {"goal": "提取所有公司名称"},
-                    {"goal": "获取产品价格信息", "include_links": True}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_get_ax_tree",
-                description="获取页面的可访问性树结构",
-                parameters={
-                    "number_of_elements": {
-                        "type": "integer",
-                        "description": "返回的元素数量",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"number_of_elements": 50}
-                ]
-            ),
-            
-            # 下拉菜单操作
-            ToolCapability(
-                name="browser_get_dropdown_options",
-                description="获取下拉菜单的所有选项",
-                parameters={
-                    "index": {
-                        "type": "integer",
-                        "description": "下拉菜单元素的索引",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"index": 3}
-                ]
-            ),
-            
-            ToolCapability(
-                name="browser_select_dropdown_option",
-                description="选择下拉菜单中的选项",
-                parameters={
-                    "index": {
-                        "type": "integer",
-                        "description": "下拉菜单元素的索引",
-                        "required": True
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "要选择的选项文本",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"index": 3, "text": "Option 1"}
-                ]
-            ),
-            
-            # 拖拽操作
-            ToolCapability(
-                name="browser_drag_drop",
-                description="执行拖拽操作",
-                parameters={
-                    "element_source": {
-                        "type": "string",
-                        "description": "源元素选择器",
-                        "required": False
-                    },
-                    "element_target": {
-                        "type": "string",
-                        "description": "目标元素选择器",
-                        "required": False
-                    },
-                    "coord_source_x": {
-                        "type": "integer",
-                        "description": "源坐标X",
-                        "required": False
-                    },
-                    "coord_source_y": {
-                        "type": "integer",
-                        "description": "源坐标Y",
-                        "required": False
-                    },
-                    "coord_target_x": {
-                        "type": "integer",
-                        "description": "目标坐标X",
-                        "required": False
-                    },
-                    "coord_target_y": {
-                        "type": "integer",
-                        "description": "目标坐标Y",
-                        "required": False
-                    },
-                    "steps": {
-                        "type": "integer",
-                        "description": "拖拽步骤数，默认10",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {"element_source": ".item1", "element_target": ".dropzone"}
-                ]
-            ),
-            
-            # 文件操作
-            ToolCapability(
-                name="browser_save_pdf",
-                description="将当前页面保存为PDF",
-                parameters={},
-                examples=[{}]
-            ),
-            
-            ToolCapability(
-                name="browser_screenshot",
-                description="截取当前页面截图",
-                parameters={
-                    "filename": {
-                        "type": "string",
-                        "description": "截图文件名，可选",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {"filename": "current_page.png"},
-                    {}
-                ]
-            ),
-            
-            # 等待功能
-            ToolCapability(
-                name="browser_wait",
-                description="等待指定秒数",
-                parameters={
-                    "seconds": {
-                        "type": "number",
-                        "description": "等待的秒数，默认3",
-                        "required": False
-                    }
-                },
-                examples=[
-                    {"seconds": 5},
-                    {}
-                ]
-            ),
-            
-            # 任务完成
-            ToolCapability(
-                name="browser_done",
-                description="标记任务完成",
-                parameters={
-                    "text": {
-                        "type": "string",
-                        "description": "完成描述",
-                        "required": True
-                    },
-                    "success": {
-                        "type": "boolean",
-                        "description": "是否成功完成",
-                        "required": True
-                    }
-                },
-                examples=[
-                    {"text": "任务已完成", "success": True}
-                ]
-            ),
-            
-            # 新增页面信息获取功能
-            ToolCapability(
-                name="browser_get_page_info",
-                description="获取当前页面信息",
-                parameters={},
-                examples=[{}]
-            ),
-            
-            ToolCapability(
-                name="browser_get_current_url",
-                description="获取当前页面URL",
-                parameters={},
-                examples=[{}]
-            ),
-            
-            ToolCapability(
-                name="browser_close_session",
-                description="关闭浏览器会话",
-                parameters={},
-                examples=[{}]
-            )
-        ]
-    
+        tool_info = self.tool_manager.get_tool_info(self.server_name)
+        capabilities = []
+        for action_name, action_def in tool_info.get('actions', {}).items():
+            capabilities.append(ToolCapability(
+                name=action_name,
+                description=action_def.get('description', ''),
+                parameters=action_def.get('parameters', {}),
+                examples=action_def.get('examples', [])
+            ))
+        return capabilities
     
     async def handle_tool_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """处理工具动作执行"""
-        try:
-            logger.info(f"Executing Browser-Use action: {action} with params: {parameters}")
-            
-            # 确保browser session已初始化
-            await self._ensure_browser_session()
-            
-            # 高级AI任务执行
-            if action == "browser_use_execute_task":
-                return await self._execute_task(parameters)
-            
-            # 基础导航功能
-            elif action == "browser_navigate":
-                return await self._execute_action("go_to_url", {"url": parameters["url"]})
-            elif action == "browser_search_google":
-                return await self._execute_action("search_google", {"query": parameters["query"]})
-            elif action == "browser_go_back":
-                return await self._execute_action("go_back", {})
-            
-            # 元素交互功能
-            elif action == "browser_click_element":
-                return await self._execute_action("click_element_by_index", {"index": parameters["index"]})
-            elif action == "browser_input_text":
-                return await self._execute_action("input_text", {
-                    "index": parameters["index"],
-                    "text": parameters["text"]
-                })
-            elif action == "browser_send_keys":
-                return await self._execute_action("send_keys", {"keys": parameters["keys"]})
-            
-            # 滚动功能
-            elif action == "browser_scroll_down":
-                return await self._execute_action("scroll_down", {"amount": parameters.get("amount")})
-            elif action == "browser_scroll_up":
-                return await self._execute_action("scroll_up", {"amount": parameters.get("amount")})
-            elif action == "browser_scroll_to_text":
-                return await self._execute_action("scroll_to_text", {"text": parameters["text"]})
-            
-            # 标签管理
-            elif action == "browser_switch_tab":
-                return await self._execute_action("switch_tab", {"page_id": parameters["page_id"]})
-            elif action == "browser_open_tab":
-                return await self._execute_action("open_tab", {"url": parameters["url"]})
-            elif action == "browser_close_tab":
-                return await self._execute_action("close_tab", {"page_id": parameters["page_id"]})
-            
-            # 内容提取
-            elif action == "browser_extract_content":
-                browser_llm = BrowserUseLLMAdapter(self.llm_client)
-                return await self._execute_action("extract_content", {
-                    "goal": parameters["goal"],
-                    "include_links": parameters.get("include_links", False)
-                }, page_extraction_llm=browser_llm)
-            elif action == "browser_get_ax_tree":
-                return await self._execute_action("get_ax_tree", {
-                    "number_of_elements": parameters["number_of_elements"]
-                })
-            
-            # 下拉菜单操作
-            elif action == "browser_get_dropdown_options":
-                return await self._execute_action("get_dropdown_options", {"index": parameters["index"]})
-            elif action == "browser_select_dropdown_option":
-                return await self._execute_action("select_dropdown_option", {
-                    "index": parameters["index"],
-                    "text": parameters["text"]
-                })
-            
-            # 拖拽操作
-            elif action == "browser_drag_drop":
-                drag_params = {}
-                for key in ["element_source", "element_target", "coord_source_x", "coord_source_y", 
-                           "coord_target_x", "coord_target_y", "steps"]:
-                    if key in parameters:
-                        drag_params[key] = parameters[key]
-                return await self._execute_action("drag_drop", drag_params)
-            
-            # 文件操作
-            elif action == "browser_save_pdf":
-                return await self._execute_action("save_pdf", {})
-            elif action == "browser_screenshot":
-                return await self._screenshot(parameters)
-            
-            # 等待功能
-            elif action == "browser_wait":
-                return await self._execute_action("wait", {"seconds": parameters.get("seconds", 3)})
-            
-            # 任务完成
-            elif action == "browser_done":
-                return await self._execute_action("done", {
-                    "text": parameters["text"],
-                    "success": parameters["success"]
-                })
-            
-            # 新增高级功能
-            elif action == "browser_get_page_info":
-                return await self._get_page_info()
-            elif action == "browser_get_current_url":
-                return await self._get_current_url()
-            elif action == "browser_close_session":
-                return await self._close_session()
-            
-            else:
-                return {
-                    "success": False,
-                    "data": None,
-                    "error_message": f"Unsupported action: {action}",
-                    "error_type": "UnsupportedAction"
-                }
-                
-        except Exception as e:
-            logger.error(f"Browser-Use tool execution failed for {action}: {e}", exc_info=True)
-            return {
-                "success": False,
-                "data": None,
-                "error_message": str(e),
-                "error_type": "BrowserUseError"
-            }
+        await self._ensure_browser_session()
+        handler = self._action_handlers.get(action)
+        if handler:
+            try:
+                return await handler(parameters)
+            except Exception as e:
+                logger.error(f"Browser-Use tool execution failed for {action}: {e}", exc_info=True)
+                return {"success": False, "data": None, "error_message": str(e), "error_type": "BrowserUseError"}
+        else:
+            return {"success": False, "data": None, "error_message": f"Unsupported action: {action}", "error_type": "UnsupportedAction"}
     
     async def _execute_action(self, action_name: str, params: dict, **kwargs) -> Dict[str, Any]:
         """执行browser-use控制器的具体动作"""
@@ -808,9 +1216,10 @@ class BrowserUseMCPServer:
             action_model = ActionModel(**action_dict)
             
             # 使用控制器执行动作
+            # Controller.act()需要browser_context参数
             result = await self.controller.act(
                 action=action_model,
-                browser=self.browser,
+                browser_context=self.browser_context,
                 **kwargs
             )
             
@@ -843,7 +1252,7 @@ class BrowserUseMCPServer:
             }
     
     async def _execute_task(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """执行AI浏览器任务"""
+        """执行AI浏览器任务 - 使用增强版结果提取"""
         task = parameters.get("task", "")
         max_steps = parameters.get("max_steps", 50)
         use_vision = parameters.get("use_vision", True)
@@ -864,47 +1273,88 @@ class BrowserUseMCPServer:
             agent = Agent(
                 task=task,
                 llm=browser_llm,
-                browser=self.browser,
+                browser_context=self.browser_context,
                 use_vision=use_vision,
                 max_failures=3,
                 retry_delay=5
             )
             
-            # 执行任务
-            result = await agent.run(max_steps=max_steps)
+            # 执行任务并获取完整的AgentHistoryList
+            agent_history = await agent.run(max_steps=max_steps)
             
-            # 提取结果
-            if hasattr(result, 'history') and result.history:
-                last_step = result.history[-1]
-                success = getattr(last_step, 'success', True)
-                content = getattr(last_step, 'extracted_content', '')
+            # 使用Browser-Use风格的结果分析器
+            analyzer = BrowserUseResultAnalyzer(agent_history)
+            comprehensive_result = analyzer.extract_comprehensive_result(task)
+            
+            # 添加执行统计日志
+            data = comprehensive_result.get('data', {})
+            debug_info = comprehensive_result.get('debug_info', {})
+            
+            logger.info(f"✅ Browser-Use task execution completed:")
+            logger.info(f"  📋 Task: {task[:50]}...")
+            logger.info(f"  🎯 Success: {comprehensive_result['success']}")
+            logger.info(f"  📊 Steps taken: {data.get('steps_taken', 0)}")
+            logger.info(f"  ⏱️ Duration: {data.get('total_duration_seconds', 0):.2f}s")
+            logger.info(f"  ✔️ Is done: {data.get('is_done', False)}")
+            logger.info(f"  🏆 Is successful: {data.get('is_successful', None)}")
+            logger.info(f"  ❌ Has errors: {data.get('has_errors', False)}")
+            logger.info(f"  🔧 Error count: {data.get('error_count', 0)}")
+            
+            if data.get('action_breakdown'):
+                logger.info(f"  📈 Actions: {data['action_breakdown']}")
+            
+            if comprehensive_result.get('error_message'):
+                logger.warning(f"  ⚠️ Error: {comprehensive_result['error_message']}")
+            
+            # 调试信息
+            logger.debug(f"Debug info: {debug_info}")
+            
+            # 将结果保存到共享工作区
+            try:
+                workspace = get_workspace_manager()
+                session_id = parameters.get('session_id', f"browser_task_{int(time.time())}")
                 
-                return {
-                    "success": success,
-                    "data": {
-                        "task": task,
-                        "result": content,
-                        "steps_taken": len(result.history),
-                        "max_steps": max_steps
+                # 保存浏览器任务结果
+                workspace.save_data(
+                    session_id=session_id,
+                    data_key="browser_result",
+                    data={
+                        "task_description": task,
+                        "execution_time": datetime.now().isoformat(),
+                        "result": comprehensive_result,
+                        "raw_content": data.get('result', ''),
+                        "urls_visited": data.get('urls_visited', []),
+                        "attachments": data.get('attachments', [])
                     },
-                    "error_message": "",
-                    "error_type": ""
+                    file_format="json"
+                )
+                
+                # 如果有具体的内容数据，也单独保存
+                if data.get('result'):
+                    workspace.save_data(
+                        session_id=session_id,
+                        data_key="extracted_content",
+                        data=data['result'],
+                        file_format="text"
+                    )
+                
+                # 添加工作区信息到结果中
+                comprehensive_result['workspace_info'] = {
+                    "session_id": session_id,
+                    "workspace_path": str(workspace.get_session_path(session_id)),
+                    "saved_files": ["browser_result.json", "extracted_content.txt"]
                 }
-            else:
-                return {
-                    "success": True,
-                    "data": {
-                        "task": task,
-                        "result": "任务执行完成",
-                        "steps_taken": 0,
-                        "max_steps": max_steps
-                    },
-                    "error_message": "",
-                    "error_type": ""
-                }
+                
+                logger.info(f"💾 浏览器结果已保存到共享工作区: {session_id}")
+                
+            except Exception as workspace_error:
+                logger.warning(f"⚠️ 保存到共享工作区失败: {workspace_error}")
+                # 不影响主要结果返回
+            
+            return comprehensive_result
                 
         except Exception as e:
-            logger.error(f"Browser-Use task execution failed: {e}", exc_info=True)
+            logger.error(f"❌ Browser-Use task execution failed: {e}", exc_info=True)
             return {
                 "success": False,
                 "data": None,
@@ -917,7 +1367,7 @@ class BrowserUseMCPServer:
         filename = parameters.get("filename", "screenshot.png")
         
         try:
-            page = await self.browser.get_current_page()
+            page = await self.browser_context.get_current_page()
             await page.screenshot(path=filename)
             
             return {
@@ -941,15 +1391,15 @@ class BrowserUseMCPServer:
     async def _get_page_info(self) -> Dict[str, Any]:
         """获取当前页面信息"""
         try:
-            if not self.browser:
+            if not self.browser_context:
                 return {
                     "success": False,
                     "data": None,
-                    "error_message": "Browser session not initialized",
+                    "error_message": "Browser context not initialized",
                     "error_type": "SessionError"
                 }
             
-            page = await self.browser.get_current_page()
+            page = await self.browser_context.get_current_page()
             url = page.url
             title = await page.title()
             
@@ -975,15 +1425,15 @@ class BrowserUseMCPServer:
     async def _get_current_url(self) -> Dict[str, Any]:
         """获取当前URL"""
         try:
-            if not self.browser:
+            if not self.browser_context:
                 return {
                     "success": False,
                     "data": None,
-                    "error_message": "Browser session not initialized",
+                    "error_message": "Browser context not initialized",
                     "error_type": "SessionError"
                 }
             
-            page = await self.browser.get_current_page()
+            page = await self.browser_context.get_current_page()
             url = page.url
             
             return {
@@ -1001,9 +1451,227 @@ class BrowserUseMCPServer:
                 "error_type": "URLError"
             }
     
+    async def _extract_page_content(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """提取页面内容"""
+        goal = parameters.get("goal", "提取页面主要内容")
+        include_links = parameters.get("include_links", False)
+        
+        try:
+            page = await self.browser_context.get_current_page()
+            
+            # 获取页面基本信息
+            url = page.url
+            title = await page.title()
+            
+            # 提取页面文本内容
+            # 获取主要内容元素
+            main_content = ""
+            
+            # 尝试获取标题
+            try:
+                h1_elements = await page.query_selector_all("h1")
+                if h1_elements:
+                    h1_text = await h1_elements[0].text_content()
+                    if h1_text:
+                        main_content += f"# {h1_text.strip()}\n\n"
+            except:
+                pass
+            
+            # 获取主要段落内容
+            try:
+                # 尝试常见的主内容选择器
+                content_selectors = [
+                    "main", "article", ".content", "#content", 
+                    ".main-content", ".page-content", ".intro-text"
+                ]
+                
+                found_content = False
+                for selector in content_selectors:
+                    try:
+                        elements = await page.query_selector_all(selector)
+                        if elements:
+                            for element in elements[:2]:  # 最多获取2个主要元素
+                                text = await element.text_content()
+                                if text and len(text.strip()) > 50:  # 只获取有意义的内容
+                                    main_content += f"{text.strip()}\n\n"
+                                    found_content = True
+                                    break
+                            if found_content:
+                                break
+                    except:
+                        continue
+                
+                # 如果没有找到主内容，获取所有段落
+                if not found_content:
+                    p_elements = await page.query_selector_all("p")
+                    for p in p_elements[:5]:  # 最多5个段落
+                        text = await p.text_content()
+                        if text and len(text.strip()) > 20:
+                            main_content += f"{text.strip()}\n\n"
+                            
+            except Exception as e:
+                logger.warning(f"获取段落内容失败: {e}")
+                
+            # 获取链接信息（如果需要）
+            links_content = ""
+            if include_links:
+                try:
+                    link_elements = await page.query_selector_all("a[href]")
+                    links = []
+                    for link in link_elements[:10]:  # 最多10个链接
+                        href = await link.get_attribute("href")
+                        text = await link.text_content()
+                        if href and text and text.strip():
+                            links.append(f"- [{text.strip()}]({href})")
+                    if links:
+                        links_content = "\n\n## 相关链接\n" + "\n".join(links)
+                except:
+                    pass
+            
+            # 如果没有获取到任何内容，使用body文本
+            if not main_content.strip():
+                try:
+                    body_text = await page.text_content("body")
+                    if body_text:
+                        # 简单清理和截取
+                        lines = body_text.strip().split('\n')
+                        meaningful_lines = [line.strip() for line in lines if line.strip() and len(line.strip()) > 10]
+                        main_content = '\n'.join(meaningful_lines[:10])  # 最多10行
+                except:
+                    main_content = "无法提取页面内容"
+            
+            # 组合最终内容
+            final_content = f"# {title}\n\n{main_content}{links_content}".strip()
+            
+            return {
+                "success": True,
+                "data": {
+                    "goal": goal,
+                    "url": url,
+                    "title": title,
+                    "content": final_content,
+                    "content_length": len(final_content),
+                    "include_links": include_links,
+                    "extraction_method": "direct_playwright"
+                },
+                "error_message": "",
+                "error_type": ""
+            }
+            
+        except Exception as e:
+            logger.error(f"内容提取失败: {e}")
+            return {
+                "success": False,
+                "data": None,
+                "error_message": f"内容提取失败: {str(e)}",
+                "error_type": "ContentExtractionError"
+            }
+
+    async def _navigate_to_url(self, url: str) -> Dict[str, Any]:
+        """直接导航到指定URL"""
+        try:
+            page = await self.browser_context.get_current_page()
+            
+            # 使用playwright的goto方法进行导航
+            await page.goto(url, wait_until='networkidle', timeout=30000)
+            
+            # 获取页面信息
+            actual_url = page.url
+            title = await page.title()
+            
+            # 记录导航成功日志（只记录一次）
+            logger.info(f"Navigation successful: {url} -> {actual_url}")
+            
+            return {
+                "success": True,
+                "data": {
+                    "navigation_successful": True,
+                    "requested_url": url,
+                    "current_url": actual_url,
+                    "page_title": title,
+                    "message": f"成功导航到 {actual_url}，页面标题: {title}",
+                    "next_suggested_actions": [
+                        "browser_extract_content - 提取页面内容",
+                        "browser_get_page_info - 获取详细页面信息", 
+                        "browser_use_execute_task - 使用AI执行复杂任务"
+                    ]
+                },
+                "error_message": "",
+                "error_type": ""
+            }
+            
+        except Exception as e:
+            logger.error(f"导航失败: {e}")
+            return {
+                "success": False,
+                "data": None,
+                "error_message": f"导航到 {url} 失败: {str(e)}",
+                "error_type": "NavigationError"
+            }
+
+    async def _execute_task_with_retry(self, parameters: Dict[str, Any], max_retries: int = 2) -> Dict[str, Any]:
+        """带重试逻辑的任务执行"""
+        last_error = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # 如果不是第一次尝试，添加延迟
+                if attempt > 0:
+                    await asyncio.sleep(2 ** attempt)  # 指数退避
+                    logger.info(f"任务执行重试 - 第{attempt + 1}次尝试")
+                
+                result = await self._execute_task(parameters)
+                
+                # 如果成功，记录重试次数并返回
+                if result.get('success', False):
+                    if attempt > 0:
+                        result['retry_count'] = attempt
+                        logger.info(f"任务执行成功 - 经过{attempt}次重试")
+                    return result
+                else:
+                    last_error = result.get('error_message', 'Unknown error')
+                    if attempt < max_retries:
+                        logger.warning(f"任务执行失败，准备重试: {last_error}")
+                    
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"任务执行异常 (尝试 {attempt + 1}): {e}")
+                if attempt < max_retries:
+                    continue
+                else:
+                    break
+        
+        # 所有重试都失败了
+        return {
+            "success": False,
+            "data": None,
+            "error_message": f"任务执行失败，已重试{max_retries}次。最后错误: {last_error}",
+            "error_type": "TaskExecutionFailure",
+            "retry_count": max_retries
+        }
+
+    def _is_recent_request(self, request_id: str, timeout: int = 5) -> bool:
+        """检查请求是否在近期内发生过"""
+        if not hasattr(self, '_request_timestamps'):
+            self._request_timestamps = {}
+        
+        last_time = self._request_timestamps.get(request_id)
+        if last_time and (time.time() - last_time) < timeout:
+            return True
+        return False
+
+    def _record_request(self, request_id: str):
+        """记录请求时间"""
+        if not hasattr(self, '_request_timestamps'):
+            self._request_timestamps = {}
+        self._request_timestamps[request_id] = time.time()
+
     async def _close_session(self) -> Dict[str, Any]:
         """关闭浏览器会话"""
         try:
+            if self.browser_context:
+                await self.browser_context.close()
+                self.browser_context = None
             if self.browser:
                 await self.browser.close()
                 self.browser = None
@@ -1073,11 +1741,13 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # 初始化ConfigManager
+    # 初始化ConfigManager和UnifiedToolManager
     from core.config_manager import ConfigManager
+    from core.unified_tool_manager import UnifiedToolManager
     config_manager = ConfigManager()
+    tool_manager = UnifiedToolManager()
     
-    server = BrowserUseMCPServer(config_manager)
+    server = BrowserUseMCPServer(config_manager, tool_manager)
     
     # 设置信号处理器确保优雅退出
     def signal_handler():

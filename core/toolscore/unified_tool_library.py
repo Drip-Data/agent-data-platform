@@ -88,8 +88,13 @@ class UnifiedToolLibrary:
             from .tool_gap_detector import ToolGapDetector
             from core.llm_client import LLMClient
             
+            # 🔧 【关键修复】 传入 tool_manager 实例
+            if not UNIFIED_TOOL_MANAGER_AVAILABLE:
+                raise ImportError("UnifiedToolManager is not available, cannot initialize LLMClient.")
+            
+            tool_manager = get_tool_manager()
             # 创建LLM客户端实例，强制使用gemini提供商
-            llm_client = LLMClient({"provider": "gemini"})
+            llm_client = LLMClient(config={"provider": "gemini"}, tool_manager=tool_manager)
             
             self.tool_gap_detector = ToolGapDetector(
                 llm_client=llm_client,  # 提供LLM客户端实例
@@ -499,10 +504,10 @@ class UnifiedToolLibrary:
                         # 查找注册表中对应的工具ID（可能是旧格式）
                         # 检查是否需要映射到旧格式
                         legacy_mappings = {
-                            'microsandbox': 'microsandbox-mcp-server',
-                            'browser_use': 'browser-use-mcp-server', 
-                            'deepsearch': 'mcp-deepsearch',
-                            'mcp-search-tool': 'mcp-search-tool'  # 保持不变
+                            'microsandbox': 'microsandbox_server',
+                            'browser_use': 'browser_use_server', 
+                            'deepsearch': 'deepsearch_server',
+                            'mcp-search-tool': 'search_tool_server'
                         }
                         registry_tool_id = legacy_mappings.get(standard_id, standard_id)
                     except ValueError:

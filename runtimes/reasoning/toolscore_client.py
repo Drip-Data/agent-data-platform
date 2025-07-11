@@ -275,6 +275,48 @@ class ToolScoreClient:
             logger.error(f"获取已注册工具列表时发生异常: {e}")
             return []
     
+    async def get_tool_descriptions(self) -> str:
+        """获取详细的工具描述，包含所有可用的actions"""
+        await self._ensure_session()
+        
+        try:
+            async with self.session.get(f"{self.endpoint}/api/v1/tools/available") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    tools = data.get("available_tools", [])
+                    
+                    formatted_descriptions = []
+                    for tool in tools:
+                        if not isinstance(tool, dict):
+                            continue
+                            
+                        tool_id = tool.get("tool_id", "")
+                        tool_name = tool.get("name", tool_id)
+                        description = tool.get("description", "")
+                        capabilities = tool.get("capabilities", [])
+                        
+                        # 构建工具描述
+                        tool_desc = f"**{tool_name}** ({tool_id}): {description}\n"
+                        
+                        if capabilities:
+                            tool_desc += "  Available actions:\n"
+                            for cap in capabilities[:5]:  # 限制显示前5个能力
+                                action_name = cap.get("name", "")
+                                action_desc = cap.get("description", "")
+                                if action_name:
+                                    tool_desc += f"    - {action_name}: {action_desc}\n"
+                        
+                        formatted_descriptions.append(tool_desc)
+                    
+                    return "\n".join(formatted_descriptions)
+                else:
+                    logger.error(f"获取工具描述失败: HTTP {response.status}")
+                    return "工具描述获取失败"
+                    
+        except Exception as e:
+            logger.error(f"获取工具描述时发生异常: {e}")
+            return "工具描述获取失败"
+    
     async def search_and_install_tools(self, task_description: str, reason: str = "") -> Dict[str, Any]:
         """搜索并安装新工具 - 兼容方法"""
         await self._ensure_session()

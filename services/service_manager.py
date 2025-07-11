@@ -129,6 +129,54 @@ class ServiceManager:
         
         logger.info("强制停止完成")
     
+    def get_service(self, name: str):
+        """获取指定名称的服务实例"""
+        if name not in self.services:
+            logger.warning(f"Service '{name}' not found in registered services")
+            return None
+        
+        # 对于特定的服务，返回实际的服务模块
+        if name == 'toolscore':
+            # 导入并返回toolscore服务模块
+            try:
+                from services import toolscore_service
+                return toolscore_service
+            except ImportError as e:
+                logger.error(f"Failed to import toolscore_service: {e}")
+                return None
+        elif name == 'redis':
+            try:
+                from services import redis_service
+                return redis_service
+            except ImportError as e:
+                logger.error(f"Failed to import redis_service: {e}")
+                return None
+        elif name == 'task_api':
+            try:
+                from services import task_api_service
+                return task_api_service
+            except ImportError as e:
+                logger.error(f"Failed to import task_api_service: {e}")
+                return None
+        elif name == 'runtime':
+            try:
+                from services import runtime_service
+                return runtime_service
+            except ImportError as e:
+                logger.error(f"Failed to import runtime_service: {e}")
+                return None
+        elif name == 'synthesis':
+            try:
+                from services import synthesis_service
+                return synthesis_service
+            except ImportError as e:
+                logger.error(f"Failed to import synthesis_service: {e}")
+                return None
+        
+        # 对于其他服务，返回服务信息字典
+        service_info = self.services[name]
+        return service_info
+    
     def health_check(self):
         """检查所有服务的健康状态"""
         results = {}

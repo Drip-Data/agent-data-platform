@@ -306,16 +306,67 @@ async def start_runtime_service(runtime, redis_manager=None):
         except Exception:
             pass
         # 消费循环
+        logger.info(f"Runtime {runtime.runtime_id} starting consumer loop for queue {queue_name}")
         while True:
-            msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=1000)
-            if not msgs:
+            try:
+                logger.debug(f"Runtime {runtime.runtime_id} reading from queue {queue_name}...")
+                msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=5000)
+                if not msgs:
+                    logger.debug(f"Runtime {runtime.runtime_id} no new messages after 5s timeout, continuing...")
+                    continue
+            except asyncio.CancelledError:
+                # 正常取消，退出循环
+                logger.info(f"Runtime {runtime.runtime_id} consumer cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error reading from queue {queue_name}: {e}")
+                await asyncio.sleep(1)
                 continue
+            logger.info(f"Runtime {runtime.runtime_id} received {len(msgs)} message(s) from queue {queue_name}")
             for _, entries in msgs:
                 for msg_id, fields in entries:
                     try:
+                        logger.info(f"Runtime {runtime.runtime_id} processing message {msg_id}")
+                        
+                        # 🚀 检查消息的交付次数 - 毒丸检测
+                        delivery_count = 1  # Redis Stream默认从1开始
+                        
+                        # 从Redis Stream信息中获取实际的delivery count
+                        try:
+                            # 🔧 修复Redis xpending命令参数错误：使用xpending_range获取详细信息
+                            pending_info = await r.xpending_range(queue_name, group, min=msg_id, max=msg_id, count=1)
+                            if pending_info:
+                                delivery_count = pending_info[0]['times_delivered']  # 使用正确的字段名
+                        except Exception as e:
+                            logger.debug(f"无法获取消息delivery count: {e}")
+                        
+                        MAX_RETRIES = 3
+                        if delivery_count > MAX_RETRIES:
+                            # 🚨 毒丸处理：将消息移到死信队列
+                            logger.warning(f"Poison pill detected: message {msg_id} has been delivered {delivery_count} times (>{MAX_RETRIES})")
+                            
+                            try:
+                                # 将消息添加到死信队列
+                                dead_letter_data = {
+                                    'original_message_id': msg_id,
+                                    'original_queue': queue_name,
+                                    'delivery_count': delivery_count,
+                                    'poison_detected_at': time.time(),
+                                    'original_data': fields[b'task'].decode()
+                                }
+                                await r.xadd('tasks:dead_letter', dead_letter_data)
+                                logger.info(f"Moved poison pill {msg_id} to dead letter queue")
+                            except Exception as e:
+                                logger.error(f"Failed to move poison pill to dead letter queue: {e}")
+                            
+                            # 立即确认消息以从主队列移除
+                            await r.xack(queue_name, group, msg_id)
+                            logger.info(f"Acknowledged and removed poison pill {msg_id} from main queue")
+                            continue  # 跳过处理，继续下一条消息
+                        
                         data = json.loads(fields[b'task'].decode())
                         task = TaskSpec.from_dict(data)
-                        logger.info(f"Processing task {task.task_id} from queue {queue_name}")
+                        logger.info(f"Processing task {task.task_id} from queue {queue_name} (delivery #{delivery_count})")
                         
                         # 更新任务状态为运行中
                         await _update_task_api_status(r, task.task_id, "running")
@@ -372,9 +423,10 @@ async def start_runtime_service(runtime, redis_manager=None):
     while True:
         try:
             await _run_service()
-        except asyncio.CancelledError:
-            # 主程序取消时直接退出
-            raise
+        except (asyncio.CancelledError, GeneratorExit):
+            # 正常取消或生成器退出时直接退出
+            logger.info(f"Runtime {getattr(runtime, 'runtime_id', 'unknown')} service stopped normally")
+            break
         except Exception as fatal_err:
             logger.exception(f"❌ Runtime {getattr(runtime, 'runtime_id', 'unknown')} crashed: {fatal_err}")
             # 留出短暂冷却时间后自动重启

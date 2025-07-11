@@ -38,6 +38,11 @@ class OpenAIProvider(ILLMProvider):
         """
         根据给定的消息生成 OpenAI LLM 响应。
         """
+        # 处理stop_sequences参数 - OpenAI API使用'stop'而不是'stop_sequences'
+        if 'stop_sequences' in kwargs:
+            stop_sequences = kwargs.pop('stop_sequences')
+            kwargs['stop'] = stop_sequences
+            logger.debug(f"🔧 转换stop_sequences为OpenAI的stop参数: {stop_sequences}")
         if model not in self._supported_models:
             logger.warning(f"模型 {model} 不受 OpenAIProvider 支持，将使用默认模型 {self._default_model}。")
             model = self._default_model

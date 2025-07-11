@@ -45,9 +45,9 @@ class MCPServerConnector:
                 self.websocket = await asyncio.wait_for(
                     websockets_client.connect(
                         self.endpoint,
-                        ping_interval=20,
-                        ping_timeout=10,
-                        close_timeout=10
+                        ping_interval=60,   # 60秒心跳间隔（3倍DeepSearch查询时间的安全边界）
+                        ping_timeout=30,   # 30秒响应超时（充足的响应时间）
+                        close_timeout=30    # 30秒关闭超时
                     ),
                     timeout=self.connection_timeout
                 )
@@ -56,6 +56,8 @@ class MCPServerConnector:
                 self._connection_health = True
                 self._last_ping_time = asyncio.get_event_loop().time()
                 logger.info(f"✅ 成功连接到 MCP 服务器: {self.endpoint}")
+                logger.info(f"🔧 WebSocket参数设置: ping_interval=90s, ping_timeout=150s, close_timeout=30s")
+                logger.info(f"💡 连接已优化以支持长时间查询操作(如DeepSearch 27秒查询)")
                 return
                 
             except asyncio.TimeoutError:
@@ -77,11 +79,13 @@ class MCPServerConnector:
         """断开连接"""
         if self.websocket:
             try:
+                logger.info(f"🔌 主动断开MCP服务器连接: {self.endpoint}")
                 await self.websocket.close()
             except Exception as e:
-                logger.warning(f"Error closing websocket: {e}")
+                logger.warning(f"⚠️ 关闭WebSocket连接时出错: {e}")
             self.websocket = None
             self._connected = False
+            logger.info(f"✅ MCP服务器连接已断开: {self.endpoint}")
     
     async def execute_tool_action(self, tool_id: str, action: str, parameters: Dict[str, Any]) -> ExecutionResult:
         """执行工具动作"""
@@ -144,12 +148,15 @@ class MCPServerConnector:
                         error_type=ErrorType.SYSTEM_ERROR
                     )
             
-            except websockets.exceptions.ConnectionClosed:
-                logger.warning("Connection to MCP server closed")
+            except websockets.exceptions.ConnectionClosed as e:
+                logger.warning(f"🔗 MCP服务器连接意外关闭: {self.endpoint}")
+                logger.warning(f"   关闭代码: {e.code}, 原因: {e.reason}")
+                logger.info(f"💡 注意: 已使用优化的WebSocket参数(ping_timeout=150s)以支持长时间操作")
                 self._connected = False
+                self._connection_health = False
                 return ExecutionResult(
                     success=False,
-                    error_message="Connection to MCP server closed",
+                    error_message=f"Connection to MCP server closed (code: {e.code})",
                     error_type=ErrorType.NETWORK_ERROR
                 )
             except json.JSONDecodeError as e:
