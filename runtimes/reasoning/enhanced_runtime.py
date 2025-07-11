@@ -30,6 +30,7 @@ from core.xml_parser_enhanced import EnhancedXMLParser
 from core.context_flow_manager import ContextFlowManager
 from core.smart_query_optimizer import SmartQueryOptimizer
 from core.tool_result_enhancer import ToolResultEnhancer
+from core.utils.json_parameter_parser import JSONParameterParser
 
 
 logger = logging.getLogger(__name__)
@@ -510,26 +511,20 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 logger.warning(f"⚠️ 查询优化失败，使用原始查询: {e}")
                 optimized_input = tool_input
 
-        # 映射服务和工具到其期望的主要参数名
-        param_mapping = {
-            "browser_use": "query",  # 默认参数
-            "microsandbox": "code",
-            "deepsearch": "question"
-        }
-        
-        # 特殊工具的参数映射
-        special_tool_mapping = {
-            ("browser_use", "browser_use_execute_task"): "task",
-            ("browser_use", "browser_extract_content"): "goal"
-        }
-        # 检查是否有特殊工具映射
-        if (service_name, tool_name) in special_tool_mapping:
-            param_name = special_tool_mapping[(service_name, tool_name)]
-        else:
-            # 默认参数名映射
-            param_name = param_mapping.get(service_name, "input")
-        
-        parameters = {param_name: optimized_input}
+        # 🔧 P1 核心修复：使用JSON参数解析器
+        parser = JSONParameterParser(self.tool_manager)
+        parse_result = parser.parse_tool_parameters(service_name, tool_name, optimized_input)
+
+        if not parse_result.is_valid:
+            # 如果解析或验证失败，返回错误信息
+            error_message = f"Tool execution failed: Invalid parameters for {service_name}/{tool_name}. "
+            error_message += "; ".join(parse_result.errors)
+            if parse_result.suggestions:
+                error_message += f" Suggestions: {'; '.join(parse_result.suggestions)}"
+            return error_message
+
+        parameters = parse_result.parsed_params
+        param_name = next(iter(parameters)) if parameters else '' # For logging
 
         logger.info(f"🔧 执行工具: service='{service_name}', tool='{tool_name}', param_name='{param_name}', input_length={len(str(optimized_input))}")
 
@@ -1347,6 +1342,14 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             history.append({"role": "assistant", "content": response_text})
             full_trajectory.append({"role": "assistant", "content": response_text})
 
+            # 🆕 新增：处理 <tool_param> 查询
+            if "<tool_param>" in response_text:
+                tool_param_result = await self._handle_tool_param_query(response_text)
+                history.append({"role": "assistant", "content": tool_param_result})
+                full_trajectory.append({"role": "assistant", "content": tool_param_result})
+                self.step_logger.finish_step("tool_param_query_handled")
+                continue
+
             # 🔧 修复：更智能的答案检测逻辑
             answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
             answer_start_tag = f"<{answer_tag}>"
@@ -1413,10 +1416,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if not parse_result.success and len(actions) > 0:
                 logger.warning(f"⚠️ 部分解析成功，提取到 {len(actions)} 个动作")
             
-            # 检查是否是仅包含思考的最终答案
+            # 检查是否包含最终答案标签 - 如果有则直接结束
             think_tag = TaskExecutionConstants.XML_TAGS['THINK']
             answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
             execute_tools_tag = TaskExecutionConstants.XML_TAGS['EXECUTE_TOOLS']
+            
+            # 🔧 关键修复：检测到answer标签时直接结束任务
+            if f"<{answer_tag}>" in response_text:
+                logger.info("✅ 检测到<answer>标签，任务完成")
+                history.append({"role": "assistant", "content": response_text})
+                full_trajectory.append({"role": "assistant", "content": response_text})
+                self.step_logger.finish_step("answer_tag_detected")
+                break
             
             if not actions and f"<{think_tag}>" in response_text and f"<{execute_tools_tag} />" not in response_text:
                 logger.info("✅ Detected a thought-only response, considering it the final answer.")
@@ -1478,15 +1489,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     self.step_logger.finish_step("plan_execution_guidance_injected")
                     continue
                 
-                elif self._should_inject_no_action_message(response_text):
-                    logger.warning("🚨 无可执行动作 - 使用增强指导")
-                    # 🔧 使用增强的指导消息
-                    enhanced_guidance = self._enhance_no_action_guidance(response_text)
-                    result_xml = self._format_result(enhanced_guidance)
-                    history.append({"role": "assistant", "content": result_xml})
-                    full_trajectory.append({"role": "assistant", "content": result_xml})
-                    # 🔍 完成步骤记录
-                    self.step_logger.finish_step("enhanced_no_action_guidance_injected")
+                # elif self._should_inject_no_action_message(response_text):
+                #     # 🔧 禁用无动作检测 - 应该通过prompt指导而非运行时修复
+                #     pass
                 else:
                     logger.info("✅ Detected thought-only response without tool execution - this is normal.")
                     # 🔍 完成步骤记录
@@ -1947,17 +1952,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 boxed_match = re.search(boxed_pattern, answer_content, re.DOTALL)
                 if boxed_match:
                     clean_answer = boxed_match.group(1).strip()
-                    logger.info(f"✅ 从\\boxed{{}}提取清洁最终结果: {clean_answer[:100]}...")
+                    logger.info(f" 从\\boxed{{}}提取清洁最终结果: {clean_answer}...")
                     return clean_answer
                 else:
                     # 如果没有\boxed{}格式，返回原始answer内容
-                    logger.info(f"✅ 从<answer>标签提取最终结果: {answer_content[:100]}...")
+                    logger.info(f"从<answer>标签提取最终结果: {answer_content}...")
                     return answer_content
         else:
             # 🔧 容错机制：如果标准答案标签解析失败，尝试修复
             answer_content = self._attempt_answer_extraction(final_trajectory_str)
             if answer_content:
-                logger.info(f"🔧 容错提取答案成功: {answer_content[:100]}...")
+                logger.info(f"🔧 容错提取答案成功: {answer_content}...")
                 return answer_content
         
         # 🔧 第二优先级：提取最后的有效工具执行结果（非"No action"）
@@ -3386,4 +3391,43 @@ LLM API调用遇到未知错误：{error_message}
                     f"技术分数={technical_score}, 有结构={has_structure}, 有意义={is_meaningful}")
         
         return is_meaningful
+
+    async def _handle_tool_param_query(self, xml_string: str) -> str:
+        """
+        处理 <tool_param> 查询，返回工具的参数定义。
+        """
+        try:
+            tool_id_match = re.search(r"<tool_id>(.*?)</tool_id>", xml_string)
+            action_match = re.search(r"<action>(.*?)</action>", xml_string)
+
+            if not tool_id_match or not action_match:
+                error_msg = "Invalid <tool_param> format. Missing <tool_id> or <action> tag."
+                logger.warning(error_msg)
+                return self._format_result(f"Error: {error_msg}")
+
+            tool_id = tool_id_match.group(1).strip()
+            action = action_match.group(1).strip()
+
+            logger.info(f"🔎 Handling <tool_param> query for {tool_id}/{action}")
+
+            # 获取参数定义
+            param_definitions = self.tool_manager.get_action_parameters(tool_id, action)
+
+            response_data = {
+                "status": "success",
+                "tool_id": tool_id,
+                "action": action,
+                "parameters": param_definitions
+            }
+
+            # 格式化为JSON字符串以便在<result>中返回
+            response_json = json.dumps(response_data, ensure_ascii=False, indent=2)
+            return self._format_result(response_json)
+
+        except ValueError as e:
+            logger.error(f"Error handling <tool_param> query: {e}")
+            return self._format_result(f"Error: {str(e)}")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in _handle_tool_param_query: {e}", exc_info=True)
+            return self._format_result("An internal error occurred while fetching tool parameters.")
     

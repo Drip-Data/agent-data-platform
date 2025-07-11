@@ -110,7 +110,7 @@ def start():
                 await asyncio.gather(*tasks, return_exceptions=True)
     
     # 在新的事件循环中启动所有运行时
-    asyncio.create_task(start_all_runtimes())
+    return asyncio.create_task(start_all_runtimes())
 
 def stop():
     """停止推理运行时服务"""

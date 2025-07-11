@@ -247,8 +247,8 @@ async def start_runtime_service(runtime, redis_manager=None):
                     # 每30秒检查一次是否有模拟任务
                     await asyncio.sleep(30)
                     logger.debug(f"Runtime {runtime.runtime_id} 在内存模式下等待任务...")
-                except asyncio.CancelledError:
-                    logger.info(f"Runtime {runtime.runtime_id} 内存模式服务已取消")
+                except (asyncio.CancelledError, GeneratorExit):
+                    logger.info(f"Runtime {runtime.runtime_id} 内存模式服务已取消或生成器退出")
                     break
                 except KeyboardInterrupt:
                     break
@@ -318,9 +318,9 @@ async def start_runtime_service(runtime, redis_manager=None):
                     if not msgs:
                         logger.debug(f"Runtime {runtime.runtime_id} no new messages after 5s timeout, continuing...")
                         continue
-                except asyncio.CancelledError:
-                    # 正常取消，退出循环
-                    logger.info(f"Runtime {runtime.runtime_id} consumer cancelled")
+                except (asyncio.CancelledError, GeneratorExit):
+                    # 正常取消或生成器退出，退出循环
+                    logger.info(f"Runtime {runtime.runtime_id} consumer cancelled or generator exit")
                     break
                 except Exception as e:
                     logger.error(f"Error reading from queue {queue_name}: {e}")
@@ -387,6 +387,10 @@ async def start_runtime_service(runtime, redis_manager=None):
                             
                             # 确认消息处理完成
                             await r.xack(queue_name, group, msg_id)
+                        except (asyncio.CancelledError, GeneratorExit):
+                            # 任务被取消或生成器退出，向上传播
+                            logger.info(f"Task execution cancelled or generator exit for task {data.get('task_id', 'unknown')}")
+                            raise
                         except Exception as e:
                             # 记录详细的错误信息
                             logger.error(f"Error executing task {data.get('task_id', 'unknown')}: {e}", exc_info=True)
@@ -426,14 +430,13 @@ async def start_runtime_service(runtime, redis_manager=None):
                             )
                         finally:
                             await r.xack(queue_name, group, msg_id)
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info(f"Runtime {runtime.runtime_id} service loop cancelled or generator exit.")
         finally:
             # 确保在退出时关闭Redis连接
-            try:
-                if 'r' in locals() and hasattr(r, 'close'):
-                    await r.close()
-                    logger.debug(f"Runtime {runtime.runtime_id} Redis connection closed")
-            except Exception as e:
-                logger.debug(f"Error closing Redis connection: {e}")
+            if 'r' in locals() and hasattr(r, 'close'):
+                await r.close()
+                logger.info(f"Runtime {runtime.runtime_id} Redis connection closed.")
 
     # === 改进：自动重启消费协程，防止异常退出导致任务堆积 ===
     while True:
@@ -442,7 +445,7 @@ async def start_runtime_service(runtime, redis_manager=None):
         except (asyncio.CancelledError, GeneratorExit):
             # 正常取消或生成器退出时直接退出
             logger.info(f"Runtime {getattr(runtime, 'runtime_id', 'unknown')} service stopped normally")
-            break
+            return  # 直接返回而不是break，避免继续执行
         except Exception as fatal_err:
             logger.exception(f"❌ Runtime {getattr(runtime, 'runtime_id', 'unknown')} crashed: {fatal_err}")
             # 留出短暂冷却时间后自动重启

@@ -1072,7 +1072,7 @@ class BrowserUseMCPServer:
                 # 🚀 Enhanced Browser Config - 基于官方browser-use最佳实践
                 # 关闭无头模式以减少反爬虫检测
                 browser_config = BrowserConfig(
-                    headless=os.getenv("BROWSER_HEADLESS", "false").lower() == "true",
+                    headless=False,  # 强制使用有头模式
                     disable_security=True,
                     extra_chromium_args=[
                         # 基础安全和性能参数

@@ -84,3 +84,29 @@
 "token_usage": {"prompt_tokens": 7926, "completion_tokens": 424, "total_tokens": 8350, "model": "gemini-2.5-flash", "data_source": "real_api", "tokens_per_second": 424.0, "efficiency_ratio": 0.053494827151148124}, "total_cost_usd": 0.003438, "cost_analysis": {"model": "gemini-2.5-flash", "estimated_cost_usd": 0.003438, "cost_per_second": 0.002175, "tokens_per_dollar": 2428878, "efficiency_score": 268.22, "cost_breakdown": {"input_cost": 0.002378, "output_cost": 0.00106, "total_cost": 0.003438}, "cache_analysis": {"cache_eligible": true, "cache_savings_usd": 0.001783, "cache_efficiency": 0.75, "without_cache_cost": 0.003438}, "performance_metrics": {"tokens_per_second": 268.2, "cost_per_input_token": 0.0, "cost_per_output_token": 3e-06, "total_tokens": 8350, "cost_efficiency_rating": "Excellent"}, "optimization_suggestions": ["输入超过1024 tokens，建议启用上下文缓存以节省成本"]}}, 
 
 
+
+- **[ ] browser_use功能**
+The truncation issue is happening because Google's search results themselves are truncated in the HTML. The
+  browser_use server is correctly extracting what Google shows, but Google intentionally truncates snippets with
+  "..." to encourage users to click through to the actual pages.
+
+  To get more complete information, you have a few options:
+
+  1. Use the browser_use_execute_task action to ask the AI to click on specific results and extract full content
+  2. Use a different search approach that navigates to individual result pages
+  3. Enhance the snippet extraction to try to get more detailed information
+
+  The current behavior is actually correct - it's showing you exactly what Google shows in its search results. The
+  "..." truncation is Google's own doing, not a bug in the browser_use server.
+
+  If you want to get the full content from those search results, you would need to use the browser_use_execute_task
+  action with a task like:
+
+  {
+    "task": "Click on the first search result about 'residential road classification system' and extract the full 
+  content about road hierarchy and classification levels",
+    "max_steps": 10
+  }
+
+  This would make the AI navigate to the actual page and extract the complete content instead of just the search
+  snippet.

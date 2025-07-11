@@ -22,9 +22,12 @@
 import yaml
 import logging
 import os
-from typing import Dict, List, Optional, Set, Any, Tuple
+import json
+from typing import Dict, List, Optional, Set, Any, Tuple, Union
 from pathlib import Path
 import re
+from dataclasses import dataclass
+from core.utils.json_parameter_parser import JSONParameterParser, ParameterParseResult
 
 # Import memory staging tools
 try:
@@ -38,6 +41,15 @@ except ImportError:
 
 # 设置日志
 logger = logging.getLogger(__name__)
+
+@dataclass
+class ParameterParseResult:
+    """JSON参数解析结果"""
+    is_valid: bool
+    parsed_params: Dict[str, Any]
+    errors: List[str]
+    suggestions: List[str]
+    original_format: str  # 'json' or 'legacy'
 
 class UnifiedToolManager:
     """
