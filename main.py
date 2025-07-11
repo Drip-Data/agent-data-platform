@@ -244,6 +244,8 @@ def parse_arguments():
     parser.add_argument('--trajectory-storage', type=str, default='daily_grouped', 
                        choices=['individual', 'daily_grouped', 'weekly_grouped', 'monthly_grouped'],
                        help='轨迹存储模式：individual(单独文件), daily_grouped(按日分组), weekly_grouped(按周分组), monthly_grouped(按月分组)')
+    parser.add_argument('--enable-synthesis', action='store_true', default=False, 
+                       help='启用TaskCraft轨迹自动监控和任务合成功能（默认关闭）')
     return parser.parse_args()
 
 def setup_signal_handlers(service_manager):
@@ -547,25 +549,31 @@ async def main_async():
         dependencies=["redis", "toolscore", "mcp_servers"]
     )
     
-    # 获取LLM配置并合并到服务配置中
-    llm_config = config_manager.get_llm_config()
-    synthesis_config = {
-        'redis_url': redis_url,
-        'TRAJECTORIES_DIR': 'output/trajectories',
-        **llm_config  # 合并LLM配置
-    }
-    
-    service_manager.register_service(
-        name="synthesis",
-        initialize_fn=lambda config: synthesis_service.initialize(
-            synthesis_config, 
-            tool_manager=unified_tool_manager
-        ),
-        start_fn=synthesis_service.start,
-        stop_fn=synthesis_service.stop,
-        health_check_fn=synthesis_service.health_check,
-        dependencies=["redis"]
-    )
+    # 根据参数决定是否启用TaskCraft轨迹监控和任务合成功能
+    if args.enable_synthesis:
+        logger.info("✅ 启用TaskCraft轨迹自动监控和任务合成功能")
+        # 获取LLM配置并合并到服务配置中
+        llm_config = config_manager.get_llm_config()
+        synthesis_config = {
+            'redis_url': redis_url,
+            'TRAJECTORIES_DIR': 'output/trajectories',
+            **llm_config  # 合并LLM配置
+        }
+        
+        service_manager.register_service(
+            name="synthesis",
+            initialize_fn=lambda config: synthesis_service.initialize(
+                synthesis_config, 
+                tool_manager=unified_tool_manager
+            ),
+            start_fn=synthesis_service.start,
+            stop_fn=synthesis_service.stop,
+            health_check_fn=synthesis_service.health_check,
+            dependencies=["redis"]
+        )
+    else:
+        logger.info("⚪ TaskCraft轨迹自动监控和任务合成功能已禁用")
+        logger.info("💡 提示：使用 --enable-synthesis 参数启用此功能")
     
     # 信号处理器已暂时移除 - 用户可以通过重启main来自动清理进程
     # setup_signal_handlers(service_manager)

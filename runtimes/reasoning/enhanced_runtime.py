@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -509,17 +510,28 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 logger.warning(f"⚠️ 查询优化失败，使用原始查询: {e}")
                 optimized_input = tool_input
 
-        # 映射服务到其期望的主要参数名
+        # 映射服务和工具到其期望的主要参数名
         param_mapping = {
-            "browser_use": "query",
+            "browser_use": "query",  # 默认参数
             "microsandbox": "code",
             "deepsearch": "question"
         }
-        # 默认参数名为 'input'
-        param_name = param_mapping.get(service_name, "input")
+        
+        # 特殊工具的参数映射
+        special_tool_mapping = {
+            ("browser_use", "browser_use_execute_task"): "task",
+            ("browser_use", "browser_extract_content"): "goal"
+        }
+        # 检查是否有特殊工具映射
+        if (service_name, tool_name) in special_tool_mapping:
+            param_name = special_tool_mapping[(service_name, tool_name)]
+        else:
+            # 默认参数名映射
+            param_name = param_mapping.get(service_name, "input")
+        
         parameters = {param_name: optimized_input}
 
-        logger.info(f"Executing via toolscore_client: service='{service_name}', tool='{tool_name}', params='{param_name}'")
+        logger.info(f"🔧 执行工具: service='{service_name}', tool='{tool_name}', param_name='{param_name}', input_length={len(str(optimized_input))}")
 
         try:
             result = await self.toolscore_client.execute_tool(
@@ -847,7 +859,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 # 如果格式化结果太短，说明可能有问题，提供原始数据的摘要
                 logger.warning(f"Browser Use output seems incomplete. Raw keys: {list(output.keys())}")
                 if output:
-                    return f"浏览器操作执行，返回数据字段: {', '.join(output.keys())}\n原始数据: {str(output)[:300]}..."
+                    max_browser_content = TaskExecutionConstants.TOOL_RESULT_LIMITS.get('MAX_BROWSER_CONTENT', 3000)
+                    return f"浏览器操作执行，返回数据字段: {', '.join(output.keys())}\n原始数据: {str(output)[:max_browser_content]}..."
                 else:
                     return "浏览器操作执行完成，但未返回数据"
             
@@ -2940,7 +2953,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 🔧 修复：对于 microsandbox，正确提取实际输出内容而非整个字典结构
         if service_name == "microsandbox":
-            import re
             # 正确提取 microsandbox 的实际输出内容
             if isinstance(raw_result, dict):
                 # 获取 data 字段中的内容

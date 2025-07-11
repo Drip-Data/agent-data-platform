@@ -25,7 +25,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Start the platform
 ```bash
+# 启动平台（默认不启用TaskCraft轨迹监控）
 python3 main.py
+
+# 启用TaskCraft轨迹自动监控和任务合成功能
+python3 main.py --enable-synthesis
 ```
 
 ### Run tests
@@ -375,7 +379,11 @@ print(f"缓存节省: ${cost_analysis['cache_analysis']['cache_savings_usd']:.6f
 - LLM reflection for complex error recovery
 - Comprehensive error classification and severity levels
 
-## 数据合成学习
+## 数据合成学习（可选功能）
+
+⚠️ **注意：TaskCraft轨迹监控和任务合成功能默认已禁用**
+- 启用方式：使用 `--enable-synthesis` 参数启动平台
+- 启用命令：`python3 main.py --enable-synthesis`
 
 平台实现"数据飞轮"进行持续学习：
 

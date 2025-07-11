@@ -247,6 +247,9 @@ async def start_runtime_service(runtime, redis_manager=None):
                     # 每30秒检查一次是否有模拟任务
                     await asyncio.sleep(30)
                     logger.debug(f"Runtime {runtime.runtime_id} 在内存模式下等待任务...")
+                except asyncio.CancelledError:
+                    logger.info(f"Runtime {runtime.runtime_id} 内存模式服务已取消")
+                    break
                 except KeyboardInterrupt:
                     break
                 except Exception as e:
@@ -307,117 +310,130 @@ async def start_runtime_service(runtime, redis_manager=None):
             pass
         # 消费循环
         logger.info(f"Runtime {runtime.runtime_id} starting consumer loop for queue {queue_name}")
-        while True:
-            try:
-                logger.debug(f"Runtime {runtime.runtime_id} reading from queue {queue_name}...")
-                msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=5000)
-                if not msgs:
-                    logger.debug(f"Runtime {runtime.runtime_id} no new messages after 5s timeout, continuing...")
+        try:
+            while True:
+                try:
+                    logger.debug(f"Runtime {runtime.runtime_id} reading from queue {queue_name}...")
+                    msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=5000)
+                    if not msgs:
+                        logger.debug(f"Runtime {runtime.runtime_id} no new messages after 5s timeout, continuing...")
+                        continue
+                except asyncio.CancelledError:
+                    # 正常取消，退出循环
+                    logger.info(f"Runtime {runtime.runtime_id} consumer cancelled")
+                    break
+                except Exception as e:
+                    logger.error(f"Error reading from queue {queue_name}: {e}")
+                    await asyncio.sleep(1)
                     continue
-            except asyncio.CancelledError:
-                # 正常取消，退出循环
-                logger.info(f"Runtime {runtime.runtime_id} consumer cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Error reading from queue {queue_name}: {e}")
-                await asyncio.sleep(1)
-                continue
-            logger.info(f"Runtime {runtime.runtime_id} received {len(msgs)} message(s) from queue {queue_name}")
-            for _, entries in msgs:
-                for msg_id, fields in entries:
-                    try:
-                        logger.info(f"Runtime {runtime.runtime_id} processing message {msg_id}")
-                        
-                        # 🚀 检查消息的交付次数 - 毒丸检测
-                        delivery_count = 1  # Redis Stream默认从1开始
-                        
-                        # 从Redis Stream信息中获取实际的delivery count
+                    
+                logger.info(f"Runtime {runtime.runtime_id} received {len(msgs)} message(s) from queue {queue_name}")
+                for _, entries in msgs:
+                    for msg_id, fields in entries:
                         try:
-                            # 🔧 修复Redis xpending命令参数错误：使用xpending_range获取详细信息
-                            pending_info = await r.xpending_range(queue_name, group, min=msg_id, max=msg_id, count=1)
-                            if pending_info:
-                                delivery_count = pending_info[0]['times_delivered']  # 使用正确的字段名
-                        except Exception as e:
-                            logger.debug(f"无法获取消息delivery count: {e}")
-                        
-                        MAX_RETRIES = 3
-                        if delivery_count > MAX_RETRIES:
-                            # 🚨 毒丸处理：将消息移到死信队列
-                            logger.warning(f"Poison pill detected: message {msg_id} has been delivered {delivery_count} times (>{MAX_RETRIES})")
+                            logger.info(f"Runtime {runtime.runtime_id} processing message {msg_id}")
                             
+                            # 🚀 检查消息的交付次数 - 毒丸检测
+                            delivery_count = 1  # Redis Stream默认从1开始
+                            
+                            # 从Redis Stream信息中获取实际的delivery count
                             try:
-                                # 将消息添加到死信队列
-                                dead_letter_data = {
-                                    'original_message_id': msg_id,
-                                    'original_queue': queue_name,
-                                    'delivery_count': delivery_count,
-                                    'poison_detected_at': time.time(),
-                                    'original_data': fields[b'task'].decode()
-                                }
-                                await r.xadd('tasks:dead_letter', dead_letter_data)
-                                logger.info(f"Moved poison pill {msg_id} to dead letter queue")
+                                # 🔧 修复Redis xpending命令参数错误：使用xpending_range获取详细信息
+                                pending_info = await r.xpending_range(queue_name, group, min=msg_id, max=msg_id, count=1)
+                                if pending_info:
+                                    delivery_count = pending_info[0]['times_delivered']  # 使用正确的字段名
                             except Exception as e:
-                                logger.error(f"Failed to move poison pill to dead letter queue: {e}")
+                                logger.debug(f"无法获取消息delivery count: {e}")
                             
-                            # 立即确认消息以从主队列移除
+                            MAX_RETRIES = 3
+                            if delivery_count > MAX_RETRIES:
+                                # 🚨 毒丸处理：将消息移到死信队列
+                                logger.warning(f"Poison pill detected: message {msg_id} has been delivered {delivery_count} times (>{MAX_RETRIES})")
+                                
+                                try:
+                                    # 将消息添加到死信队列
+                                    dead_letter_data = {
+                                        'original_message_id': msg_id,
+                                        'original_queue': queue_name,
+                                        'delivery_count': delivery_count,
+                                        'poison_detected_at': time.time(),
+                                        'original_data': fields[b'task'].decode()
+                                    }
+                                    await r.xadd('tasks:dead_letter', dead_letter_data)
+                                    logger.info(f"Moved poison pill {msg_id} to dead letter queue")
+                                except Exception as e:
+                                    logger.error(f"Failed to move poison pill to dead letter queue: {e}")
+                                
+                                # 立即确认消息以从主队列移除
+                                await r.xack(queue_name, group, msg_id)
+                                logger.info(f"Acknowledged and removed poison pill {msg_id} from main queue")
+                                continue  # 跳过处理，继续下一条消息
+                            
+                            data = json.loads(fields[b'task'].decode())
+                            task = TaskSpec.from_dict(data)
+                            logger.info(f"Processing task {task.task_id} from queue {queue_name} (delivery #{delivery_count})")
+                            
+                            # 更新任务状态为运行中
+                            await _update_task_api_status(r, task.task_id, "running")
+                            
+                            result = await runtime.execute(task)
+                            
+                            # 更新任务状态为已完成
+                            final_status = "completed" if result.success else "failed"
+                            await _update_task_api_status(r, task.task_id, final_status, result)
+                            
+                            # 路径由 runtime 自行保存轨迹
+                            logger.info(f"Task {task.task_id} executed successfully: {result.success}")
+                            
+                            # 确认消息处理完成
                             await r.xack(queue_name, group, msg_id)
-                            logger.info(f"Acknowledged and removed poison pill {msg_id} from main queue")
-                            continue  # 跳过处理，继续下一条消息
-                        
-                        data = json.loads(fields[b'task'].decode())
-                        task = TaskSpec.from_dict(data)
-                        logger.info(f"Processing task {task.task_id} from queue {queue_name} (delivery #{delivery_count})")
-                        
-                        # 更新任务状态为运行中
-                        await _update_task_api_status(r, task.task_id, "running")
-                        
-                        result = await runtime.execute(task)
-                        
-                        # 更新任务状态为已完成
-                        final_status = "completed" if result.success else "failed"
-                        await _update_task_api_status(r, task.task_id, final_status, result)
-                        
-                        # 路径由 runtime 自行保存轨迹
-                        logger.info(f"Task {task.task_id} executed successfully: {result.success}")
-                    except Exception as e:
-                        # 记录详细的错误信息
-                        logger.error(f"Error executing task {data.get('task_id', 'unknown')}: {e}", exc_info=True)
-                        
-                        # 更新任务状态为失败
-                        task_id = data.get('task_id', 'unknown')
-                        await _update_task_api_status(r, task_id, "failed")
-                        
-                        # 创建错误轨迹结果
-                        try:
-                            error_result = TrajectoryResult(
-                                task_name=data.get('task_id', 'unknown'),
-                                task_id=data.get('task_id', 'unknown'),
-                                task_description=data.get('description', ''),
-                                runtime_id=getattr(runtime, 'runtime_id', 'unknown'),
-                                success=False,
-                                steps=[],
-                                final_result="",
-                                error_message=str(e),
-                                error_type=ErrorType.SYSTEM_ERROR,
-                                total_duration=0,
-                                metadata={"execution_error": True, "error_details": str(e)}
-                            )
+                        except Exception as e:
+                            # 记录详细的错误信息
+                            logger.error(f"Error executing task {data.get('task_id', 'unknown')}: {e}", exc_info=True)
                             
-                            # 尝试保存错误轨迹
-                            if hasattr(runtime, '_save_trajectory'):
-                                await runtime._save_trajectory(error_result)
-                        except Exception as save_error:
-                            logger.error(f"Failed to save error trajectory: {save_error}")
-                        
-                        # 记录指标
-                        if hasattr(runtime, 'metrics'):
-                            runtime.metrics.record_task_failure(
-                                data.get('task_id', 'unknown'), 
-                                getattr(runtime, 'runtime_id', 'unknown'),
+                            # 更新任务状态为失败
+                            task_id = data.get('task_id', 'unknown')
+                            await _update_task_api_status(r, task_id, "failed")
+                            
+                            # 创建错误轨迹结果
+                            try:
+                                error_result = TrajectoryResult(
+                                    task_name=data.get('task_id', 'unknown'),
+                                    task_id=data.get('task_id', 'unknown'),
+                                    task_description=data.get('description', ''),
+                                    runtime_id=getattr(runtime, 'runtime_id', 'unknown'),
+                                    success=False,
+                                    steps=[],
+                                    final_result="",
+                                    error_message=str(e),
+                                    error_type=ErrorType.SYSTEM_ERROR,
+                                    total_duration=0,
+                                    metadata={"execution_error": True, "error_details": str(e)}
+                                )
+                                
+                                # 尝试保存错误轨迹
+                                if hasattr(runtime, '_save_trajectory'):
+                                    await runtime._save_trajectory(error_result)
+                            except Exception as save_error:
+                                logger.error(f"Failed to save error trajectory: {save_error}")
+                            
+                            # 记录指标
+                            if hasattr(runtime, 'metrics'):
+                                runtime.metrics.record_task_failure(
+                                    data.get('task_id', 'unknown'), 
+                                    getattr(runtime, 'runtime_id', 'unknown'),
                                 "system_error"
                             )
-                    finally:
-                        await r.xack(queue_name, group, msg_id)
+                        finally:
+                            await r.xack(queue_name, group, msg_id)
+        finally:
+            # 确保在退出时关闭Redis连接
+            try:
+                if 'r' in locals() and hasattr(r, 'close'):
+                    await r.close()
+                    logger.debug(f"Runtime {runtime.runtime_id} Redis connection closed")
+            except Exception as e:
+                logger.debug(f"Error closing Redis connection: {e}")
 
     # === 改进：自动重启消费协程，防止异常退出导致任务堆积 ===
     while True:

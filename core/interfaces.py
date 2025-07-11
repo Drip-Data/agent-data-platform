@@ -42,12 +42,13 @@ class TaskExecutionConstants:
         'CONCLUSION': 'conclusion'
     }
     
-    # 🔧 新增：工具结果格式化常量
+    # 🔧 新增：工具结果格式化常量 - 增强搜索结果显示
     TOOL_RESULT_LIMITS = {
-        'MAX_SEARCH_RESULTS': 5,           # 搜索结果最大显示数量
+        'MAX_SEARCH_RESULTS': 8,           # 搜索结果最大显示数量（增加到8个）
         'MAX_FILE_RESULTS': 10,            # 文件搜索结果最大显示数量
-        'MAX_SNIPPET_LENGTH': 200,         # 文本片段最大长度
-        'MAX_CONTENT_LENGTH': 300,         # 内容最大显示长度
+        'MAX_SNIPPET_LENGTH': 500,         # 文本片段最大长度（增加到500）
+        'MAX_CONTENT_LENGTH': 2000,        # 内容最大显示长度（增加到2000）
+        'MAX_BROWSER_CONTENT': 3000,       # 浏览器内容专用限制（新增）
         'MIN_MEANINGFUL_CONTENT': 10       # 有意义内容最小长度
     }
     
@@ -443,7 +444,7 @@ class TaskSpec:
     context: Optional[str] = None # 新增：任务的上下文信息
     expected_tools: List[str] = field(default_factory=list)
     constraints: Dict[str, Any] = field(default_factory=dict)
-    max_steps: int = 20
+    max_steps: int = 8 #最多执行八步
     timeout: int = 300
     priority: int = 1
     
