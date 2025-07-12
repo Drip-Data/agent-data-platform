@@ -239,7 +239,7 @@ async def _start_server(server_name: str):
             if port:
                 env[f"{server_name.upper()}_PORT"] = str(port)
 
-            cmd = ['python3', '-m', module_str]
+            cmd = ['python', '-m', module_str]
             env['PYTHONPATH'] = project_root_for_pythonpath + os.pathsep + env.get('PYTHONPATH', '')
             
             # 处理端口分配逻辑

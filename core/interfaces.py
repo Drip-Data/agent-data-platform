@@ -444,7 +444,7 @@ class TaskSpec:
     context: Optional[str] = None # 新增：任务的上下文信息
     expected_tools: List[str] = field(default_factory=list)
     constraints: Dict[str, Any] = field(default_factory=dict)
-    max_steps: int = 8 #最多执行八步
+    max_steps: int = 10 #最多执行10步
     timeout: int = 300
     priority: int = 1
     

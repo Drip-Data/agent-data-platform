@@ -50,7 +50,7 @@ class ResultInjector:
     
     def _build_result_xml(self, result: Dict[str, Any], step_id: str = None) -> str:
         """
-        构建结果XML标签
+        构建结果XML标签 - 修改：直接显示后端返回的原始结果
         
         Args:
             result: 执行结果
@@ -59,19 +59,16 @@ class ResultInjector:
         Returns:
             格式化的结果XML
         """
-        if result.get('success', True):
-            # 成功结果
-            output = result.get('output', result.get('observation', ''))
-            
-            # 清理和格式化输出
-            cleaned_output = self._clean_output(output)
-            
-            result_xml = f"\n<result>\n{cleaned_output}\n</result>\n"
-        else:
-            # 错误结果
-            error_msg = result.get('error', result.get('error_message', 'Unknown error'))
-            result_xml = f"\n<result>\nError: {error_msg}\n</result>\n"
+        # 🔧 修复：直接显示原始结果，不进行任何提取或转换
+        import json
+        try:
+            # 将结果格式化为JSON字符串，保持原始结构
+            raw_output = json.dumps(result, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            # 如果JSON序列化失败，转为字符串
+            raw_output = str(result)
         
+        result_xml = f"\n<result>\n{raw_output}\n</result>\n"
         return result_xml
     
     def _clean_output(self, output: Any) -> str:

@@ -1179,9 +1179,15 @@ class BrowserUseMCPServer:
     async def _execute_action(self, action_name: str, params: dict, **kwargs) -> Dict[str, Any]:
         """执行browser-use控制器的具体动作"""
         try:
-            # 创建动作模型
-            action_dict = {action_name: params}
-            action_model = ActionModel(**action_dict)
+            # 🔧 通用修复：统一处理空字典参数，保持接口一致性
+            # 如果参数是空字典，则不传递参数给ActionModel，避免验证错误
+            if not params or params == {}:
+                # 对于空参数，创建只包含动作名的ActionModel
+                action_model = ActionModel(**{action_name: None})
+            else:
+                # 对于有参数的动作，正常创建
+                action_dict = {action_name: params}
+                action_model = ActionModel(**action_dict)
             
             # 使用控制器执行动作
             # Controller.act()需要browser_context参数

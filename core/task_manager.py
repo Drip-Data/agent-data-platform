@@ -399,25 +399,52 @@ async def start_runtime_service(runtime, redis_manager=None):
                             task_id = data.get('task_id', 'unknown')
                             await _update_task_api_status(r, task_id, "failed")
                             
-                            # 创建错误轨迹结果
+                            # 尝试保存失败任务的轨迹
                             try:
-                                error_result = TrajectoryResult(
-                                    task_name=data.get('task_id', 'unknown'),
-                                    task_id=data.get('task_id', 'unknown'),
-                                    task_description=data.get('description', ''),
-                                    runtime_id=getattr(runtime, 'runtime_id', 'unknown'),
-                                    success=False,
-                                    steps=[],
-                                    final_result="",
-                                    error_message=str(e),
-                                    error_type=ErrorType.SYSTEM_ERROR,
-                                    total_duration=0,
-                                    metadata={"execution_error": True, "error_details": str(e)}
-                                )
+                                # 尝试从runtime获取到目前为止的轨迹数据
+                                raw_response = f"任务执行失败: {str(e)}"
+                                execution_duration = 0
                                 
-                                # 尝试保存错误轨迹
-                                if hasattr(runtime, '_save_trajectory'):
-                                    await runtime._save_trajectory(error_result)
+                                if hasattr(runtime, 'step_logger') and runtime.step_logger:
+                                    # 获取已记录的交互历史
+                                    try:
+                                        step_data = await runtime.step_logger.get_execution_steps()
+                                        if step_data:
+                                            # 构建详细的执行历史
+                                            history_parts = [f"任务执行了 {len(step_data)} 个步骤后失败:"]
+                                            for i, step in enumerate(step_data, 1):
+                                                step_desc = step.get('step_description', f'步骤{i}')
+                                                step_status = step.get('step_status', 'unknown')
+                                                history_parts.append(f"  步骤{i}: {step_desc} ({step_status})")
+                                            
+                                            history_parts.append(f"\n最终错误: {str(e)}")
+                                            raw_response = "\n".join(history_parts)
+                                        
+                                        # 尝试获取任务执行时长
+                                        if hasattr(runtime.step_logger, 'current_task_data') and runtime.step_logger.current_task_data:
+                                            task_data = runtime.step_logger.current_task_data
+                                            if 'task_start_time' in task_data:
+                                                from datetime import datetime
+                                                start_time = datetime.fromisoformat(task_data['task_start_time'])
+                                                execution_duration = (datetime.now() - start_time).total_seconds()
+                                    except Exception as step_error:
+                                        logger.debug(f"获取步骤数据失败: {step_error}")
+                                        raw_response = f"任务执行失败 (无法获取详细步骤): {str(e)}"
+                                
+                                # 构建轨迹数据格式（与成功任务一致）
+                                if hasattr(runtime, '_save_xml_output'):
+                                    from datetime import datetime
+                                    xml_output = {
+                                        "timestamp": datetime.now().isoformat(),
+                                        "task_id": task_id,
+                                        "task_description": data.get('description', ''),
+                                        "duration": execution_duration,
+                                        "success": False,
+                                        "final_result": f"任务执行失败: {str(e)}",
+                                        "raw_response": raw_response
+                                    }
+                                    await runtime._save_xml_output(xml_output)
+                                    logger.info(f"已保存失败任务 {task_id} 的轨迹 ({execution_duration:.1f}s)")
                             except Exception as save_error:
                                 logger.error(f"Failed to save error trajectory: {save_error}")
                             
@@ -432,6 +459,7 @@ async def start_runtime_service(runtime, redis_manager=None):
                             await r.xack(queue_name, group, msg_id)
         except (asyncio.CancelledError, GeneratorExit):
             logger.info(f"Runtime {runtime.runtime_id} service loop cancelled or generator exit.")
+            raise  # 重新抛出异常，让外层循环正确处理
         finally:
             # 确保在退出时关闭Redis连接
             if 'r' in locals() and hasattr(r, 'close'):
@@ -442,10 +470,11 @@ async def start_runtime_service(runtime, redis_manager=None):
     while True:
         try:
             await _run_service()
+            # 如果 _run_service 正常退出，也退出循环
+            break
         except (asyncio.CancelledError, GeneratorExit):
-            # 正常取消或生成器退出时直接退出
-            logger.info(f"Runtime {getattr(runtime, 'runtime_id', 'unknown')} service stopped normally")
-            return  # 直接返回而不是break，避免继续执行
+            logger.info(f"Runtime {runtime.runtime_id} service loop cancelled or generator exit.")
+            break  # 跳出循环，正常退出
         except Exception as fatal_err:
             logger.exception(f"❌ Runtime {getattr(runtime, 'runtime_id', 'unknown')} crashed: {fatal_err}")
             # 留出短暂冷却时间后自动重启

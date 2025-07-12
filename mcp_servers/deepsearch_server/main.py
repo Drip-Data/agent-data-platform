@@ -83,7 +83,7 @@ class DeepSearchMCPServer:
         listen_host = os.getenv("DEEPSEARCH_LISTEN_HOST", "0.0.0.0")
         public_host = os.getenv("DEEPSEARCH_HOST", "localhost")
         
-        self.endpoint = f"ws://{public_host}:{deepsearch_port}/mcp"
+        self.endpoint = f"ws://{public_host}:{deepsearch_port}/websocket"
         self._listen_host = listen_host
         self._listen_port = deepsearch_port
         

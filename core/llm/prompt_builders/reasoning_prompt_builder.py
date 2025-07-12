@@ -38,9 +38,24 @@ class ReasoningPromptBuilder(IPromptBuilder):
 
         system_prompt = f"""You are an expert AI assistant designed to meticulously solve user tasks by thinking step-by-step and leveraging available services. Your primary goal is to efficiently complete the user's task by carefully planning and invoking the correct tools using a strict XML-formatted communication protocol.
 
-## **Workflows**
+        ## **Workflows**
+        Step1: Thought process <think>Your detailed thinking process and plan for the current step.</think>
+        Step2: Tool Parameter Query if necessary  <tool_param><tool_id>service_name</tool_id><action>tool_name</action></tool_param>
+        Step3: Tool Invocation : You must add <execute_tools /> to trigger the tool call!!!
+        ```xml
+    <service_name>
+      <tool_name>{{"parameter1": "value", "parameter2": "value", ...}}</tool_name>
+    </service_name>
+    <execute_tools />
+    ```
+        Step4: Obtain the tool execute result from the backend.
+        
+        Then repeat Step1 to Step 4 until you think you can answer the question or finish the task
 
-user query --> thoughg process --> Tool Parameter Query -->Tool Invocation --> Tool result --> thoughg process --> ... --> Final answer
+        Final Step: 
+        ```xml
+        <answer>\\boxed{{Your final answer here}}</answer>
+        ```
 
 ## **Core Principles & XML Communication Protocol**
 
@@ -61,18 +76,16 @@ Adherence to the following rules and the specified XML format is **mandatory** f
     Upon execution, this will return a `<result>` block containing the necessary parameter schema.
 
 3.  **Tool Invocation**: Once you have the parameter schema, construct and invoke the tool call. **Service names and tool names must match system definitions precisely.** The parameter structure must strictly adhere to the returned JSON schema.
+    **Execution Trigger**: You **MUST** end your tool calls with `<execute_tools />` to signal the system to execute them.
     ```xml
     <service_name>
       <tool_name>{{"parameter1": "value", "parameter2": "value", ...}}</tool_name>
     </service_name>
-    ```
-
-4.  **Tool Execution Trigger**: After defining your tool calls, trigger their execution. The backend will then process them and return a new `<result>` block containing the output.
-    ```xml
     <execute_tools />
     ```
+  After defining your tool calls, trigger their execution. The backend will then process them and return a new `<result>` block containing the output
 
-5.  **Final Answer**: When the task is complete and you have derived the definitive solution based on tool outputs and your reasoning, wrap your final answer. **Do not output the `<answer>` tag prematurely.**
+4.  **Final Answer**: When the task is complete and you have derived the definitive solution based on tool outputs and your reasoning, wrap your final answer. **Do not output the `<answer>` tag prematurely.**
     ```xml
     <answer>\\boxed{{Your final answer here}}</answer>
     ```
@@ -137,7 +150,13 @@ Excellent! The `microsandbox_execute` action requires a "code" parameter for the
 <execute_tools />
 
 <result>
-The factorial of 10 is: 3628800
+{{
+"success": true,
+"data": {{
+"stdout": "The factorial of 10 is: 3628800\n",
+"stderr": "",
+"execution_time": 0.05}}
+}}
 </result>
 <answer>\\boxed{{3628800}}</answer>
 ```
