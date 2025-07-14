@@ -30,27 +30,8 @@ class EnhancedLLMClient:
         self.base_client = base_client
         self.interaction_history: List[LLMInteraction] = []
         
-        # 成本计算配置（示例值，实际应从配置文件读取）
-        self.cost_config = {
-            'gemini': {
-                'input_cost_per_1k': 0.00025,
-                'output_cost_per_1k': 0.0005
-            },
-            'openai': {
-                'gpt-4': {
-                    'input_cost_per_1k': 0.03,
-                    'output_cost_per_1k': 0.06
-                },
-                'gpt-3.5-turbo': {
-                    'input_cost_per_1k': 0.0015,
-                    'output_cost_per_1k': 0.002
-                }
-            },
-            'deepseek': {
-                'input_cost_per_1k': 0.00014,
-                'output_cost_per_1k': 0.00028
-            }
-        }
+        # 🔧 移除冗余的成本计算配置 - 统一由CostAnalyzer处理
+        # 保留interaction_history用于轨迹记录
     
     def estimate_token_count(self, text: str) -> int:
         """估算令牌数量（简化实现）"""
@@ -61,34 +42,8 @@ class EnhancedLLMClient:
         estimated_tokens = int(chinese_chars / 1.5 + other_chars / 4)
         return max(estimated_tokens, 1)  # 至少1个令牌
     
-    def calculate_cost(self, provider: str, model: str, input_tokens: int, output_tokens: int) -> Dict[str, Any]:
-        """计算API调用成本"""
-        try:
-            cost_config = self.cost_config.get(provider.lower(), {})
-            
-            if provider.lower() == 'openai':
-                model_config = cost_config.get(model, cost_config.get('gpt-4', {}))
-            else:
-                model_config = cost_config
-            
-            input_cost_per_1k = model_config.get('input_cost_per_1k', 0)
-            output_cost_per_1k = model_config.get('output_cost_per_1k', 0)
-            
-            input_cost = (input_tokens / 1000) * input_cost_per_1k
-            output_cost = (output_tokens / 1000) * output_cost_per_1k
-            total_cost = input_cost + output_cost
-            
-            return {
-                'input_cost': round(input_cost, 6),
-                'output_cost': round(output_cost, 6),
-                'total_cost': round(total_cost, 6),
-                'currency': 'USD',
-                'model': model,
-                'rate_type': 'estimated'
-            }
-        except Exception as e:
-            logger.warning(f"成本计算失败: {e}")
-            return {'error': str(e)}
+    # 🔧 移除冗余的成本计算方法 - 统一由CostAnalyzer处理
+    # calculate_cost方法已删除，避免与CostAnalyzer重复
     
     async def enhanced_call_api(self, messages: List[Dict[str, Any]], context: str = "unknown") -> LLMResponse:
         """增强的API调用，收集详细元数据"""
@@ -103,24 +58,47 @@ class EnhancedLLMClient:
         model = getattr(self.base_client.provider_instance, 'get_default_model', lambda: 'unknown')()
         
         try:
-            # 调用基础客户端
-            response_content = await self.base_client._call_api(messages)
+            # 调用基础客户端（新格式：返回字典包含content和usage）
+            response_data = await self.base_client._call_api(messages)
             
             response_time = time.time() - start_time
+            response_content = response_data.get('content', '')
+            real_usage = response_data.get('usage')
             
-            # 估算输出令牌数
-            estimated_output_tokens = self.estimate_token_count(response_content)
-            
-            # 计算成本
-            cost_info = self.calculate_cost(provider, model, estimated_input_tokens, estimated_output_tokens)
-            
-            # 构建详细的令牌使用信息
-            token_usage = {
-                'prompt_tokens': estimated_input_tokens,
-                'completion_tokens': estimated_output_tokens,
-                'total_tokens': estimated_input_tokens + estimated_output_tokens,
-                'estimation_method': 'character_based'
-            }
+            # 🔧 优先使用真实token数据，回退到估算
+            if real_usage and real_usage.get('data_source') == 'real_api':
+                # 使用真实API返回的token数据
+                token_usage = real_usage
+                logger.info(f"✅ 使用真实token数据: prompt={real_usage['prompt_tokens']}, completion={real_usage['completion_tokens']}")
+                
+                # 🔧 成本计算由CostAnalyzer统一处理，此处不再计算
+                cost_info = {
+                    'note': 'Cost calculation delegated to CostAnalyzer',
+                    'data_source': 'real_api',
+                    'model': model
+                }
+                
+            else:
+                # 回退到估算模式
+                logger.warning("⚠️ 未获取到真实token数据，使用估算模式")
+                estimated_output_tokens = self.estimate_token_count(response_content)
+                
+                # 构建估算的令牌使用信息
+                token_usage = {
+                    'prompt_tokens': estimated_input_tokens,
+                    'completion_tokens': estimated_output_tokens,
+                    'total_tokens': estimated_input_tokens + estimated_output_tokens,
+                    'data_source': 'estimation',
+                    'model': model,
+                    'estimation_method': 'character_based'
+                }
+                
+                # 🔧 成本计算由CostAnalyzer统一处理
+                cost_info = {
+                    'note': 'Cost calculation delegated to CostAnalyzer',
+                    'data_source': 'estimation',
+                    'model': model
+                }
             
             # 创建LLM交互记录
             interaction = LLMInteraction(

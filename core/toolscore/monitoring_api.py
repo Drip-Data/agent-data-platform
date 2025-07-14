@@ -1311,7 +1311,7 @@ class ToolScoreMonitoringAPI:
                 "message": str(e)
             }, status=500)
 
-async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8080):
+async def start_monitoring_api(tool_library: UnifiedToolLibrary, port: int = 8088):
     """启动监控API服务器的便捷函数"""
     api = ToolScoreMonitoringAPI(tool_library, port)
     runner = await api.start()

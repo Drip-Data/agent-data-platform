@@ -78,7 +78,7 @@ class CoreManager:
                 "tool_id": "browser_use",
                 "name": "Browser Use MCP Server", 
                 "description": "AI-powered browser automation and control",
-                "endpoint": "ws://localhost:8084/mcp",
+                "endpoint": "ws://localhost:8082/mcp",
                 "capabilities": [
                     {
                         "name": "browser_use_execute_task",

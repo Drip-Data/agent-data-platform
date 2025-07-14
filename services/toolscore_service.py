@@ -87,8 +87,8 @@ def start():
         port_management_config = ports_config.get('port_management', {})
         auto_detect = port_management_config.get('auto_detect', False)
         
-        # 优先从ports_config.yaml获取端口，如果未配置则使用默认值8090
-        configured_port = int(os.getenv('TOOLSCORE_PORT', toolscore_mcp_config.get('port', 8090)))
+        # 优先从ports_config.yaml获取端口，如果未配置则使用默认值8081
+        configured_port = int(os.getenv('TOOLSCORE_PORT', toolscore_mcp_config.get('port', 8081)))
         
         bind_port = configured_port # 默认使用配置的端口
 
@@ -113,7 +113,7 @@ def start():
     except Exception as e:
         logger.warning(f"Failed to load port config for ToolScore MCP, using defaults. Error: {e}")
         host = os.getenv('TOOLSCORE_HOST', '0.0.0.0')
-        bind_port = int(os.getenv('TOOLSCORE_PORT', 8090)) # 使用ports_config.yaml中的默认端口8090
+        bind_port = int(os.getenv('TOOLSCORE_PORT', 8081)) # 使用ports_config.yaml中的默认端口8081
         websocket_path = "websocket"
         
     endpoint = f"ws://{host}:{bind_port}/{websocket_path}" # 使用 bind_port 构建 endpoint

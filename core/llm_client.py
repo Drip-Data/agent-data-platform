@@ -317,7 +317,7 @@ class LLMClient:
             execution_context=execution_context
         )
 
-    async def _call_api(self, messages: List[Dict[str, Any]], timeout: int = 120, stop_sequences: Optional[List[str]] = None) -> str:
+    async def _call_api(self, messages: List[Dict[str, Any]], timeout: int = 120, stop_sequences: Optional[List[str]] = None) -> Dict[str, Any]:
         """调用相应的API，并记录完整的交互信息"""
         # 🔧 新增：预调用数据验证 - 防止数据类型错误传播
         try:
@@ -375,38 +375,65 @@ class LLMClient:
             
             response = await self.provider_instance.generate_response(**params)
             
-            # 🔍 新增：检查响应类型，防止AsyncMock泄露到响应中
-            if hasattr(response, '_mock_name') or "Mock" in type(response).__name__:
+            # 🔍 新增：检查响应类型，处理不同的返回格式
+            duration = time.time() - start_time
+            
+            # 如果provider返回字符串（旧格式），转换为新格式
+            if isinstance(response, str):
+                response_data = {
+                    'content': response,
+                    'usage': None,  # 旧格式没有usage信息
+                    'metadata': {
+                        'response_time': duration,
+                        'provider': self.provider.value,
+                        'model': model_name
+                    }
+                }
+                logger.warning(f"⚠️ Provider返回旧格式(string)，已转换为新格式")
+            elif isinstance(response, dict):
+                # 新格式：字典包含content和metadata
+                response_data = response
+                response_data.setdefault('metadata', {})
+                response_data['metadata'].update({
+                    'response_time': duration,
+                    'provider': self.provider.value,
+                    'model': model_name
+                })
+            elif hasattr(response, '_mock_name') or "Mock" in type(response).__name__:
                 logger.error(f"❌ LLM provider返回了Mock对象: {type(response)}")
-                raise ValueError(f"LLM provider返回了Mock对象而不是字符串: {type(response)}")
+                raise ValueError(f"LLM provider返回了Mock对象: {type(response)}")
+            else:
+                logger.error(f"❌ LLM provider返回了意外类型: {type(response)}")
+                raise ValueError(f"LLM provider返回了意外类型: {type(response)}")
+            
+            # 验证响应内容
+            content = response_data.get('content', '')
+            if not isinstance(content, str):
+                logger.warning(f"⚠️ 响应内容类型异常: {type(content)}, 尝试转换为字符串")
+                content = str(content) if content is not None else ""
+                response_data['content'] = content
             
             # 🔍 新增：记录API响应信息和数据流追踪
-            duration = time.time() - start_time
             logger.info("✅ LLM API调用成功")
             logger.info(f"   响应时间: {duration:.2f}秒")
-            logger.info(f"   响应长度: {len(response)} 字符")
-            logger.info(f"   响应类型: {type(response)}")
-            
-            # 🔍 数据流验证
-            if not isinstance(response, str):
-                logger.warning(f"⚠️ LLM API返回类型异常: {type(response)}, 尝试转换为字符串")
-                response = str(response) if response is not None else ""
+            logger.info(f"   响应长度: {len(content)} 字符")
+            logger.info(f"   包含usage信息: {response_data.get('usage') is not None}")
             
             # 检查响应是否为空或异常
-            if not response or response.strip() == "":
+            if not content or content.strip() == "":
                 logger.warning("⚠️ LLM API返回空响应")
-            elif len(response) > 10000:
-                logger.warning(f"⚠️ LLM API返回响应过长: {len(response)} 字符")
+            elif len(content) > 10000:
+                logger.warning(f"⚠️ LLM API返回响应过长: {len(content)} 字符")
             
             # 记录响应内容
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"   完整响应内容:\n{response}")
+                logger.debug(f"   完整响应内容:\n{content}")
             else:
                 # 生产模式下只记录前后片段
-                response_preview = response[:200] + "..." + response[-100:] if len(response) > 300 else response
+                response_preview = content[:200] + "..." + content[-100:] if len(content) > 300 else content
                 logger.info(f"   响应预览: {response_preview}")
             
-            return response
+            return response_data
             
         except httpx.HTTPStatusError as e: # 捕获更具体的HTTP错误
             # 🔍 新增：记录API错误信息

@@ -803,19 +803,19 @@ async def main():
         description="统一工具注册与调用中心",
         capabilities=capabilities,
         tool_type=ToolType.MCP_SERVER,
-        endpoint="ws://0.0.0.0:8080/websocket",
+        endpoint="ws://0.0.0.0:8081/websocket",
         toolscore_endpoint=None  # 自己就是toolscore
     )
     
     # 设置工具库
     server.unified_tool_library = tool_library
     
-    # 启动HTTP监控API (在8090端口)
-    logger.info("Starting ToolScore monitoring API on port 8090...")
-    http_runner = await start_monitoring_api(tool_library, port=8090)
+    # 启动HTTP监控API (在8088端口)
+    logger.info("Starting ToolScore monitoring API on port 8088...")
+    http_runner = await start_monitoring_api(tool_library, port=8088)
     
-    # 启动WebSocket MCP服务器 (在8080端口)
-    logger.info("Starting ToolScore MCP WebSocket server on port 8080...")
+    # 启动WebSocket MCP服务器 (在8081端口)
+    logger.info("Starting ToolScore MCP WebSocket server on port 8081...")
     await server.start()
 
 if __name__ == "__main__":

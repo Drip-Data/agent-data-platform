@@ -809,7 +809,25 @@ class BrowserUseLLMAdapter(BaseChatModel):
     def _parse_structured_response(self, content):
         """Parse structured response from LLM content"""
         try:
-            # 🔧 修复：使用JSONExtractor工具类，彻底避免re作用域问题
+            # 🔧 修复：确保content是字符串类型
+            if isinstance(content, dict):
+                # 如果content是字典，尝试提取文本内容
+                if 'content' in content:
+                    content = content['content']
+                elif 'text' in content:
+                    content = content['text']
+                elif 'response' in content:
+                    content = content['response']
+                else:
+                    # 如果是字典但没有明显的文本字段，转换为JSON字符串
+                    content = json.dumps(content)
+                    logger.warning(f"Content was dict, converted to JSON string: {content[:100]}...")
+            elif not isinstance(content, str):
+                # 如果既不是字符串也不是字典，强制转换为字符串
+                content = str(content)
+                logger.warning(f"Content was {type(content)}, converted to string: {content[:100]}...")
+            
+            # 使用JSONExtractor工具类，彻底避免re作用域问题
             parsed = JSONExtractor.parse_structured_content(content)
             structured_resp = StructuredResponse(parsed)
             logger.info(f"JSONExtractor parse successful, created StructuredResponse with keys: {list(structured_resp.keys())}")
@@ -820,7 +838,7 @@ class BrowserUseLLMAdapter(BaseChatModel):
             return structured_resp
         except Exception as e:
             logger.error(f"Error in structured response parsing: {e}")
-            return StructuredResponse({"error": str(e), "response": content})
+            return StructuredResponse({"error": str(e), "response": str(content)})
 
 
 from core.unified_tool_manager import UnifiedToolManager
@@ -1072,7 +1090,7 @@ class BrowserUseMCPServer:
                 # 🚀 Enhanced Browser Config - 基于官方browser-use最佳实践
                 # 关闭无头模式以减少反爬虫检测
                 browser_config = BrowserConfig(
-                    headless=False,  # 强制使用有头模式
+                    headless=False,  # 关闭无头模式，可视化调试
                     disable_security=True,
                     extra_chromium_args=[
                         # 基础安全和性能参数
@@ -1122,7 +1140,7 @@ class BrowserUseMCPServer:
                         # 🎭 模拟真实用户行为
                         "--simulate-outdated-no-au",
                         "--disable-features=VizDisplayCompositor",
-                        "--start-maximized"  # 有头模式时最大化窗口
+                        "--start-maximized"  # 最大化窗口便于观察
                     ]
                 )
                 
@@ -1253,8 +1271,23 @@ class BrowserUseMCPServer:
                 retry_delay=5
             )
             
-            # 执行任务并获取完整的AgentHistoryList
-            agent_history = await agent.run(max_steps=max_steps)
+            # 执行任务并获取完整的AgentHistoryList，添加超时控制
+            task_timeout = min(max_steps * 30, 300)  # 每步最多30秒，总共最多5分钟
+            logger.info(f"🕐 执行任务，超时设置: {task_timeout}秒，最大步数: {max_steps}")
+            
+            try:
+                agent_history = await asyncio.wait_for(
+                    agent.run(max_steps=max_steps), 
+                    timeout=task_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"❌ 任务执行超时 ({task_timeout}秒)")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error_message": f"任务执行超时 ({task_timeout}秒)，请尝试减少max_steps或简化任务",
+                    "error_type": "TaskTimeout"
+                }
             
             # 使用Browser-Use风格的结果分析器
             analyzer = BrowserUseResultAnalyzer(agent_history)
@@ -1888,7 +1921,7 @@ async def main():
     except OSError as e:
         if "Address already in use" in str(e) or "Errno 48" in str(e):
             logger.error(f"端口冲突: {e}")
-            logger.error("端口8084已被占用，请检查是否有其他Browser Use进程正在运行")
+            logger.error("端口8082已被占用，请检查是否有其他Browser Use进程正在运行")
             sys.exit(1)
         else:
             logger.error(f"网络错误: {e}")

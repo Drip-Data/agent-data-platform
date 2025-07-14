@@ -1217,7 +1217,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 try:
                     optimized_history, optimization_info = await self.token_manager.optimize_messages_with_cache(
                         history, 
-                        model=getattr(self.client, 'model', 'gemini-2.5-flash'),
+                        model=self.client.get_default_model() if hasattr(self.client, 'get_default_model') else getattr(self.client, 'model', 'gemini-2.5-flash'),
                         session_id=getattr(task, 'session_id', task.task_id)
                     )
                     if optimization_info.get('tokens_saved', 0) > 0:
@@ -1239,7 +1239,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             for attempt in range(3):  # 最多重试3次
                 try:
                     logger.debug(f"🔄 LLM API调用尝试 {attempt + 1}/3")
-                    response_text = await self.client._call_api(optimized_history, stop_sequences=stop_sequences)
+                    response_data = await self.client._call_api(optimized_history, stop_sequences=stop_sequences)
+                    response_text = response_data.get('content', '') if isinstance(response_data, dict) else response_data
                     llm_end_time = time.time()
                     
                     logger.info(f"✅ LLM API调用成功 (尝试 {attempt + 1})")
@@ -1267,19 +1268,34 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     else:
                         logger.error("❌ 所有LLM API调用尝试都失败了")
             
-            # 3. 🆕 Token使用统计和记录（无论成功失败都尝试）
+            # 3. 🆕 Token使用统计和记录（优先使用真实API数据）
             if response_text and self.token_manager:
                 try:
-                    # 计算实际token使用
-                    prompt_text = " ".join([msg.get('content', '') for msg in optimized_history if isinstance(msg, dict)])
-                    prompt_tokens = await self.token_manager.count_tokens_accurately(prompt_text)
-                    completion_tokens = await self.token_manager.count_tokens_accurately(response_text)
+                    # 🔧 优先使用真实API返回的token数据
+                    real_usage = response_data.get('usage') if isinstance(response_data, dict) else None
+                    
+                    if real_usage and real_usage.get('data_source') == 'real_api':
+                        # 使用真实API token数据
+                        prompt_tokens = real_usage['prompt_tokens']
+                        completion_tokens = real_usage['completion_tokens']
+                        model_name = real_usage.get('model', self.client.get_default_model() if hasattr(self.client, 'get_default_model') else 'gemini-2.5-flash')
+                        data_source = 'real_api'
+                        
+                        logger.info(f"✅ 使用真实API token数据: prompt={prompt_tokens}, completion={completion_tokens}")
+                    else:
+                        # 回退到精确计算
+                        logger.warning("⚠️ 未获取到真实token数据，使用精确计算")
+                        prompt_text = " ".join([msg.get('content', '') for msg in optimized_history if isinstance(msg, dict)])
+                        prompt_tokens = await self.token_manager.count_tokens_accurately(prompt_text)
+                        completion_tokens = await self.token_manager.count_tokens_accurately(response_text)
+                        model_name = self.client.get_default_model() if hasattr(self.client, 'get_default_model') else 'gemini-2.5-flash'
+                        data_source = 'accurate_estimation'
                     
                     # 记录token使用
                     await self.token_manager.record_token_usage(
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
-                        model=getattr(self.client, 'model', 'gemini-2.5-flash'),
+                        model=model_name,
                         task_id=task.task_id,
                         session_id=getattr(task, 'session_id', None),
                         cached_tokens=optimization_info.get('tokens_saved', 0)
@@ -1290,8 +1306,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         'completion_tokens': completion_tokens,
                         'total_tokens': prompt_tokens + completion_tokens,
                         'cached_tokens': optimization_info.get('tokens_saved', 0),
-                        'model': getattr(self.client, 'model', 'gemini-2.5-flash'),
-                        'data_source': 'api_provided'
+                        'model': model_name,
+                        'data_source': data_source
                     }
                 except Exception as e:
                     logger.warning(f"Token统计失败: {e}")
@@ -1678,7 +1694,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 tool_descriptions="",
                 streaming_mode=False
             )
-            response = await self.client._call_api(messages)
+            response_data = await self.client._call_api(messages)
+            response = response_data.get('content', '') if isinstance(response_data, dict) else response_data
             
             # 🧠 标准模式也使用智能评估（简化版）
             final_result = self._extract_final_result(response)

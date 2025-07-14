@@ -7,6 +7,7 @@ from typing import Dict, Optional, List, Any # 导入Any
 import time
 import json
 import socket # 导入socket模块
+import websockets  # 添加websockets导入
 from core.config_manager import ConfigManager
 from core.toolscore.service_container import MCPServiceContainer
 from core.toolscore.mcp_auto_registration import get_auto_registrar
@@ -86,7 +87,7 @@ def initialize(config_manager: ConfigManager, service_manager: 'ServiceManager',
     logger.info(f"MCP服务器启动器初始化完成，配置了 {len(mcp_servers)} 个服务器: {mcp_servers}")
 
 async def start():
-    """启动所有MCP服务器"""
+    """启动所有MCP服务器 - 修复版：顺序启动以避免竞态条件"""
     global mcp_processes, server_statuses
     
     if not mcp_servers:
@@ -99,29 +100,177 @@ async def start():
     mcp_processes = {}
     server_statuses = {}
     
-    # 🚀 并行启动所有服务器以提高启动速度
-    logger.info(f"正在并行启动 {len(mcp_servers)} 个MCP服务器...")
+    # 🔧 修复：等待ToolScore服务器完全就绪
+    logger.info("⏳ 等待ToolScore服务器完全就绪...")
+    if not await _ensure_toolscore_ready():
+        logger.error("❌ ToolScore服务器未就绪，无法启动MCP服务器")
+        return
     
-    startup_tasks = []
-    for server_name in mcp_servers:
-        task = asyncio.create_task(_start_server(server_name))
-        startup_tasks.append(task)
+    # 🔧 修复：依赖感知的顺序启动
+    startup_order = [
+        "microsandbox_server",    # 基础代码执行服务，优先启动
+        "search_tool_server",     # 文件搜索服务
+        "browser_use_server",     # Web自动化服务
+        "deepsearch_server"       # 高级搜索服务，依赖其他服务
+    ]
     
-    # 等待所有服务器启动完成，设置合理的超时时间
-    try:
-        await asyncio.wait_for(
-            asyncio.gather(*startup_tasks, return_exceptions=True),
-            timeout=120  # 2分钟启动超时
-        )
-    except asyncio.TimeoutError:
-        logger.warning("⚠️ MCP服务器启动超时，部分服务器可能未完全启动")
+    # 确保所有配置的服务器都在启动列表中
+    remaining_servers = [s for s in mcp_servers if s not in startup_order]
+    startup_order.extend(remaining_servers)
     
-    # 统计启动成功的服务器
-    successful_servers = [name for name, status in server_statuses.items() 
-                         if status.get('status') == 'running']
+    logger.info(f"🚀 按依赖顺序启动 {len(startup_order)} 个MCP服务器: {startup_order}")
     
-    logger.info(f"✅ 成功启动 {len(successful_servers)}/{len(mcp_servers)} 个MCP服务器: {successful_servers}")
+    successful_servers = []
+    failed_servers = []
+    
+    for server_name in startup_order:
+        if server_name not in mcp_servers:
+            logger.debug(f"跳过未配置的服务器: {server_name}")
+            continue
+            
+        logger.info(f"📦 启动服务器: {server_name}")
+        
+        try:
+            await _start_server_with_enhanced_error_capture(server_name)
+            
+            # 检查启动结果
+            status = server_statuses.get(server_name, {})
+            if status.get('status') == 'running':
+                successful_servers.append(server_name)
+                logger.info(f"✅ {server_name} 启动成功")
+                
+                # 启动间隔，避免资源竞争
+                await asyncio.sleep(2)
+            else:
+                failed_servers.append(server_name)
+                logger.error(f"❌ {server_name} 启动失败: {status.get('message', '未知错误')}")
+                
+        except Exception as e:
+            failed_servers.append(server_name)
+            logger.error(f"❌ {server_name} 启动异常: {e}")
+            server_statuses[server_name] = {'status': 'error', 'message': str(e)}
+    
+    # 最终统计
+    logger.info(f"🎯 MCP服务器启动完成:")
+    logger.info(f"   ✅ 成功: {len(successful_servers)}/{len(startup_order)} - {successful_servers}")
+    if failed_servers:
+        logger.warning(f"   ❌ 失败: {len(failed_servers)} - {failed_servers}")
+    
+    # 等待所有服务器稳定
+    await asyncio.sleep(3)
+    logger.info("🔄 验证所有服务器最终状态...")
+    await _verify_all_servers_final_status()
 
+
+async def _ensure_toolscore_ready(endpoint="ws://localhost:8081/websocket", timeout=60) -> bool:
+    """确保ToolScore服务器完全就绪"""
+    import websockets
+    
+    start_time = time.time()
+    attempt = 0
+    
+    while time.time() - start_time < timeout:
+        attempt += 1
+        try:
+            logger.debug(f"🔍 第{attempt}次检查ToolScore健康状态: {endpoint}")
+            
+            # 尝试WebSocket连接
+            async with websockets.connect(
+                endpoint, 
+                ping_timeout=5, 
+                close_timeout=3,
+                open_timeout=10
+            ) as ws:
+                # 发送简单的ping测试
+                await ws.send('{"type": "ping", "request_id": "health_check"}')
+                
+                # 等待响应
+                try:
+                    response = await asyncio.wait_for(ws.recv(), timeout=5)
+                    logger.info(f"✅ ToolScore服务器健康检查成功: {response[:100]}...")
+                    return True
+                except asyncio.TimeoutError:
+                    logger.debug("⚠️ ToolScore响应超时，但连接成功，视为就绪")
+                    return True
+                    
+        except Exception as e:
+            logger.debug(f"⏳ ToolScore未就绪 (第{attempt}次): {e}")
+            
+            # 渐进式重试间隔：1s, 2s, 3s, 然后保持3s
+            wait_time = min(attempt, 3)
+            await asyncio.sleep(wait_time)
+    
+    logger.error(f"❌ ToolScore服务器健康检查超时 ({timeout}秒)")
+    return False
+
+async def _start_server_with_enhanced_error_capture(server_name: str):
+    """启动单个MCP服务器并增强错误捕获"""
+    global mcp_processes, server_statuses
+    
+    logger.info(f"🚀 启动MCP服务器: {server_name}")
+    
+    try:
+        # 调用原始启动函数
+        await _start_server(server_name)
+        
+        # 等待启动完成并检查状态
+        await asyncio.sleep(1)
+        
+        # 检查进程是否还在运行
+        if server_name in mcp_processes:
+            process = mcp_processes[server_name]
+            
+            if process.poll() is not None:
+                # 进程已退出，捕获输出
+                try:
+                    stdout, stderr = process.communicate(timeout=3)
+                    
+                    logger.error(f"❌ {server_name} 进程退出 (代码: {process.returncode})")
+                    if stdout:
+                        logger.error(f"📋 {server_name} 标准输出:\n{stdout}")
+                    if stderr:
+                        logger.error(f"🔥 {server_name} 错误输出:\n{stderr}")
+                    
+                    # 更新状态
+                    server_statuses[server_name] = {
+                        'status': 'failed',
+                        'exit_code': process.returncode,
+                        'stdout': stdout[:1000] if stdout else None,
+                        'stderr': stderr[:1000] if stderr else None,
+                        'message': f'Process exited with code {process.returncode}'
+                    }
+                    
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"⚠️ {server_name} 输出捕获超时")
+                    
+        else:
+            logger.warning(f"⚠️ {server_name} 进程未在进程字典中找到")
+            
+    except Exception as e:
+        logger.error(f"❌ 启动 {server_name} 时异常: {e}")
+        server_statuses[server_name] = {
+            'status': 'error',
+            'message': str(e),
+            'exception': type(e).__name__
+        }
+
+async def _verify_all_servers_final_status():
+    """验证所有服务器的最终状态"""
+    logger.info("🔍 最终状态验证:")
+    
+    for server_name in mcp_servers:
+        status = server_statuses.get(server_name, {'status': 'unknown'})
+        
+        if server_name in mcp_processes:
+            process = mcp_processes[server_name]
+            is_running = process.poll() is None
+            
+            if is_running:
+                logger.info(f"   ✅ {server_name}: 运行中 (PID: {process.pid})")
+            else:
+                logger.warning(f"   ❌ {server_name}: 进程已退出 (代码: {process.returncode})")
+        else:
+            logger.warning(f"   ⚠️ {server_name}: 未找到进程记录")
 
 async def _start_server(server_name: str):
     """启动单个MCP服务器"""
@@ -239,7 +388,7 @@ async def _start_server(server_name: str):
             if port:
                 env[f"{server_name.upper()}_PORT"] = str(port)
 
-            cmd = ['python', '-m', module_str]
+            cmd = ['python3', '-m', module_str]
             env['PYTHONPATH'] = project_root_for_pythonpath + os.pathsep + env.get('PYTHONPATH', '')
             
             # 处理端口分配逻辑

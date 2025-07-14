@@ -490,7 +490,7 @@ async def export_dual_track_tasks():
 if __name__ == "__main__":
     import uvicorn
     
-    port = int(os.getenv("API_PORT", "8081"))
+    port = int(os.getenv("API_PORT", "8085"))
     host = os.getenv("API_HOST", "0.0.0.0")
     
     logger.info(f"Starting Synthesis API on {host}:{port}")

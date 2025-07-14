@@ -287,10 +287,16 @@ class IntelligentStatusEvaluator:
         
         try:
             # 使用LLMClient的_call_api方法
-            response = await self.llm_client._call_api(
+            response_data = await self.llm_client._call_api(
                 messages=[{"role": "user", "content": prompt}],
                 timeout=30  # 快速响应
             )
+            
+            # 🔧 兼容新的返回格式：提取content字段
+            if isinstance(response_data, dict):
+                response = response_data.get('content', '')
+            else:
+                response = str(response_data)
             
             # 尝试解析JSON响应
             try:

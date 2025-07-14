@@ -464,13 +464,21 @@ class CostAnalyzer:
                                f"Other=${tool_costs['other_tools_cost_usd']:.6f}")
             
             # 🆕 从轨迹数据中推断工具使用（改进的智能估算）
+            has_tool_executions = any(
+                step_log.get('tool_executions') for step_log in (step_logs or [])
+            )
+            
             if trajectory_data and not any(tool_costs.values()):
                 # 只有在没有从step_logs获取真实数据时才使用智能估算
                 estimated_costs = self._estimate_tool_costs_from_trajectory(trajectory_data)
                 for key, value in estimated_costs.items():
                     tool_costs[key] = max(tool_costs[key], value)
-                    
-                self.logger.warning(f"⚠️ 使用轨迹数据估算工具成本（缺少真实token数据）")
+                
+                # 更精确的警告信息
+                if has_tool_executions:
+                    self.logger.warning(f"⚠️ 使用轨迹数据估算工具成本（工具执行缺少真实token数据）")
+                else:
+                    self.logger.debug(f"📊 任务无工具调用，跳过工具成本分析")
             
         except Exception as e:
             self.logger.error(f"工具成本分析失败: {e}")

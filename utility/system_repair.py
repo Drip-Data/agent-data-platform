@@ -140,7 +140,7 @@ class SystemRepair:
         critical_services = {
             "deepsearch": 8086,
             "microsandbox": 8090,
-            "browser_use": 8084,
+            "browser_use": 8082,
             "search_tool": 8080
         }
         

@@ -211,8 +211,33 @@ class GeminiProvider(ILLMProvider):
                     logger.warning(f"text字段不是字符串类型: {type(text_content)}, 尝试转换")
                     text_content = str(text_content)
                 
+                # 🔧 新增：提取usage metadata（token信息）
+                usage_metadata = result.get('usageMetadata', {})
+                usage_info = None
+                if usage_metadata:
+                    usage_info = {
+                        'prompt_tokens': usage_metadata.get('promptTokenCount', 0),
+                        'completion_tokens': usage_metadata.get('candidatesTokenCount', 0),
+                        'total_tokens': usage_metadata.get('totalTokenCount', 0),
+                        'data_source': 'real_api',
+                        'model': model
+                    }
+                    logger.info(f"✅ 获取到真实token使用数据: prompt={usage_info['prompt_tokens']}, completion={usage_info['completion_tokens']}")
+                else:
+                    logger.warning("⚠️ Gemini API响应中没有usageMetadata字段")
+                
                 logger.info(f"✅ Gemini响应解析成功，内容长度: {len(text_content)}")
-                return text_content
+                
+                # 返回新格式：包含content和usage信息
+                return {
+                    'content': text_content,
+                    'usage': usage_info,
+                    'metadata': {
+                        'model': model,
+                        'provider': 'gemini',
+                        'api_response': result  # 保留原始响应用于调试
+                    }
+                }
                 
             except Exception as parse_error:
                 logger.error(f"Gemini响应解析失败: {parse_error}")
@@ -255,9 +280,29 @@ class GeminiProvider(ILLMProvider):
                             if not isinstance(backup_text, str):
                                 backup_text = str(backup_text)
                             
+                            # 备用响应也提取token信息
+                            backup_usage_metadata = result.get('usageMetadata', {})
+                            backup_usage_info = None
+                            if backup_usage_metadata:
+                                backup_usage_info = {
+                                    'prompt_tokens': backup_usage_metadata.get('promptTokenCount', 0),
+                                    'completion_tokens': backup_usage_metadata.get('candidatesTokenCount', 0),
+                                    'total_tokens': backup_usage_metadata.get('totalTokenCount', 0),
+                                    'data_source': 'real_api_backup',
+                                    'model': stable_model
+                                }
+                            
                             await backup_client.aclose()
                             logger.info("✅ 使用备用网络配置成功恢复")
-                            return backup_text
+                            return {
+                                'content': backup_text,
+                                'usage': backup_usage_info,
+                                'metadata': {
+                                    'model': stable_model,
+                                    'provider': 'gemini',
+                                    'backup_recovery': True
+                                }
+                            }
                         else:
                             raise ValueError(f"备用响应格式无效: {list(result.keys()) if isinstance(result, dict) else type(result)}")
                     except Exception as backup_parse_error:
