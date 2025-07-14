@@ -1360,11 +1360,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
             # 🆕 新增：处理 <tool_param> 查询
             if "<tool_param>" in response_text:
-                tool_param_result = await self._handle_tool_param_query(response_text)
-                history.append({"role": "assistant", "content": tool_param_result})
-                full_trajectory.append({"role": "assistant", "content": tool_param_result})
-                self.step_logger.finish_step("tool_param_query_handled")
-                continue
+                # 🔧 增强检查：确保这是真正的tool_param查询，而不是工具调用中包含tool_param字符串
+                tool_param_pattern = r'<tool_param>\s*<tool_id>.*?</tool_id>\s*<action>.*?</action>\s*</tool_param>'
+                if re.search(tool_param_pattern, response_text, re.DOTALL):
+                    logger.info("🔎 检测到真正的tool_param查询")
+                    tool_param_result = await self._handle_tool_param_query(response_text)
+                    history.append({"role": "assistant", "content": tool_param_result})
+                    full_trajectory.append({"role": "assistant", "content": tool_param_result})
+                    self.step_logger.finish_step("tool_param_query_handled")
+                    continue
+                else:
+                    logger.debug("⚠️ 响应中包含'tool_param'但不是有效的参数查询格式，继续正常工具执行")
 
             # 🔧 修复：更智能的答案检测逻辑
             answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
@@ -2858,6 +2864,31 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     parameters=clean_parameters
                 )
                 
+                # 🔧 新增：检测是否错误返回了参数定义而不是执行结果
+                if isinstance(raw_result, dict) and raw_result.get('status') == 'success':
+                    # 检查是否是参数定义格式（包含parameters字段且其值是参数描述）
+                    parameters_field = raw_result.get('parameters', {})
+                    if (isinstance(parameters_field, dict) and 
+                        any(isinstance(v, dict) and 'type' in v and 'description' in v 
+                            for v in parameters_field.values())):
+                        
+                        logger.warning(f"⚠️ 检测到工具执行返回参数定义而不是执行结果，重新执行")
+                        
+                        # 重新构造简单参数格式并重试
+                        simple_params = {
+                            "query" if service_name == "browser_use" else 
+                            "code" if service_name == "microsandbox" else 
+                            "question" if service_name == "deepsearch" else "input": 
+                            tool_input
+                        }
+                        
+                        logger.info(f"🔄 使用简化参数重试: {simple_params}")
+                        raw_result = await self.toolscore_client.execute_tool(
+                            tool_id=service_name,
+                            action=tool_name,
+                            parameters=simple_params
+                        )
+                
                 formatted_result = self._format_tool_output(service_name, tool_name, raw_result)
                 execution_status = "success"
                 error_details = None
@@ -3610,6 +3641,7 @@ LLM API调用遇到未知错误：{error_message}
         🔧 自动注入缺失的<execute_tools />标签
         
         检测工具调用但缺少<execute_tools />的情况，自动添加该标签以确保工具能够执行。
+        针对flash-lite等模型进行了特殊优化。
         
         Args:
             response_text: LLM的原始响应
@@ -3623,20 +3655,28 @@ LLM API调用遇到未知错误：{error_message}
         if '<execute_tools />' in response_text or '<execute_tools></execute_tools>' in response_text:
             return response_text
         
-        # 检测工具调用模式：<service_name><tool_name>...</tool_name></service_name>
+        # 🔧 增强：更准确的工具调用检测模式
         tool_call_patterns = [
+            # 标准格式：<service><tool>content</tool></service>
             r'<(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>\s*<[^>]+>.*?</[^>]+>\s*</(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>',
-            r'<browser>\s*<[^>]+>.*?</[^>]+>\s*</browser>'  # 兼容browser别名
+            # 兼容格式
+            r'<browser>\s*<[^>]+>.*?</[^>]+>\s*</browser>',
+            # 🆕 新增：检测JSON格式的工具调用（flash-lite常用）
+            r'<(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>\s*<[^>]+>\s*\{[^}]*\}\s*</[^>]+>\s*</(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>'
         ]
         
         has_tool_calls = False
+        tool_match = None
+        
         for pattern in tool_call_patterns:
-            if re.search(pattern, response_text, re.DOTALL | re.IGNORECASE):
+            match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
+            if match:
                 has_tool_calls = True
+                tool_match = match
                 break
         
         # 如果检测到工具调用但没有execute_tools标签，自动添加
-        if has_tool_calls:
+        if has_tool_calls and tool_match:
             # 找到最后一个工具调用的结束位置
             last_tool_end = -1
             for pattern in tool_call_patterns:
@@ -3657,7 +3697,10 @@ LLM API调用遇到未知错误：{error_message}
                 
                 injected_response = before + '<execute_tools />' + after
                 
-                logger.info("🔧 自动注入<execute_tools />标签以确保工具执行")
+                # 🔧 增强：记录更详细的注入信息，便于调试
+                model_info = getattr(self.client, 'model', 'unknown')
+                logger.info(f"🔧 为模型 {model_info} 自动注入<execute_tools />标签")
+                logger.debug(f"检测到的工具调用: {tool_match.group(0)[:100]}...")
                 logger.debug(f"注入位置: 字符位置 {last_tool_end}")
                 
                 return injected_response
