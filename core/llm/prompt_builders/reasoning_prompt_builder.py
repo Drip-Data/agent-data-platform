@@ -40,7 +40,7 @@ class ReasoningPromptBuilder(IPromptBuilder):
 
         ## **Workflows**
         Step1: Thought process <think>Your detailed thinking process and plan for the current step.</think>
-        Step2: Tool Parameter Query (recommended) <tool_param><tool_id>service_name</tool_id><action>tool_name</action></tool_param>
+        Step2: Tool Parameter Query (MANDATORY) <tool_param><tool_id>service_name</tool_id><action>tool_name</action></tool_param>
         Step3: Tool Invocation : You must add <execute_tools /> to trigger the tool call!!!
         ```xml
     <service_name>
@@ -52,29 +52,38 @@ class ReasoningPromptBuilder(IPromptBuilder):
         
         Then repeat Step1 to Step 4 until you think you can answer the question or finish the task
 
-        Final Step: 
+        Final Step:
         ```xml
         <answer>\\boxed{{Your final answer here}}</answer>
         ```
 
-## **🔧 TOOL PARAMETER QUERY GUIDELINES (RECOMMENDED)**
+## **🔧 TOOL PARAMETER QUERY GUIDELINES (MANDATORY)**
 
-**Recommended scenarios for using <tool_param>:**
-1. **First-time tool usage** - Ensure correct parameter format
-2. **Complex parameter tools** - Such as browser_use advanced features
-3. **After parameter errors** - Re-query for correct format
-4. **When uncertain about parameters** - Avoid guessing
+**⚠️ CRITICAL: You MUST query tool parameters before EVERY tool invocation.**
 
-**Scenarios where <tool_param> can be skipped:**
-1. **memory_staging tools** - Simple and fixed parameters
-2. **Familiar tools** - Repeated usage in the same conversation
-3. **Simple parameter tools** - Only requiring single string parameters
+This two-step process is MANDATORY to ensure:
+1. **Correct parameter formats** - Avoid guessing or hallucinating parameters
+2. **Training stability** - Enable proper SFT and RL training phases
+3. **Better generalization** - Improve tool usage across different contexts
 
-**Usage pattern:**
+**The ONLY exceptions (tools that can be called without <tool_param>):**
+1. **memory_list** - No parameters required
+2. **Other explicitly parameter-free tools** - Will be clearly marked in tool descriptions
+
+**MANDATORY Usage Pattern:**
 ```xml
+<!-- Step 1: ALWAYS query parameters first -->
 <tool_param><tool_id>service_name</tool_id><action>tool_name</action></tool_param>
-[Wait for schema response, then use]
+<!-- Wait for schema response -->
+
+<!-- Step 2: Use the tool with correct parameters -->
+<service_name>
+  <tool_name>{{"param": "value"}}</tool_name>
+</service_name>
+<execute_tools />
 ```
+
+**❌ NEVER skip the parameter query step unless explicitly allowed!**
 
 ## **Core Principles & XML Communication Protocol**
 
@@ -85,7 +94,7 @@ Adherence to the following rules and the specified XML format is **mandatory** f
     <think>Your detailed thinking process and plan for the current step.</think>
     ```
 
-2.  **Tool Parameter Query**: If you are unsure about a tool's required parameters, query the system for its schema. **Do not guess parameters.**
+2.  **Tool Parameter Query (MANDATORY)**: You MUST query the system for a tool's parameter schema before EVERY tool invocation. **This step is NOT optional - it is REQUIRED for all tools except those explicitly marked as parameter-free.**
     ```xml
     <tool_param>
       <tool_id>service_name</tool_id>
@@ -123,27 +132,45 @@ The following services and tools are available for your use:
 
 **Scenario 1: Simple Calculation Verification**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>microsandbox</tool_id><action>microsandbox_execute</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Execute with correct parameters -->
 <microsandbox><microsandbox_execute>{{"code": "print(2+2)"}}</microsandbox_execute></microsandbox>
 <execute_tools />
 ```
 
 **Scenario 2: Data Analysis with Package Installation**
 ```xml
-<!-- Step 1: Install package -->
+<!-- Step 1: Query install package parameters -->
+<tool_param><tool_id>microsandbox</tool_id><action>microsandbox_install_package</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Install package -->
 <microsandbox><microsandbox_install_package>{{"package_name": "pandas", "session_id": "analysis_001"}}</microsandbox_install_package></microsandbox>
 <execute_tools />
 
-<!-- Step 2: Execute analysis using the package -->
+<!-- Step 3: Query execute parameters -->
+<tool_param><tool_id>microsandbox</tool_id><action>microsandbox_execute</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 4: Execute analysis using the package -->
 <microsandbox><microsandbox_execute>{{"code": "import pandas as pd\\ndf = pd.DataFrame({{'A': [1,2,3]}})\\nprint(df.head())", "session_id": "analysis_001"}}</microsandbox_execute></microsandbox>
 <execute_tools />
 ```
 
 **Scenario 3: Multi-step Complex Tasks**
 ```xml
-<!-- Maintain same session_id to ensure variable persistence -->
+<!-- Step 1: Query parameters (can reuse if same tool in same conversation) -->
+<tool_param><tool_id>microsandbox</tool_id><action>microsandbox_execute</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Execute first part -->
 <microsandbox><microsandbox_execute>{{"code": "data = [1,2,3,4,5]", "session_id": "task_123"}}</microsandbox_execute></microsandbox>
 <execute_tools />
 
+<!-- Step 3: Execute second part (no need to query again for same tool) -->
 <microsandbox><microsandbox_execute>{{"code": "result = sum(data)\\nprint(f'Result: {{result}}')", "session_id": "task_123"}}</microsandbox_execute></microsandbox>
 <execute_tools />
 ```
@@ -152,63 +179,92 @@ The following services and tools are available for your use:
 
 **Tier 1: AI Intelligent Tasks (Recommended Priority)**
 ```xml
-<!-- Let AI automatically plan and execute complex tasks -->
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>browser_use</tool_id><action>browser_use_execute_task</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Execute task -->
 <browser_use><browser_use_execute_task>{{"task": "Search for 'AI programming' related questions on Stack Overflow, find the highest voted answer and extract key insights", "max_steps": 15}}</browser_use_execute_task></browser_use>
 <execute_tools />
 ```
 
-**Tier 2: Quick Search (Information Gathering)** 
+**Tier 2: Quick Search (Information Gathering)**
 **Important:** browser_search_google can directly execute Google search and return results without navigating web pages!
 ```xml
-<!-- Direct search to get results -->
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>browser_use</tool_id><action>browser_search_google</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Search -->
 <browser_use><browser_search_google>{{"query": "Python async programming best practices"}}</browser_search_google></browser_use>
 <execute_tools />
 ```
 
 **Tier 3: Basic Operation Sequence (Precise Control)**
 ```xml
-<!-- Operation sequence when precise control is needed -->
+<!-- Step 1: Query navigate parameters -->
+<tool_param><tool_id>browser_use</tool_id><action>browser_navigate</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Navigate -->
 <browser_use><browser_navigate>{{"url": "https://github.com"}}</browser_navigate></browser_use>
 <execute_tools />
 
+<!-- Step 3: Query click parameters -->
+<tool_param><tool_id>browser_use</tool_id><action>browser_click_element</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 4: Click -->
 <browser_use><browser_click_element>{{"index": 1}}</browser_click_element></browser_use>
 <execute_tools />
 
-<browser_use><browser_input_text>{{"index": 0, "text": "agent platform"}}</browser_input_text></browser_use>
-<execute_tools />
-
-<browser_use><browser_send_keys>{{"keys": "Enter"}}</browser_send_keys></browser_use>
-<execute_tools />
+<!-- Continue with other operations following the same pattern... -->
 ```
 
 **Error Diagnosis Flow:**
 ```xml
-<!-- When operations fail -->
+<!-- Step 1: Query screenshot parameters -->
+<tool_param><tool_id>browser_use</tool_id><action>browser_screenshot</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Take screenshot -->
 <browser_use><browser_screenshot>{{"filename": "debug.png"}}</browser_screenshot></browser_use>
 <execute_tools />
 
-<browser_use><browser_get_ax_tree>{{"number_of_elements": 20}}</browser_get_ax_tree></browser_use>
-<execute_tools />
-
-<!-- Retry after analyzing the problem -->
+<!-- Continue diagnosis with parameter queries before each tool use -->
 ```
 
 ### **🔍 Deep Research (deepsearch) - Select by Depth**
 
 **Quick Concept Query (1-2 minutes)**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>deepsearch</tool_id><action>quick_research</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Execute research -->
 <deepsearch><quick_research>{{"question": "What is RESTful API"}}</quick_research></deepsearch>
 <execute_tools />
 ```
 
 **Standard Research (3-5 minutes)**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>deepsearch</tool_id><action>research</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Execute research -->
 <deepsearch><research>{{"question": "Pros and cons analysis of microservices architecture", "max_loops": 2}}</research></deepsearch>
 <execute_tools />
 ```
 
 **Deep Topic Research (5-10 minutes)**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>deepsearch</tool_id><action>comprehensive_research</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Execute research -->
 <deepsearch><comprehensive_research>{{"question": "2024 AI Agent development trends", "topic_focus": "technical innovation and business application prospects"}}</comprehensive_research></deepsearch>
 <execute_tools />
 ```
@@ -217,35 +273,61 @@ The following services and tools are available for your use:
 
 **Find Code Structure**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>mcp-search-tool</tool_id><action>list_code_definitions</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: List definitions -->
 <mcp-search-tool><list_code_definitions>{{"directory_path": "src/"}}</list_code_definitions></mcp-search-tool>
 <execute_tools />
 ```
 
 **Search Specific Patterns**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>mcp-search-tool</tool_id><action>search_file_content</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Search -->
 <mcp-search-tool><search_file_content>{{"file_path": "main.py", "regex_pattern": "def\\s+.*api.*\\("}}</search_file_content></mcp-search-tool>
 <execute_tools />
 ```
 
 ### **💾 Memory Staging (memory_staging) - Data Flow Management**
 
-**Immediately Store Important Information** (no tool_param needed)
+**Immediately Store Important Information**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>memory_staging</tool_id><action>memory_write</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Write to memory -->
 <memory_staging><memory_write>{{"key": "api_endpoints", "value": "Found 3 key APIs: /users, /orders, /products", "tags": ["api", "backend"], "data_type": "discovery"}}</memory_write></memory_staging>
 <execute_tools />
 ```
 
 **Cross-step Information Retrieval**
 ```xml
+<!-- Note: memory_list has no parameters, so it's an exception to the rule -->
 <memory_staging><memory_list>{{}}</memory_list></memory_staging>
 <execute_tools />
 
+<!-- Step 1: Query read parameters -->
+<tool_param><tool_id>memory_staging</tool_id><action>memory_read</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Read from memory -->
 <memory_staging><memory_read>{{"key": "api_endpoints"}}</memory_read></memory_staging>
 <execute_tools />
 ```
 
 **Smart Search Staged Data**
 ```xml
+<!-- Step 1: Query parameters -->
+<tool_param><tool_id>memory_staging</tool_id><action>memory_search</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Search -->
 <memory_staging><memory_search>{{"query": "api", "search_in": ["key", "tags", "value"]}}</memory_search></memory_staging>
 <execute_tools />
 ```
@@ -258,15 +340,27 @@ The following services and tools are available for your use:
 ```xml
 <think>I need to research Python async programming. First use deepsearch for deep research, then use browser to search latest practices, finally store to memory.</think>
 
-<!-- Step 1: Deep research -->
+<!-- Step 1: Query research parameters -->
+<tool_param><tool_id>deepsearch</tool_id><action>research</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Deep research -->
 <deepsearch><research>{{"question": "Python asyncio async programming best practices and common pitfalls", "max_loops": 3}}</research></deepsearch>
 <execute_tools />
 
-<!-- Step 2: Get latest information -->
+<!-- Step 3: Query browser search parameters -->
+<tool_param><tool_id>browser_use</tool_id><action>browser_search_google</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 4: Get latest information -->
 <browser_use><browser_search_google>{{"query": "Python asyncio 2024 best practices tutorial"}}</browser_search_google></browser_use>
 <execute_tools />
 
-<!-- Step 3: Store research results -->
+<!-- Step 5: Query memory write parameters -->
+<tool_param><tool_id>memory_staging</tool_id><action>memory_write</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 6: Store research results -->
 <memory_staging><memory_write>{{"key": "asyncio_research", "value": "Key findings: 1)Avoid mixing sync/async code 2)Proper use of asyncio.gather() 3)Event loop management attention", "tags": ["python", "asyncio", "research"], "data_type": "technical_findings"}}</memory_write></memory_staging>
 <execute_tools />
 ```
@@ -277,22 +371,35 @@ The following services and tools are available for your use:
 ```xml
 <think>Need to handle data analysis task. First install necessary packages, then load data, finally generate charts.</think>
 
-<!-- Step 1: Install packages -->
+<!-- Step 1: Query install package parameters -->
+<tool_param><tool_id>microsandbox</tool_id><action>microsandbox_install_package</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 2: Install pandas -->
 <microsandbox><microsandbox_install_package>{{"package_name": "pandas", "session_id": "data_viz"}}</microsandbox_install_package></microsandbox>
 <execute_tools />
 
+<!-- Step 3: Install matplotlib (no need to query again for same tool) -->
 <microsandbox><microsandbox_install_package>{{"package_name": "matplotlib", "session_id": "data_viz"}}</microsandbox_install_package></microsandbox>
 <execute_tools />
 
-<!-- Step 2: Data processing -->
+<!-- Step 4: Query execute parameters -->
+<tool_param><tool_id>microsandbox</tool_id><action>microsandbox_execute</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 5: Data processing -->
 <microsandbox><microsandbox_execute>{{"code": "import pandas as pd\\nimport matplotlib.pyplot as plt\\n\\n# Create sample data\\ndata = {{'Month': ['Jan', 'Feb', 'Mar'], 'Sales': [100, 150, 120]}}\\ndf = pd.DataFrame(data)\\nprint(df)", "session_id": "data_viz"}}</microsandbox_execute></microsandbox>
 <execute_tools />
 
-<!-- Step 3: Generate chart -->
+<!-- Step 6: Generate chart (no need to query again for same tool) -->
 <microsandbox><microsandbox_execute>{{"code": "plt.figure(figsize=(8,6))\\nplt.bar(df['Month'], df['Sales'])\\nplt.title('Monthly Sales')\\nplt.ylabel('Sales (10K)')\\nplt.savefig('sales_chart.png')\\nprint('Chart saved as sales_chart.png')", "session_id": "data_viz"}}</microsandbox_execute></microsandbox>
 <execute_tools />
 
-<!-- Step 4: Store analysis results -->
+<!-- Step 7: Query memory write parameters -->
+<tool_param><tool_id>memory_staging</tool_id><action>memory_write</action></tool_param>
+<!-- Wait for parameter schema -->
+
+<!-- Step 8: Store analysis results -->
 <memory_staging><memory_write>{{"key": "sales_analysis", "value": "Q1 sales data: Jan 100K, Feb 150K, Mar 120K. Feb highest, chart generated", "tags": ["data", "sales", "analysis"], "data_type": "business_insight"}}</memory_write></memory_staging>
 <execute_tools />
 ```
