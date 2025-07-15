@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import sys
 import threading
 import subprocess
 from typing import Dict, Optional, List, Any # 导入Any
@@ -359,7 +360,10 @@ async def _start_server(server_name: str):
         if start_script.endswith('.sh'):
             cmd = ['sh', start_script] # start_script is now absolute
         else:
-            # 对于Python脚本，使用模块格式运行
+            # 对于Python脚本，使用模块格式运行，并确保使用当前虚拟环境的python解释器
+            python_executable = sys.executable  # 获取当前运行的Python解释器路径
+            logger.info(f"[MCP启动器] 将使用Python解释器: {python_executable}")
+            
             relative_script_path = os.path.relpath(start_script, project_root_for_pythonpath)
             module_path_parts = list(os.path.splitext(relative_script_path)[0].split(os.sep))
             module_str = ".".join(module_path_parts)
@@ -388,7 +392,7 @@ async def _start_server(server_name: str):
             if port:
                 env[f"{server_name.upper()}_PORT"] = str(port)
 
-            cmd = ['python3', '-m', module_str]
+            cmd = [python_executable, '-m', module_str]
             env['PYTHONPATH'] = project_root_for_pythonpath + os.pathsep + env.get('PYTHONPATH', '')
             
             # 处理端口分配逻辑

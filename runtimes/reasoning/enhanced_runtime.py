@@ -636,7 +636,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         # 3. Browser Use - 格式化浏览器操作结果
         elif service_name == 'browser_use':
             if isinstance(output, dict):
-                return self._format_browser_use_output(output)
+                return self._format_browser_use_output(tool_name, output)
             return str(output)
         
         # 4. Search Tool - 格式化搜索结果
@@ -782,7 +782,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             logger.warning(f"Failed to format DeepSearch list output: {e}")
             return f"DeepSearch搜索完成，找到 {len(output)} 个结果"
     
-    def _format_browser_use_output(self, output: dict) -> str:
+    def _format_browser_use_output(self, tool_name: str, output: dict) -> str:
         """🔧 完整修复：格式化Browser Use操作结果，确保搜索结果不丢失"""
         try:
             # 🔧 修复：正确提取browser-use的响应结构
@@ -792,6 +792,22 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             
             # 提取关键信息 - 修正字段路径
             status = output.get('success', result_data.get('success', True))
+            
+            # 🆕 增强：检查浏览器工具失败的具体原因
+            if not status:
+                error_msg = (result_data.get('error') or 
+                           output_data.get('error') or 
+                           output_data.get('stderr') or 
+                           '未知错误')
+                logger.warning(f"🌐 浏览器工具失败 ({tool_name}): {error_msg}")
+                
+                # 检查是否是Chrome沙盒问题
+                if 'sandbox' in str(error_msg).lower() or 'chrome' in str(error_msg).lower():
+                    logger.warning("🔧 检测到Chrome沙盒问题，建议检查AppArmor配置")
+                elif 'timeout' in str(error_msg).lower():
+                    logger.warning("⏰ 浏览器操作超时")
+                elif 'connection' in str(error_msg).lower():
+                    logger.warning("🔌 浏览器连接错误")
             
             # 🔧 修复：从result和output中提取内容
             content = result_data.get('content', output_data.get('content', ''))
@@ -811,7 +827,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             
             # 状态信息
             status_text = "成功" if status else "失败"
-            formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['BROWSER_ACTION']}: {action} - {status_text}")
+            formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['BROWSER_ACTION']}: {tool_name} - {status_text}")
             
             # 搜索查询信息
             if query:
@@ -1260,7 +1276,33 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     elif "TimeoutError" in error_type or "timeout" in str(e).lower():
                         logger.warning("⏰ 检测到超时错误")
                     elif "HTTPStatusError" in error_type:
-                        logger.warning(f"🌐 检测到HTTP状态错误: {getattr(e, 'response', {}).get('status_code', 'unknown')}")
+                        response = getattr(e, 'response', None)
+                        if response and hasattr(response, 'status_code'):
+                            status_code = response.status_code
+                            logger.warning(f"🌐 检测到HTTP状态错误: {status_code}")
+                            
+                            # 针对特定状态码的处理
+                            if status_code == 429:
+                                logger.warning("🚫 API调用频率过高，触发限流")
+                                # 对429错误使用更长的等待时间
+                                wait_time = wait_time * 2
+                                logger.info(f"🔄 由于429错误，延长等待时间至 {wait_time} 秒")
+                            elif status_code == 503:
+                                logger.warning("🔧 服务暂时不可用")
+                            elif status_code >= 500:
+                                logger.warning("🔥 服务器内部错误")
+                            elif status_code == 401:
+                                logger.error("🔐 API认证失败，请检查API密钥")
+                            elif status_code == 403:
+                                logger.error("🚫 API访问被拒绝，请检查权限")
+                        else:
+                            logger.warning(f"🌐 检测到HTTP状态错误: unknown")
+                    elif "ConnectionError" in error_type or "ConnectTimeout" in error_type:
+                        logger.warning("🔌 网络连接错误")
+                    elif "ReadTimeout" in error_type:
+                        logger.warning("📖 读取超时")
+                    else:
+                        logger.warning(f"❓ 未知错误类型: {error_type}")
                     
                     if attempt < 2:  # 不是最后一次尝试
                         logger.info(f"🔄 {wait_time}秒后进行第 {attempt + 2} 次重试...")

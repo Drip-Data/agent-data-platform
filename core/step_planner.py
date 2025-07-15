@@ -85,7 +85,7 @@ class StepPlanner:
     """
     
     def __init__(self, llm_client, memory_manager: MemoryManager = None, 
-                 default_max_steps: int = 10):
+                 default_max_steps: int = 25):
         """
         初始化步骤规划器
         

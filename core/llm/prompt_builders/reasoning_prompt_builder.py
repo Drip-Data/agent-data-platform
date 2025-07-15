@@ -118,6 +118,11 @@ Adherence to the following rules and the specified XML format is **mandatory** f
     <answer>\\boxed{{Your final answer here}}</answer>
     ```
 
+## **Output Formatting Rules (MANDATORY)**
+
+1.  **Strict Answer Formatting**: The `<answer>\boxed{...}</answer>` tag is reserved exclusively for the final, definitive answer to the user's request. Do NOT use this tag for explanations, acknowledgements, or any intermediate thoughts. If you cannot provide a definitive answer, explain the issue in the `<think>` tag without using the `<answer>` tag.
+2.  **No Prompt Repetition**: Your response must not repeat, quote, or paraphrase any part of the system prompt or these instructions. Focus solely on executing the task.
+
 ---
 ## **Available Services**
 

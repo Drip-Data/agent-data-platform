@@ -3,18 +3,58 @@
 🚀 **智能代理数据平台** - 基于MCP协议的企业级AI任务执行与学习框架，现已集成**MicroSandbox安全执行环境**、**持久化记忆管理**和**多步推理能力**
 
 ---
-## 📖 快速启动命令
-#启动服务
-cd agent-data-platform
-python3 main.py
 
-#注入任务
+## 🚀 Installation & Setup
+
+Get up and running with a single script. This is the recommended method for setting up the entire environment, including system-level dependencies like Redis.
+
+### 1. Clone the Repository
+```bash
+git clone <your-repo-url>
 cd agent-data-platform
-python3 scripts/batch_test_tasks.py --tasks-file tasks.jsonl
+```
+
+### 2. Run the Universal Installer
+This script will automatically:
+- Detect your Linux distribution (Debian/Ubuntu, Fedora/RHEL).
+- Install `redis-server`.
+- Create a Python virtual environment (`venv`).
+- Install all required Python packages.
+
+```bash
+bash scripts/install_dependencies.sh
+```
+
+### 3. Configure Environment Variables
+Create a `.env` file for your API keys.
+```bash
+cp .env.example .env
+```
+Now, edit the `.env` file and add your `GEMINI_API_KEY`.
+```
+# .env
+GEMINI_API_KEY=your_gemini_api_key_here
+OPENAI_API_KEY=your_optional_openai_key
+```
+
+### 4. Start the Services
+You need to ensure the Redis server is running before starting the platform.
+
+```bash
+# Start the Redis server (the installer script installs this for you)
+sudo systemctl start redis-server
+
+# Start the Agent Data Platform
+# The script will automatically use the python from your virtual environment
+venv/bin/python3 main.py
+```
+The platform is now running!
+
+---
 
 ## 📖 项目概述
 
-**Agent Data Platform** 是一个先进的智能代理系统，专为**自动化AI任务执行**、**轨迹学习**和**大规模数据处理**而设计。该平台采用**模块化微服务架构**，结合**大语言模型推理能力**和**可扩展工具生态**，为复杂任务的智能化处理和持续学习提供完整解决方案。
+**Agent Data Platform** 是一个先进的智能代理系统，专为**自动化AI任务执行**、**轨迹学习**和**大规模数据处理**而设计。该平台采用**��块化微服务架构**，结合**大语言模型推理能力**和**可扩展工具生态**，为复杂任务的智能化处理和持续学习提供完整解决方案。
 
 ### 🎯 核心价值
 
@@ -28,6 +68,10 @@ python3 scripts/batch_test_tasks.py --tasks-file tasks.jsonl
 - **📊 全链路追踪**: 完整的任务执行轨迹记录和分析
 - **🌐 标准化接口**: RESTful API和WebSocket支持
 - **🔄 自进化数据飞轮**: 实时轨迹监控 → 智能任务合成 → 质量验证 → 任务池扩充
+
+---
+*The rest of the README file continues below, with detailed explanations of the architecture, features, and manual setup steps for reference.*
+
 
 ### 🏗️ 核心架构
 

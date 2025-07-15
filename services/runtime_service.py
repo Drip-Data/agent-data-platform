@@ -14,14 +14,14 @@ runtime_tasks = []
 
 from core.unified_tool_manager import UnifiedToolManager
 
-def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, tool_manager: UnifiedToolManager = None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, trajectory_storage_mode: str = "daily_grouped"):
+def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=None, toolscore_client=None, tool_manager: UnifiedToolManager = None, toolscore_websocket_endpoint: Optional[str] = None, redis_manager=None, trajectory_storage_mode: str = "daily_grouped", num_workers: int = 1):
     """初始化推理运行时服务"""
     global runtime_instances, runtime_tasks
     
     if config is None:
         config = {}
     
-    logger.info("正在初始化推理运行时服务...")
+    logger.info(f"正在初始化推理运行时服务，计划启动 {num_workers} 个工作进程...")
     
     # 如果没有传入依赖，尝试从全局或者延迟到运行时创建
     if not all([config_manager, llm_client, toolscore_client, tool_manager]):
@@ -32,11 +32,8 @@ def initialize(config: Optional[Dict] = None, config_manager=None, llm_client=No
     runtime_instances = []
     runtime_tasks = []
     
-    # 从环境变量中获取运行时实例数量
-    instance_count = int(os.getenv('RUNTIME_INSTANCES', 1))
-    
-    # 创建指定数量的运行时实例 (默认启用XML streaming模式)
-    for i in range(instance_count):
+    # 创建指定数量的运行时实例
+    for i in range(num_workers):
         instance_name = f"enhanced-runtime-{i+1}"
         logger.info(f"创建增强运行时实例: {instance_name} (存储模式: {trajectory_storage_mode})")
         # 创建运行时实例并传入依赖，默认启用XML streaming模式

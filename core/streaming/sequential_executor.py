@@ -39,7 +39,7 @@ class SequentialStreamingExecutor:
     
     async def execute_streaming_task(self, initial_response: str, 
                                    task_description: str = "",
-                                   max_steps: int = 10,
+                                   max_steps: int = 25,
                                    timeout_per_step: int = 300,
                                    total_timeout: int = 1800,
                                    session_id: Optional[str] = None) -> Dict[str, Any]:

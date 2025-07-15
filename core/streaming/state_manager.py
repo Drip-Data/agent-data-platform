@@ -30,7 +30,7 @@ class ExecutionContext:
     task_description: str
     initial_response: str
     current_response: str
-    max_steps: int = 10
+    max_steps: int = 25
     timeout_per_step: int = 300  # 5 minutes per step
     total_timeout: int = 1800    # 30 minutes total
     session_id: str = ""  # 会话ID

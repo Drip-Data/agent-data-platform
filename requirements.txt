@@ -40,3 +40,4 @@ google-genai>=0.8.0
 # Removed: Guardrails AI dependencies (not needed for simple runtime)
 # guardrails-ai>=0.4.0
 # validators>=0.20.0
+PyJWT>=2.8.0

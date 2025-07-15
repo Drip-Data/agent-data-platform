@@ -158,32 +158,47 @@ from core.utils.path_utils import ensure_output_structure
 import subprocess
 
 def cleanup_ports():
-    """增强的端口和进程清理功能"""
-    # 扩展端口列表，包含所有可能的MCP服务器端口
+    """增强的端口和进程清理功能，可安全地清理旧进程而不会自我终止。"""
+    current_pid = os.getpid()
+    print(f"🧹 开始增强端口清理... (当前进程PID: {current_pid})")
+
+    # 定义要清理的进程模式
+    process_patterns = [
+        'main.py', 
+        'mcp_servers', 
+        'microsandbox_server', 
+        'browser_use_server', 
+        'search_tool_server', 
+        'deepsearch_server'
+    ]
+    
+    print("🔍 搜索并清理相关的旧Python进程...")
+    for pattern in process_patterns:
+        try:
+            # 使用pgrep查找所有匹配的进程ID
+            result = subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True)
+            if result.returncode == 0:
+                pids_to_kill = [pid for pid in result.stdout.strip().split('\n') if pid and int(pid) != current_pid]
+                
+                if pids_to_kill:
+                    print(f"  - 发现与 '{pattern}' 相关的旧进程: {', '.join(pids_to_kill)}. 正在终止...")
+                    # 杀死过滤后的进程
+                    subprocess.run(['kill', '-9'] + pids_to_kill, check=False)
+                else:
+                    print(f"  - 未发现与 '{pattern}' 相关的旧进程。")
+            else:
+                print(f"  - 未发现与 '{pattern}' 相关的进程。")
+        except Exception as e:
+            print(f"⚠️ 清理模式 '{pattern}' 时出错: {e}")
+    
+    print("✅ 进程清理完成。")
+
+    # 端口清理部分保持不变
     ports = [8088, 8089, 8090, 8091, 8092, 5555, 8081, 8082, 8080, 8084, 8085, 8086, 8087, 8000]
-    
-    print("🧹 开始增强端口清理...")
-    
-    # 首先清理所有相关的Python进程
-    try:
-        print("🔍 搜索并清理相关Python进程...")
-        # 清理可能的main.py进程
-        subprocess.run(['pkill', '-f', 'main.py'], timeout=5, check=False)
-        # 清理MCP服务器进程
-        subprocess.run(['pkill', '-f', 'mcp_servers'], timeout=5, check=False)
-        subprocess.run(['pkill', '-f', 'microsandbox_server'], timeout=3, check=False)
-        subprocess.run(['pkill', '-f', 'browser_use_server'], timeout=3, check=False)
-        subprocess.run(['pkill', '-f', 'search_tool_server'], timeout=3, check=False)
-        subprocess.run(['pkill', '-f', 'deepsearch_server'], timeout=3, check=False)
-        print("✅ 进程清理完成")
-    except Exception as e:
-        print(f"⚠️ 进程清理时出错: {e}")
-    
-    # 等待进程清理完成
+    print("🧹 开始清理网络端口...")
     import time
-    time.sleep(2)
-    
-    # 然后清理端口
+    time.sleep(1) # 等待进程终止
+
     for port in ports:
         try:
             result = subprocess.run(
@@ -194,18 +209,19 @@ def cleanup_ports():
             if result.returncode == 0 and result.stdout.strip():
                 pids = result.stdout.strip().split('\n')
                 for pid in pids:
-                    try:
-                        subprocess.run(['kill', '-9', pid], timeout=3, check=False)
-                        print(f"🔥 强制清理端口 {port} 的进程 {pid}")
-                    except Exception as e:
-                        print(f"⚠️ 清理进程 {pid} 失败: {e}")
+                    # 再次确认不会杀死自己
+                    if pid and int(pid) != current_pid:
+                        try:
+                            subprocess.run(['kill', '-9', pid], timeout=3, check=False)
+                            print(f"🔥 强制清理端口 {port} 的进程 {pid}")
+                        except Exception as e:
+                            print(f"⚠️ 清理进程 {pid} 失败: {e}")
             else:
                 print(f"✅ 端口 {port} 空闲")
                 
         except Exception as e:
             print(f"⚠️ 检查端口 {port} 时出错: {e}")
     
-    # 最后再次等待确保清理完成
     time.sleep(1)
     print("✅ 增强端口清理完成")
 
@@ -235,6 +251,12 @@ logger = logging.getLogger(__name__)
 
 def parse_arguments():
     """解析命令行参数"""
+    # 获取CPU核心数作为默认工作进程数
+    try:
+        default_workers = os.cpu_count() or 1
+    except NotImplementedError:
+        default_workers = 1
+        
     parser = argparse.ArgumentParser(description="Agent Data Platform")
     parser.add_argument('--config-dir', type=str, default="config", help='配置文件目录路径')
     parser.add_argument('--debug', action='store_true', help='启用调试模式')
@@ -246,6 +268,8 @@ def parse_arguments():
                        help='轨迹存储模式：individual(单独文件), daily_grouped(按日分组), weekly_grouped(按周分组), monthly_grouped(按月分组)')
     parser.add_argument('--enable-synthesis', action='store_true', default=False, 
                        help='启用TaskCraft轨迹自动监控和任务合成功能（默认关闭）')
+    parser.add_argument('--num-workers', type=int, default=default_workers, 
+                       help=f'启动的并行任务处理工作进程数量 (默认: {default_workers})')
     return parser.parse_args()
 
 def setup_signal_handlers(service_manager):
@@ -656,7 +680,8 @@ async def main_async():
             unified_tool_manager,
             toolscore_websocket_endpoint,
             redis_manager,
-            args.trajectory_storage
+            args.trajectory_storage,
+            num_workers=args.num_workers  # 传递工作进程数量
         ),
         start_fn=runtime_service.start,
         stop_fn=runtime_service.stop,
@@ -671,7 +696,7 @@ async def main_async():
         llm_config = config_manager.get_llm_config()
         synthesis_config = {
             'redis_url': redis_url,
-            'TRAJECTORIES_DIR': 'output/trajectories',
+            'TRAJECTORIES_DIR': str(project_root / 'output' / 'trajectories'),
             **llm_config  # 合并LLM配置
         }
         
@@ -720,10 +745,10 @@ async def main_async():
 
 def main():
     # 设置统一日志捕获
-    unified_log_path = os.path.join('logs', 'System.log')
+    unified_log_path = str(project_root / 'logs' / 'System.log')
     
     # 在开始时写入分隔符
-    os.makedirs('logs', exist_ok=True)
+    # The log directory is created at the top level of the script.
     with open(unified_log_path, 'a', encoding='utf-8') as f:
         f.write(f"\n{'='*80}\n")
         f.write(f"[系统启动] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
