@@ -112,7 +112,8 @@ class MCPAutoRegistration:
         # 从文件系统发现
         if self.mcp_servers_dir.exists():
             for server_dir in self.mcp_servers_dir.iterdir():
-                if server_dir.is_dir():
+                # 🔧 修复：忽略__pycache__和隐藏目录
+                if server_dir.is_dir() and not server_dir.name.startswith('__') and not server_dir.name.startswith('.'):
                     server_info = await self._parse_server_config(server_dir)
                     if server_info:
                         discovered_servers.append(server_info)

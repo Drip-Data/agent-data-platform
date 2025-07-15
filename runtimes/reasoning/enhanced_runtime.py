@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -29,6 +30,7 @@ from core.xml_parser_enhanced import EnhancedXMLParser
 from core.context_flow_manager import ContextFlowManager
 from core.smart_query_optimizer import SmartQueryOptimizer
 from core.tool_result_enhancer import ToolResultEnhancer
+from core.utils.json_parameter_parser import JSONParameterParser
 
 
 logger = logging.getLogger(__name__)
@@ -104,6 +106,10 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         except Exception as e:
             logger.warning(f"⚠️ Token管理器初始化失败: {e}")
             self.token_manager = None
+        
+        # 🔧 初始化JSON参数解析器
+        self.json_parameter_parser = JSONParameterParser(tool_manager=self.tool_manager)
+        logger.info("✅ JSON参数解析器初始化成功")
         
         self.mcp_servers = self._load_mcp_config("config/mcp_servers.json")
     
@@ -509,17 +515,22 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 logger.warning(f"⚠️ 查询优化失败，使用原始查询: {e}")
                 optimized_input = tool_input
 
-        # 映射服务到其期望的主要参数名
-        param_mapping = {
-            "browser_use": "query",
-            "microsandbox": "code",
-            "deepsearch": "question"
-        }
-        # 默认参数名为 'input'
-        param_name = param_mapping.get(service_name, "input")
-        parameters = {param_name: optimized_input}
+        # 🔧 P1 核心修复：使用JSON参数解析器
+        parser = JSONParameterParser(self.tool_manager)
+        parse_result = parser.parse_tool_parameters(service_name, tool_name, optimized_input)
 
-        logger.info(f"Executing via toolscore_client: service='{service_name}', tool='{tool_name}', params='{param_name}'")
+        if not parse_result.is_valid:
+            # 如果解析或验证失败，返回错误信息
+            error_message = f"Tool execution failed: Invalid parameters for {service_name}/{tool_name}. "
+            error_message += "; ".join(parse_result.errors)
+            if parse_result.suggestions:
+                error_message += f" Suggestions: {'; '.join(parse_result.suggestions)}"
+            return error_message
+
+        parameters = parse_result.parsed_params
+        param_name = next(iter(parameters)) if parameters else '' # For logging
+
+        logger.info(f"🔧 执行工具: service='{service_name}', tool='{tool_name}', param_name='{param_name}', input_length={len(str(optimized_input))}")
 
         try:
             result = await self.toolscore_client.execute_tool(
@@ -608,13 +619,19 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         if service_name == 'microsandbox':
             return self._format_microsandbox_output(output)
         
-        # 2. DeepSearch - 格式化搜索结果
+        # 2. DeepSearch - 显示完整原始JSON结果
         elif service_name == 'deepsearch':
-            if isinstance(output, dict):
-                return self._format_deepsearch_output(output)
-            elif isinstance(output, list):
-                return self._format_deepsearch_list_output(output)
-            return str(output)
+            import json
+            try:
+                if isinstance(output, dict):
+                    return json.dumps(output, ensure_ascii=False, indent=2)
+                elif isinstance(output, list):
+                    return json.dumps(output, ensure_ascii=False, indent=2)
+                else:
+                    return str(output)
+            except Exception as e:
+                logger.warning(f"Failed to format DeepSearch output: {e}")
+                return str(output)
         
         # 3. Browser Use - 格式化浏览器操作结果
         elif service_name == 'browser_use':
@@ -769,23 +786,26 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         """🔧 完整修复：格式化Browser Use操作结果，确保搜索结果不丢失"""
         try:
             # 🔧 修复：正确提取browser-use的响应结构
-            # browser-use返回: {result: {success: true, data: {content: "...", ...}}}
+            # 实际结构: {success: True, result: {...}, output: {...}, processing_time_ms: ...}
             result_data = output.get('result', {})
-            data_content = result_data.get('data', {}) if isinstance(result_data, dict) else {}
+            output_data = output.get('output', {})
             
-            # 提取关键信息 - 正确的字段路径
-            action = output.get('action', data_content.get('operation', TaskExecutionConstants.TOOL_FORMAT_PREFIXES['BROWSER_ACTION']))
-            status = result_data.get('success', output.get('success', True))
+            # 提取关键信息 - 修正字段路径
+            status = output.get('success', result_data.get('success', True))
             
-            # 🔧 关键修复：browser-use搜索内容在data.content中，不是extracted_content
-            content = data_content.get('content', output.get('content', output.get('data', output.get('text', ''))))
+            # 🔧 修复：从result和output中提取内容
+            content = result_data.get('content', output_data.get('content', ''))
             
-            url = data_content.get('current_url', output.get('url', output.get('current_url', '')))
-            error = result_data.get('error_message', output.get('error', output.get('error_message', '')))
+            # 🔧 修复：提取搜索相关信息
+            url = result_data.get('url', output_data.get('url', ''))
+            query = result_data.get('query', output_data.get('query', ''))
+            error = result_data.get('error', output_data.get('error', ''))
             
-            # 🔧 新增：专门处理搜索结果 - 检查多个可能的字段
-            search_results = data_content.get('search_results', data_content.get('results', output.get('search_results', output.get('results', []))))
-            query = data_content.get('query', output.get('query', output.get('search_query', '')))
+            # 🔧 关键修复：检查所有可能的搜索结果字段
+            search_results = (result_data.get('search_results') or 
+                            result_data.get('results') or
+                            output_data.get('search_results') or 
+                            output_data.get('results') or [])
             
             formatted_lines = []
             
@@ -827,12 +847,18 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     else:
                         formatted_lines.append(f"{i}. {str(result)[:100]}...")
             
-            # 处理普通内容信息
-            elif content:
+            # 🔧 增强：处理包含搜索结果的content字段
+            elif content and isinstance(content, str):
                 max_content = TaskExecutionConstants.TOOL_RESULT_LIMITS['MAX_CONTENT_LENGTH']
+                
+                # 检查content是否包含Google搜索结果格式
+                if "Google搜索结果" in content or "找到" in content and "个相关结果" in content:
+                    # 截取合理长度的搜索结果内容
+                    truncated_content = content[:max_content]
+                    formatted_lines.append(f"搜索内容摘要: {truncated_content}...")
+                    
                 # 如果内容是HTML，尝试提取文本
-                if isinstance(content, str) and ('<html>' in content.lower() or '<div>' in content.lower()):
-                    # 简单的HTML文本提取
+                elif '<html>' in content.lower() or '<div>' in content.lower():
                     import re
                     text_content = re.sub(r'<[^>]+>', '', content)
                     text_content = re.sub(r'\s+', ' ', text_content).strip()
@@ -841,15 +867,25 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 else:
                     formatted_lines.append(f"{TaskExecutionConstants.TOOL_FORMAT_PREFIXES['OPERATION_RESULT']}: {str(content)[:max_content]}...")
             
-            # 🔧 增强：如果没有有用内容，提供更详细的调试信息
+            # 🔧 增强：确保总是有内容输出，避免触发原始数据后备逻辑
             result_text = '\n'.join(formatted_lines).strip()
             if not result_text or len(result_text) < 20:
-                # 如果格式化结果太短，说明可能有问题，提供原始数据的摘要
+                # 🔧 修复：提供简洁的后备输出，避免大量重复数据
                 logger.warning(f"Browser Use output seems incomplete. Raw keys: {list(output.keys())}")
-                if output:
-                    return f"浏览器操作执行，返回数据字段: {', '.join(output.keys())}\n原始数据: {str(output)[:300]}..."
-                else:
-                    return "浏览器操作执行完成，但未返回数据"
+                
+                # 尝试从output中提取基本信息
+                success_status = "成功" if status else "失败"
+                basic_info = f"浏览器操作执行 - {success_status}"
+                
+                if query:
+                    basic_info += f"\n查询: {query}"
+                if url:
+                    basic_info += f"\nURL: {url}"
+                if error:
+                    basic_info += f"\n错误: {error}"
+                
+                # 🔧 关键修复：避免输出大量原始数据，只输出摘要
+                return basic_info + "\n(详细结果处理中...)"
             
             return result_text
             
@@ -896,49 +932,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             return f"文件搜索完成，找到 {count} 个结果"
     
     def _format_microsandbox_output(self, output) -> str:
-        """🔧 专用MicroSandbox结果格式化 - 提取核心执行内容"""
+        """🔧 修改：显示MicroSandbox的完整原始JSON结果"""
+        import json
         try:
+            # 直接返回完整的原始JSON结构，不进行任何简化
             if isinstance(output, dict):
-                # 优先提取stdout（主要输出）
-                if 'stdout' in output:
-                    stdout_content = str(output['stdout']).strip()
-                    if stdout_content:
-                        return stdout_content
-                
-                # 如果没有stdout，检查嵌套结构
-                if 'result' in output and isinstance(output['result'], dict):
-                    nested_result = output['result']
-                    if 'stdout' in nested_result:
-                        stdout_content = str(nested_result['stdout']).strip()
-                        if stdout_content:
-                            return stdout_content
-                
-                # 检查stderr错误信息
-                stderr_content = ""
-                if 'stderr' in output:
-                    stderr_content = str(output['stderr']).strip()
-                elif 'result' in output and isinstance(output['result'], dict) and 'stderr' in output['result']:
-                    stderr_content = str(output['result']['stderr']).strip()
-                
-                if stderr_content:
-                    return f"执行错误: {stderr_content}"
-                
-                # 检查返回代码
-                return_code = output.get('return_code') or (output.get('result', {}).get('return_code') if isinstance(output.get('result'), dict) else None)
-                if return_code == 0:
-                    return "代码执行成功，但无输出内容"
-                elif return_code is not None:
-                    return f"代码执行失败，返回代码: {return_code}"
-            
-            # 其他情况返回简化的字符串
-            output_str = str(output).strip()
-            if len(output_str) > 200:
-                return f"执行完成: {output_str[:200]}..."
-            return output_str if output_str else "代码执行完成"
-            
+                return json.dumps(output, ensure_ascii=False, indent=2)
+            else:
+                return str(output)
         except Exception as e:
             logger.warning(f"Failed to format MicroSandbox output: {e}")
-            return f"代码执行完成: {str(output)[:100]}..."
+            return str(output)
     
     def _format_generic_output(self, output) -> str:
         """通用工具输出格式化"""
@@ -1213,7 +1217,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 try:
                     optimized_history, optimization_info = await self.token_manager.optimize_messages_with_cache(
                         history, 
-                        model=getattr(self.client, 'model', 'gemini-2.5-flash'),
+                        model=self.client.get_default_model() if hasattr(self.client, 'get_default_model') else getattr(self.client, 'model', 'gemini-2.5-flash'),
                         session_id=getattr(task, 'session_id', task.task_id)
                     )
                     if optimization_info.get('tokens_saved', 0) > 0:
@@ -1224,7 +1228,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     optimized_history = history
             
             # 2. 🔧 调用LLM，带完整异常处理和重试机制
-            stop_sequences = ["<execute_tools />", "<execute_tools></execute_tools>", "</answer>"]
+            # 🔧 修复：在execute_tools标签之后停止，而不是在标签本身停止
+            stop_sequences = ["\n<execute_tools />", "\n<execute_tools></execute_tools>", "</answer>"]
             llm_start_time = time.time()
             response_text = None
             llm_error = None
@@ -1234,7 +1239,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             for attempt in range(3):  # 最多重试3次
                 try:
                     logger.debug(f"🔄 LLM API调用尝试 {attempt + 1}/3")
-                    response_text = await self.client._call_api(optimized_history, stop_sequences=stop_sequences)
+                    response_data = await self.client._call_api(optimized_history, stop_sequences=stop_sequences)
+                    response_text = response_data.get('content', '') if isinstance(response_data, dict) else response_data
                     llm_end_time = time.time()
                     
                     logger.info(f"✅ LLM API调用成功 (尝试 {attempt + 1})")
@@ -1262,19 +1268,34 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     else:
                         logger.error("❌ 所有LLM API调用尝试都失败了")
             
-            # 3. 🆕 Token使用统计和记录（无论成功失败都尝试）
+            # 3. 🆕 Token使用统计和记录（优先使用真实API数据）
             if response_text and self.token_manager:
                 try:
-                    # 计算实际token使用
-                    prompt_text = " ".join([msg.get('content', '') for msg in optimized_history if isinstance(msg, dict)])
-                    prompt_tokens = await self.token_manager.count_tokens_accurately(prompt_text)
-                    completion_tokens = await self.token_manager.count_tokens_accurately(response_text)
+                    # 🔧 优先使用真实API返回的token数据
+                    real_usage = response_data.get('usage') if isinstance(response_data, dict) else None
+                    
+                    if real_usage and real_usage.get('data_source') == 'real_api':
+                        # 使用真实API token数据
+                        prompt_tokens = real_usage['prompt_tokens']
+                        completion_tokens = real_usage['completion_tokens']
+                        model_name = real_usage.get('model', self.client.get_default_model() if hasattr(self.client, 'get_default_model') else 'gemini-2.5-flash')
+                        data_source = 'real_api'
+                        
+                        logger.info(f"✅ 使用真实API token数据: prompt={prompt_tokens}, completion={completion_tokens}")
+                    else:
+                        # 回退到精确计算
+                        logger.warning("⚠️ 未获取到真实token数据，使用精确计算")
+                        prompt_text = " ".join([msg.get('content', '') for msg in optimized_history if isinstance(msg, dict)])
+                        prompt_tokens = await self.token_manager.count_tokens_accurately(prompt_text)
+                        completion_tokens = await self.token_manager.count_tokens_accurately(response_text)
+                        model_name = self.client.get_default_model() if hasattr(self.client, 'get_default_model') else 'gemini-2.5-flash'
+                        data_source = 'accurate_estimation'
                     
                     # 记录token使用
                     await self.token_manager.record_token_usage(
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
-                        model=getattr(self.client, 'model', 'gemini-2.5-flash'),
+                        model=model_name,
                         task_id=task.task_id,
                         session_id=getattr(task, 'session_id', None),
                         cached_tokens=optimization_info.get('tokens_saved', 0)
@@ -1285,8 +1306,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         'completion_tokens': completion_tokens,
                         'total_tokens': prompt_tokens + completion_tokens,
                         'cached_tokens': optimization_info.get('tokens_saved', 0),
-                        'model': getattr(self.client, 'model', 'gemini-2.5-flash'),
-                        'data_source': 'api_provided'
+                        'model': model_name,
+                        'data_source': data_source
                     }
                 except Exception as e:
                     logger.warning(f"Token统计失败: {e}")
@@ -1331,8 +1352,25 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 # 跳到轨迹保存和返回
                 break
             
+            # 🔧 修复：自动注入缺失的<execute_tools />标签
+            response_text = self._auto_inject_execute_tools(response_text)
+            
             history.append({"role": "assistant", "content": response_text})
             full_trajectory.append({"role": "assistant", "content": response_text})
+
+            # 🆕 新增：处理 <tool_param> 查询
+            if "<tool_param>" in response_text:
+                # 🔧 增强检查：确保这是真正的tool_param查询，而不是工具调用中包含tool_param字符串
+                tool_param_pattern = r'<tool_param>\s*<tool_id>.*?</tool_id>\s*<action>.*?</action>\s*</tool_param>'
+                if re.search(tool_param_pattern, response_text, re.DOTALL):
+                    logger.info("🔎 检测到真正的tool_param查询")
+                    tool_param_result = await self._handle_tool_param_query(response_text)
+                    history.append({"role": "assistant", "content": tool_param_result})
+                    full_trajectory.append({"role": "assistant", "content": tool_param_result})
+                    self.step_logger.finish_step("tool_param_query_handled")
+                    continue
+                else:
+                    logger.debug("⚠️ 响应中包含'tool_param'但不是有效的参数查询格式，继续正常工具执行")
 
             # 🔧 修复：更智能的答案检测逻辑
             answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
@@ -1400,27 +1438,22 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             if not parse_result.success and len(actions) > 0:
                 logger.warning(f"⚠️ 部分解析成功，提取到 {len(actions)} 个动作")
             
-            # 检查是否是仅包含思考的最终答案
+            # 检查是否包含最终答案标签 - 如果有则直接结束
             think_tag = TaskExecutionConstants.XML_TAGS['THINK']
             answer_tag = TaskExecutionConstants.XML_TAGS['ANSWER']
             execute_tools_tag = TaskExecutionConstants.XML_TAGS['EXECUTE_TOOLS']
             
-            if not actions and f"<{think_tag}>" in response_text and f"<{execute_tools_tag} />" not in response_text:
-                logger.info("✅ Detected a thought-only response, considering it the final answer.")
-                # 提取思考内容作为最终答案
-                try:
-                    import re
-                    match = re.search(f"<{think_tag}>(.*)</{think_tag}>", response_text, re.DOTALL)
-                    if match:
-                        final_thought = match.group(1).strip()
-                        answer_content = f"<{answer_tag}>{final_thought}</{answer_tag}>"
-                        history.append({"role": "assistant", "content": answer_content})
-                        full_trajectory.append({"role": "assistant", "content": answer_content})
-                except Exception:
-                    pass # 如果解析失败，则正常继续
-                # 🔍 完成步骤记录
-                self.step_logger.finish_step("thought_only_final_answer")
+            # 🔧 关键修复：检测到answer标签时直接结束任务
+            if f"<{answer_tag}>" in response_text:
+                logger.info("✅ 检测到<answer>标签，任务完成")
+                history.append({"role": "assistant", "content": response_text})
+                full_trajectory.append({"role": "assistant", "content": response_text})
+                self.step_logger.finish_step("answer_tag_detected")
                 break
+            
+            # 🔧 修复：删除错误的thought-only final answer逻辑
+            # 不应该将纯思考内容当作最终答案，模型可能只是在第一步思考
+            # 让执行流程继续，如果确实需要工具执行，后续的逻辑会处理
 
             # 🔧 Stage 2 增强：复杂任务检测与强制执行机制
             if not actions:
@@ -1465,39 +1498,85 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                     self.step_logger.finish_step("plan_execution_guidance_injected")
                     continue
                 
-                elif self._should_inject_no_action_message(response_text):
-                    logger.warning("🚨 无可执行动作 - 使用增强指导")
-                    # 🔧 使用增强的指导消息
-                    enhanced_guidance = self._enhance_no_action_guidance(response_text)
-                    result_xml = self._format_result(enhanced_guidance)
+                # 🔧 修复：对于只有思考内容的情况，提供引导而不是直接终止
+                if f"<{think_tag}>" in response_text:
+                    logger.info("💭 检测到纯思考内容，提供执行引导")
+                    
+                    # 提供执行引导
+                    guidance = (
+                        "You have shared your thinking process. Now please proceed to execute the necessary steps. "
+                        "Use the appropriate tool calls with the exact XML format and end with <execute_tools />. "
+                        "Remember: thinking is just the first step - execution is required to complete the task."
+                    )
+                    
+                    result_xml = self._format_result(guidance)
                     history.append({"role": "assistant", "content": result_xml})
                     full_trajectory.append({"role": "assistant", "content": result_xml})
                     # 🔍 完成步骤记录
-                    self.step_logger.finish_step("enhanced_no_action_guidance_injected")
-                else:
-                    logger.info("✅ Detected thought-only response without tool execution - this is normal.")
-                    # 🔍 完成步骤记录
-                    self.step_logger.finish_step("thought_only_normal")
+                    self.step_logger.finish_step("thinking_execution_guidance")
+                    continue
+                
+                # 其他情况：正常的无动作响应
+                logger.info("✅ Detected response without tool execution - continuing to next step")
+                # 🔍 完成步骤记录
+                self.step_logger.finish_step("no_action_continue")
                 continue
 
             # 4. 根据类型分发执行
             results = []
             block_type = parse_result.execution_type or "single"
 
-            # 对于串行块，我们只执行第一个动作。LLM将在下一轮根据结果决定后续步骤。
-            if block_type == "sequential":
-                logger.info(f"Executing first action of sequential block.")
-                if actions:
-                    result_data = await self._execute_tool_with_logging(actions[0], 0)
-                    results = [result_data["formatted_result"]]
-            elif block_type == "parallel":
-                logger.info(f"Executing parallel block with {len(actions)} actions.")
-                results = await self._execute_parallel_with_logging(actions)
-            else: # single
-                if actions:
-                    logger.info(f"Executing single action.")
-                    result_data = await self._execute_tool_with_logging(actions[0], 0)
-                    results = [result_data["formatted_result"]]
+            # 🔧 修复：添加工具执行异常处理，确保轨迹记录完整性
+            try:
+                # 对于串行块，我们只执行第一个动作。LLM将在下一轮根据结果决定后续步骤。
+                if block_type == "sequential":
+                    logger.info(f"Executing first action of sequential block.")
+                    if actions:
+                        result_data = await self._execute_tool_with_logging(actions[0], 0)
+                        results = [result_data["formatted_result"]]
+                elif block_type == "parallel":
+                    logger.info(f"Executing parallel block with {len(actions)} actions.")
+                    results = await self._execute_parallel_with_logging(actions)
+                else: # single
+                    if actions:
+                        logger.info(f"Executing single action.")
+                        result_data = await self._execute_tool_with_logging(actions[0], 0)
+                        results = [result_data["formatted_result"]]
+                        
+            except Exception as tool_exec_error:
+                # 🔧 关键修复：工具执行失败时，记录完整的推理过程和错误信息
+                logger.error(f"工具执行失败: {tool_exec_error}")
+                error_type = self._analyze_error_type(str(tool_exec_error))
+                
+                # 创建详细的错误结果，包含推理过程
+                error_result = f"工具执行失败: {str(tool_exec_error)}"
+                
+                # 🔧 特殊处理参数验证失败的情况
+                if "Parameter validation failed" in str(tool_exec_error):
+                    # 提取模型原本想要执行的动作
+                    original_action = actions[0] if actions else {}
+                    service_name = original_action.get('service', 'unknown')
+                    tool_name = original_action.get('tool', 'unknown')
+                    tool_input = original_action.get('input', '')
+                    
+                    error_result = f"""参数验证失败，但模型的推理过程已记录：
+
+模型尝试执行：{service_name}.{tool_name}
+模型提供的输入：{tool_input}
+
+错误详情：{str(tool_exec_error)}
+
+建议：请检查参数格式是否正确，确保传入了工具所需的必需参数。"""
+                
+                results = [error_result]
+                
+                # 🔧 记录错误步骤到轨迹中
+                self.step_logger.log_step_error(
+                    step_index=len(full_trajectory),
+                    error_type=error_type,
+                    error_message=str(tool_exec_error),
+                    recovery_attempted=True
+                )
 
             # 5. 格式化并为每个结果注入单独的<result>标签
             for res in results:
@@ -1621,7 +1700,8 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 tool_descriptions="",
                 streaming_mode=False
             )
-            response = await self.client._call_api(messages)
+            response_data = await self.client._call_api(messages)
+            response = response_data.get('content', '') if isinstance(response_data, dict) else response_data
             
             # 🧠 标准模式也使用智能评估（简化版）
             final_result = self._extract_final_result(response)
@@ -1682,17 +1762,37 @@ class EnhancedReasoningRuntime(RuntimeInterface):
     async def _get_available_tools(self) -> List[str]:
         """获取可用工具列表"""
         try:
-            tools = await self.toolscore_client.get_available_tools()
+            # 添加超时保护，避免异步取消导致的问题
+            tools = await asyncio.wait_for(
+                self.toolscore_client.get_available_tools(), 
+                timeout=5.0
+            )
             return [str(tool) for tool in tools] if isinstance(tools, list) else []
+        except asyncio.TimeoutError:
+            logger.warning(f"获取工具列表超时，使用默认工具列表")
+            return ["microsandbox", "browser_use", "deepsearch", "search_tool"]
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info("工具列表获取被取消")
+            raise
         except Exception as e:
             logger.warning(f"获取工具列表失败: {e}")
-            return []
+            return ["microsandbox", "browser_use", "deepsearch", "search_tool"]
     
     async def _get_tool_descriptions(self) -> str:
         """获取工具描述"""
         try:
-            descriptions = await self.toolscore_client.get_tool_descriptions()
+            # 添加超时保护
+            descriptions = await asyncio.wait_for(
+                self.toolscore_client.get_tool_descriptions(),
+                timeout=5.0
+            )
             return descriptions if descriptions else "工具描述获取失败"
+        except asyncio.TimeoutError:
+            logger.warning(f"获取工具描述超时，使用默认描述")
+            return "基础工具：代码执行、浏览器操作、搜索功能"
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info("工具描述获取被取消")
+            raise
         except Exception as e:
             logger.warning(f"获取工具描述失败: {e}")
             return "工具描述获取失败"
@@ -1934,17 +2034,17 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 boxed_match = re.search(boxed_pattern, answer_content, re.DOTALL)
                 if boxed_match:
                     clean_answer = boxed_match.group(1).strip()
-                    logger.info(f"✅ 从\\boxed{{}}提取清洁最终结果: {clean_answer[:100]}...")
+                    logger.info(f" 从\\boxed{{}}提取清洁最终结果: {clean_answer}...")
                     return clean_answer
                 else:
                     # 如果没有\boxed{}格式，返回原始answer内容
-                    logger.info(f"✅ 从<answer>标签提取最终结果: {answer_content[:100]}...")
+                    logger.info(f"从<answer>标签提取最终结果: {answer_content}...")
                     return answer_content
         else:
             # 🔧 容错机制：如果标准答案标签解析失败，尝试修复
             answer_content = self._attempt_answer_extraction(final_trajectory_str)
             if answer_content:
-                logger.info(f"🔧 容错提取答案成功: {answer_content[:100]}...")
+                logger.info(f"🔧 容错提取答案成功: {answer_content}...")
                 return answer_content
         
         # 🔧 第二优先级：提取最后的有效工具执行结果（非"No action"）
@@ -2689,13 +2789,70 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             }
             param_name = param_mapping.get(service_name, "input")
             
+            # 🔧 Fix JSON parameter parsing issue - 使用已有的JSONParameterParser
+            # Parse tool_input if it contains JSON data mixed with XML tags
+            parsed_parameters = self._parse_tool_input_parameters(tool_input, service_name, tool_name, param_name)
+            
+            # 🔧 修复：检查参数验证错误并作为工具结果返回，而不是抛出异常
+            if "_validation_error" in parsed_parameters:
+                validation_error = parsed_parameters["_validation_error"]
+                logger.warning(f"Parameter validation failed, returning error to model for correction: {validation_error}")
+                
+                # 🔧 关键修复：将参数验证错误作为工具执行结果返回给模型
+                # 这样模型可以看到错误信息，并基于此重新思考和修正参数
+                error_result = {
+                    "error": validation_error,
+                    "success": False,
+                    "error_type": "parameter_validation_error",
+                    "suggestions": [
+                        f"请检查工具 {service_name}.{tool_name} 的参数格式",
+                        "确保所有必需参数都已提供",
+                        "参考工具文档确认正确的参数名称和类型"
+                    ]
+                }
+                
+                # 格式化错误信息，让模型能够理解并修正
+                formatted_error = self._format_parameter_validation_error(
+                    service_name, tool_name, validation_error, parsed_parameters.get(param_name, tool_input)
+                )
+                
+                tool_end_time = time.time()
+                
+                # 记录参数验证失败的日志，但不标记为执行失败
+                self.step_logger.log_tool_execution(
+                    execution_index=execution_index,
+                    action=action,
+                    toolscore_request={
+                        "tool_type": "external",
+                        "tool_id": service_name,
+                        "action": tool_name,
+                        "parameters": parsed_parameters,
+                        "validation_status": "failed"
+                    },
+                    raw_response=error_result,
+                    formatted_result=formatted_error,
+                    start_time=tool_start_time,
+                    end_time=tool_end_time,
+                    execution_status="parameter_validation_failed",  # 新的状态，不是failure
+                    error_details=validation_error
+                )
+                
+                return {
+                    "formatted_result": formatted_error,
+                    "raw_result": error_result,
+                    "execution_status": "parameter_validation_failed"
+                }
+            
+            # 清理_validation_error参数，确保它不会传递给实际的工具
+            clean_parameters = {k: v for k, v in parsed_parameters.items() if k != "_validation_error"}
+            
             toolscore_request = {
                 "endpoint": f"http://127.0.0.1:{self._get_service_port(service_name)}/execute_tool",
                 "method": "POST",
                 "payload": {
                     "tool_id": service_name,
                     "action": tool_name,
-                    "parameters": {param_name: tool_input}
+                    "parameters": clean_parameters
                 }
             }
             
@@ -2704,8 +2861,33 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 raw_result = await self.toolscore_client.execute_tool(
                     tool_id=service_name,
                     action=tool_name,
-                    parameters={param_name: tool_input}
+                    parameters=clean_parameters
                 )
+                
+                # 🔧 新增：检测是否错误返回了参数定义而不是执行结果
+                if isinstance(raw_result, dict) and raw_result.get('status') == 'success':
+                    # 检查是否是参数定义格式（包含parameters字段且其值是参数描述）
+                    parameters_field = raw_result.get('parameters', {})
+                    if (isinstance(parameters_field, dict) and 
+                        any(isinstance(v, dict) and 'type' in v and 'description' in v 
+                            for v in parameters_field.values())):
+                        
+                        logger.warning(f"⚠️ 检测到工具执行返回参数定义而不是执行结果，重新执行")
+                        
+                        # 重新构造简单参数格式并重试
+                        simple_params = {
+                            "query" if service_name == "browser_use" else 
+                            "code" if service_name == "microsandbox" else 
+                            "question" if service_name == "deepsearch" else "input": 
+                            tool_input
+                        }
+                        
+                        logger.info(f"🔄 使用简化参数重试: {simple_params}")
+                        raw_result = await self.toolscore_client.execute_tool(
+                            tool_id=service_name,
+                            action=tool_name,
+                            parameters=simple_params
+                        )
                 
                 formatted_result = self._format_tool_output(service_name, tool_name, raw_result)
                 execution_status = "success"
@@ -2940,7 +3122,6 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         
         # 🔧 修复：对于 microsandbox，正确提取实际输出内容而非整个字典结构
         if service_name == "microsandbox":
-            import re
             # 正确提取 microsandbox 的实际输出内容
             if isinstance(raw_result, dict):
                 # 获取 data 字段中的内容
@@ -3374,4 +3555,203 @@ LLM API调用遇到未知错误：{error_message}
                     f"技术分数={technical_score}, 有结构={has_structure}, 有意义={is_meaningful}")
         
         return is_meaningful
+
+    def _parse_tool_input_parameters(self, tool_input: str, service_name: str, tool_name: str, default_param_name: str) -> dict:
+        """
+        使用已有的JSONParameterParser解析工具输入参数
+        
+        Args:
+            tool_input: 从XML解析得到的原始输入（可能包含JSON+XML混合内容）
+            service_name: 服务名称（如 'browser_use'）
+            tool_name: 工具名称（如 'browser_search_google'）
+            default_param_name: 默认参数名称
+            
+        Returns:
+            dict: 解析后的参数字典
+        """
+        try:
+            # 使用已有的JSONParameterParser
+            parse_result = self.json_parameter_parser.parse_tool_parameters(
+                tool_id=service_name,
+                action=tool_name,
+                raw_input=tool_input
+            )
+            
+            if parse_result.is_valid:
+                logger.debug(f"✅ JSON参数解析成功: {parse_result.parsed_params}")
+                return parse_result.parsed_params
+            else:
+                logger.warning(f"⚠️ JSON参数解析失败: {parse_result.errors}")
+                
+                # 🔧 修复：将参数验证错误注入结果流，让模型看到错误信息
+                error_message = f"Parameter validation failed for {service_name}.{tool_name}: {parse_result.errors}"
+                
+                # 将错误信息作为特殊参数返回，这样工具执行会包含错误反馈
+                return {
+                    "_validation_error": error_message,
+                    default_param_name: tool_input
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ JSON参数解析异常: {e}")
+            # 出错时回退到简单参数映射
+            return {default_param_name: tool_input}
+
+    async def _handle_tool_param_query(self, xml_string: str) -> str:
+        """
+        处理 <tool_param> 查询，返回工具的参数定义。
+        """
+        try:
+            tool_id_match = re.search(r"<tool_id>(.*?)</tool_id>", xml_string)
+            action_match = re.search(r"<action>(.*?)</action>", xml_string)
+
+            if not tool_id_match or not action_match:
+                error_msg = "Invalid <tool_param> format. Missing <tool_id> or <action> tag."
+                logger.warning(error_msg)
+                return self._format_result(f"Error: {error_msg}")
+
+            tool_id = tool_id_match.group(1).strip()
+            action = action_match.group(1).strip()
+
+            logger.info(f"🔎 Handling <tool_param> query for {tool_id}/{action}")
+
+            # 获取参数定义
+            param_definitions = self.tool_manager.get_action_parameters(tool_id, action)
+
+            response_data = {
+                "status": "success",
+                "tool_id": tool_id,
+                "action": action,
+                "parameters": param_definitions
+            }
+
+            # 格式化为JSON字符串以便在<result>中返回
+            response_json = json.dumps(response_data, ensure_ascii=False, indent=2)
+            return self._format_result(response_json)
+
+        except ValueError as e:
+            logger.error(f"Error handling <tool_param> query: {e}")
+            return self._format_result(f"Error: {str(e)}")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in _handle_tool_param_query: {e}", exc_info=True)
+            return self._format_result("An internal error occurred while fetching tool parameters.")
     
+    def _auto_inject_execute_tools(self, response_text: str) -> str:
+        """
+        🔧 自动注入缺失的<execute_tools />标签
+        
+        检测工具调用但缺少<execute_tools />的情况，自动添加该标签以确保工具能够执行。
+        针对flash-lite等模型进行了特殊优化。
+        
+        Args:
+            response_text: LLM的原始响应
+            
+        Returns:
+            可能添加了<execute_tools />的响应文本
+        """
+        import re
+        
+        # 如果已经有<execute_tools />，不需要处理
+        if '<execute_tools />' in response_text or '<execute_tools></execute_tools>' in response_text:
+            return response_text
+        
+        # 🔧 增强：更准确的工具调用检测模式
+        tool_call_patterns = [
+            # 标准格式：<service><tool>content</tool></service>
+            r'<(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>\s*<[^>]+>.*?</[^>]+>\s*</(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>',
+            # 兼容格式
+            r'<browser>\s*<[^>]+>.*?</[^>]+>\s*</browser>',
+            # 🆕 新增：检测JSON格式的工具调用（flash-lite常用）
+            r'<(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>\s*<[^>]+>\s*\{[^}]*\}\s*</[^>]+>\s*</(microsandbox|deepsearch|browser_use|search_tool|memory_staging)>'
+        ]
+        
+        has_tool_calls = False
+        tool_match = None
+        
+        for pattern in tool_call_patterns:
+            match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
+            if match:
+                has_tool_calls = True
+                tool_match = match
+                break
+        
+        # 如果检测到工具调用但没有execute_tools标签，自动添加
+        if has_tool_calls and tool_match:
+            # 找到最后一个工具调用的结束位置
+            last_tool_end = -1
+            for pattern in tool_call_patterns:
+                matches = list(re.finditer(pattern, response_text, re.DOTALL | re.IGNORECASE))
+                if matches:
+                    last_match_end = matches[-1].end()
+                    if last_match_end > last_tool_end:
+                        last_tool_end = last_match_end
+            
+            if last_tool_end > -1:
+                # 在最后一个工具调用后添加<execute_tools />
+                before = response_text[:last_tool_end]
+                after = response_text[last_tool_end:]
+                
+                # 确保有适当的换行
+                if not before.endswith('\n'):
+                    before += '\n'
+                
+                injected_response = before + '<execute_tools />' + after
+                
+                # 🔧 增强：记录更详细的注入信息，便于调试
+                model_info = getattr(self.client, 'model', 'unknown')
+                logger.info(f"🔧 为模型 {model_info} 自动注入<execute_tools />标签")
+                logger.debug(f"检测到的工具调用: {tool_match.group(0)[:100]}...")
+                logger.debug(f"注入位置: 字符位置 {last_tool_end}")
+                
+                return injected_response
+        
+        # 没有检测到工具调用或已有execute_tools标签，返回原文
+        return response_text
+    
+    def _format_parameter_validation_error(self, service_name: str, tool_name: str, validation_error: str, original_input: str) -> str:
+        """
+        🔧 格式化参数验证错误，让模型能够理解并修正参数
+        
+        Args:
+            service_name: 服务名称
+            tool_name: 工具名称
+            validation_error: 验证错误信息
+            original_input: 原始输入参数
+            
+        Returns:
+            格式化后的错误信息
+        """
+        error_message = f"""
+Parameter Validation Failed 
+
+Tool Call: {service_name}.{tool_name}
+Error Details: {validation_error}
+
+Your Input: {original_input}
+
+Correction Suggestions: Use <tool_param><tool_id>{service_name}</tool_id><action>{tool_name}</action></tool_param> to get the correct parameters
+
+Please retry the tool call with correct parameters based on the error information above.
+"""
+        return error_message.strip()
+
+    def _format_error_with_recovery_suggestion(self, error_message: str, error_type: str, service_name: str, tool_name: str) -> str:
+        """🔧 增强的错误格式化和恢复建议 - 针对具体错误类型提供详细指导"""
+        base_error = f"Tool execution failed: {error_message}"
+        
+        recovery_suggestions = {
+            "parameter_error": f"💡 建议: 检查 {service_name} 的 {tool_name} 工具参数格式。参考工具定义中的正确参数名称。",
+            "tool_not_found": f"💡 建议: 工具 {tool_name} 在 {service_name} 中不存在。检查工具名称是否正确，或尝试使用其他工具。",
+            "network_error": f"💡 建议: 网络连接问题。等待几秒后重试，或尝试使用替代工具。",
+            "validation_error": f"💡 建议: 输入数据验证失败。检查输入格式和内容是否符合要求。",
+            "permission_error": f"💡 建议: 权限不足。检查服务配置或尝试其他方法。",
+            "empty_results": f"🔍 建议: 搜索未找到结果。尝试:\n  • 使用不同的关键词或更简单的查询\n  • 切换到其他搜索工具 (如 deepsearch → browser_use)\n  • 检查数据是否已保存在内存暂存区: <memory_staging><memory_list></memory_list></memory_staging>",
+            "data_not_available": f"📊 建议: 数据不可用。尝试:\n  • 使用更广泛的搜索词\n  • 检查内存暂存区是否有相关数据: <memory_staging><memory_search>关键词</memory_search></memory_staging>\n  • 考虑使用示例数据（明确标记为模拟数据）",
+            "timeout_error": f"⏱️ 建议: 工具执行超时。尝试:\n  • 简化查询或操作\n  • 分步骤执行复杂任务\n  • 稍后重试",
+            "service_unavailable": f"🚫 建议: 服务不可用。尝试:\n  • 使用替代工具达到相同目标\n  • 稍后重试\n  • 使用缓存或内存中的数据",
+            "unknown_error": f"💡 建议: 未知错误。尝试简化输入或使用其他工具替代。"
+        }
+        
+        suggestion = recovery_suggestions.get(error_type, recovery_suggestions["unknown_error"])
+        return f"{base_error}\n{suggestion}"
+

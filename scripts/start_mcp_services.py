@@ -8,6 +8,7 @@ import sys
 import time
 import logging
 import os
+import json
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
@@ -54,16 +55,48 @@ def start_service(service_name: str, port: int):
         logger.error(f"❌ 启动 {service_name} 异常: {e}")
         return False
 
+def load_mcp_config():
+    """从配置文件加载MCP服务端口配置"""
+    project_root = Path(__file__).parent.parent
+    config_path = project_root / "config" / "mcp_servers.json"
+    
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        logger.info(f"✅ 成功加载MCP配置: {config_path}")
+        return config
+    except FileNotFoundError:
+        logger.error(f"❌ 配置文件不存在: {config_path}")
+        return {}
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ 配置文件JSON格式错误: {e}")
+        return {}
+
 def main():
     """主函数"""
     logger.info("🚀 启动所有MCP服务...")
     
-    services = [
-        ("deepsearch", 8086),
-        ("microsandbox", 8090),
-        ("browser_use", 8084),
-        ("search_tool", 8080)
-    ]
+    # 从配置文件动态加载端口配置
+    mcp_config = load_mcp_config()
+    
+    # 构建服务列表，优先使用配置文件中的端口，回退到默认端口
+    services = []
+    service_mappings = {
+        "deepsearch": ("deepsearch_server", 8086),
+        "microsandbox": ("microsandbox", 8090),
+        "browser_use": ("browser_use_server", 8082),  # 修正为配置文件中的端口
+        "search_tool": ("search_tool_server", 8080)
+    }
+    
+    for service_key, (config_key, default_port) in service_mappings.items():
+        if config_key in mcp_config:
+            port = mcp_config[config_key].get("port", default_port)
+            logger.info(f"📍 {service_key} 使用配置文件端口: {port}")
+        else:
+            port = default_port
+            logger.warning(f"⚠️ {service_key} 配置缺失，使用默认端口: {port}")
+        
+        services.append((service_key, port))
     
     success_count = 0
     for service_name, port in services:

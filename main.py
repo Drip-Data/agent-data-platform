@@ -244,6 +244,8 @@ def parse_arguments():
     parser.add_argument('--trajectory-storage', type=str, default='daily_grouped', 
                        choices=['individual', 'daily_grouped', 'weekly_grouped', 'monthly_grouped'],
                        help='轨迹存储模式：individual(单独文件), daily_grouped(按日分组), weekly_grouped(按周分组), monthly_grouped(按月分组)')
+    parser.add_argument('--enable-synthesis', action='store_true', default=False, 
+                       help='启用TaskCraft轨迹自动监控和任务合成功能（默认关闭）')
     return parser.parse_args()
 
 def setup_signal_handlers(service_manager):
@@ -281,6 +283,10 @@ def setup_signal_handlers(service_manager):
         """异步优雅关闭"""
         try:
             logger.info("🔄 开始优雅关闭所有服务...")
+            
+            # 🔧 新增：优雅关闭时也清理队列
+            await clear_all_task_queues()
+            
             await asyncio.wait_for(service_manager.stop_all(), timeout=15)
             logger.info("✅ 所有服务已优雅关闭")
         except asyncio.TimeoutError:
@@ -297,6 +303,10 @@ def setup_signal_handlers(service_manager):
         """同步优雅关闭"""
         try:
             logger.info("🔄 开始优雅关闭所有服务...")
+            
+            # 🔧 新增：同步版本的队列清理
+            sync_clear_all_task_queues()
+            
             service_manager.force_stop_all()  # 同步停止
             logger.info("✅ 所有服务已关闭")
         except Exception as e:
@@ -305,7 +315,109 @@ def setup_signal_handlers(service_manager):
         finally:
             logger.info("👋 Agent Data Platform 已退出")
             os._exit(0)
-    
+
+    async def clear_all_task_queues():
+        """异步清理所有任务队列"""
+        try:
+            logger.info("🗑️ 开始清理任务队列...")
+            import redis.asyncio as async_redis
+            
+            # 连接到Redis
+            try:
+                redis_url = config_manager.get_redis_url() if 'config_manager' in globals() else "redis://localhost:6379"
+                r = async_redis.from_url(redis_url)
+                
+                # 清理主要队列
+                queue_cleared = await r.delete('tasks:reasoning')
+                logger.info(f"清理主任务队列: {queue_cleared} 个队列")
+                
+                # 清理任务状态
+                task_keys = await r.keys('task:*')
+                if task_keys:
+                    task_status_cleared = await r.delete(*task_keys)
+                    logger.info(f"清理任务状态: {task_status_cleared} 个状态")
+                
+                # 清理任务状态API键
+                task_status_keys = await r.keys('task_status:*')
+                if task_status_keys:
+                    api_status_cleared = await r.delete(*task_status_keys)
+                    logger.info(f"清理API任务状态: {api_status_cleared} 个状态")
+                
+                # 清理死信队列
+                dead_letter_cleared = await r.delete('tasks:dead_letter')
+                if dead_letter_cleared:
+                    logger.info(f"清理死信队列: {dead_letter_cleared} 个队列")
+                
+                await r.close()
+                logger.info("✅ Redis队列清理完成")
+                
+            except Exception as redis_error:
+                logger.warning(f"Redis队列清理失败: {redis_error}")
+            
+            # 清理本地任务文件
+            _clear_local_task_file()
+                
+        except Exception as e:
+            logger.error(f"任务队列清理失败: {e}")
+
+    def sync_clear_all_task_queues():
+        """同步清理所有任务队列"""
+        try:
+            logger.info("🗑️ 开始清理任务队列...")
+            import redis
+            
+            # 连接到Redis
+            try:
+                redis_url = config_manager.get_redis_url() if 'config_manager' in globals() else "redis://localhost:6379"
+                r = redis.from_url(redis_url)
+                
+                # 清理主要队列
+                queue_cleared = r.delete('tasks:reasoning')
+                logger.info(f"清理主任务队列: {queue_cleared} 个队列")
+                
+                # 清理任务状态
+                task_keys = r.keys('task:*')
+                if task_keys:
+                    task_status_cleared = r.delete(*task_keys)
+                    logger.info(f"清理任务状态: {task_status_cleared} 个状态")
+                
+                # 清理任务状态API键
+                task_status_keys = r.keys('task_status:*')
+                if task_status_keys:
+                    api_status_cleared = r.delete(*task_status_keys)
+                    logger.info(f"清理API任务状态: {api_status_cleared} 个状态")
+                
+                # 清理死信队列
+                dead_letter_cleared = r.delete('tasks:dead_letter')
+                if dead_letter_cleared:
+                    logger.info(f"清理死信队列: {dead_letter_cleared} 个队列")
+                
+                r.close()
+                logger.info("✅ Redis队列清理完成")
+                
+            except Exception as redis_error:
+                logger.warning(f"Redis队列清理失败: {redis_error}")
+            
+            # 清理本地任务文件
+            _clear_local_task_file()
+                
+        except Exception as e:
+            logger.error(f"任务队列清理失败: {e}")
+
+    def _clear_local_task_file():
+        """清理本地任务文件的通用函数"""
+        try:
+            task_file_path = 'tasks.jsonl'
+            if 'config_manager' in globals():
+                task_file_path = config_manager.get_task_file_path()
+            
+            with open(task_file_path, 'w', encoding='utf-8') as f:
+                f.write('')  # 清空文件
+            logger.info(f"✅ 清空本地任务文件: {task_file_path}")
+            
+        except Exception as file_error:
+            logger.warning(f"本地任务文件清理失败: {file_error}")
+
     async def emergency_shutdown(service_manager):
         """紧急关闭流程"""
         try:
@@ -321,6 +433,9 @@ def setup_signal_handlers(service_manager):
     def force_cleanup():
         """强制清理所有资源"""
         logger.info("执行强制清理...")
+        
+        # 🔧 调用通用队列清理函数
+        sync_clear_all_task_queues()
         
         # 首先尝试使用系统命令强制清理MCP服务器进程
         try:
@@ -379,10 +494,11 @@ def setup_signal_handlers(service_manager):
                             pass
             except:
                 pass
-    
-    # 信号处理器已暂时移除 - 避免误退出
-    # signal.signal(signal.SIGINT, signal_handler)
-    # signal.signal(signal.SIGTERM, signal_handler)
+
+    # 🔧 注册信号处理器
+    import signal
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
 async def main_async():
     """异步主函数，应用入口点"""
@@ -399,8 +515,9 @@ async def main_async():
         logging.getLogger().setLevel(logging.DEBUG)
         logger.debug("调试模式已启用。")
 
-    # 1. 初始化 ConfigManager
+    # 1. 初始化 ConfigManager 并设为全局变量
     logger.debug("🔧 步骤1: 初始化ConfigManager...")
+    global config_manager  # 🔧 设为全局变量，供清理函数使用
     config_manager = ConfigManager(config_dir=args.config_dir)
     logger.debug(f"✅ ConfigManager初始化完成，配置目录: {args.config_dir}")
     
@@ -547,28 +664,34 @@ async def main_async():
         dependencies=["redis", "toolscore", "mcp_servers"]
     )
     
-    # 获取LLM配置并合并到服务配置中
-    llm_config = config_manager.get_llm_config()
-    synthesis_config = {
-        'redis_url': redis_url,
-        'TRAJECTORIES_DIR': 'output/trajectories',
-        **llm_config  # 合并LLM配置
-    }
+    # 根据参数决定是否启用TaskCraft轨迹监控和任务合成功能
+    if args.enable_synthesis:
+        logger.info("✅ 启用TaskCraft轨迹自动监控和任务合成功能")
+        # 获取LLM配置并合并到服务配置中
+        llm_config = config_manager.get_llm_config()
+        synthesis_config = {
+            'redis_url': redis_url,
+            'TRAJECTORIES_DIR': 'output/trajectories',
+            **llm_config  # 合并LLM配置
+        }
+        
+        service_manager.register_service(
+            name="synthesis",
+            initialize_fn=lambda config: synthesis_service.initialize(
+                synthesis_config, 
+                tool_manager=unified_tool_manager
+            ),
+            start_fn=synthesis_service.start,
+            stop_fn=synthesis_service.stop,
+            health_check_fn=synthesis_service.health_check,
+            dependencies=["redis"]
+        )
+    else:
+        logger.info("⚪ TaskCraft轨迹自动监控和任务合成功能已禁用")
+        logger.info("💡 提示：使用 --enable-synthesis 参数启用此功能")
     
-    service_manager.register_service(
-        name="synthesis",
-        initialize_fn=lambda config: synthesis_service.initialize(
-            synthesis_config, 
-            tool_manager=unified_tool_manager
-        ),
-        start_fn=synthesis_service.start,
-        stop_fn=synthesis_service.stop,
-        health_check_fn=synthesis_service.health_check,
-        dependencies=["redis"]
-    )
-    
-    # 信号处理器已暂时移除 - 用户可以通过重启main来自动清理进程
-    # setup_signal_handlers(service_manager)
+    # 🔧 设置信号处理器 - 用于系统退出时自动清理队列
+    setup_signal_handlers(service_manager)
     
     try:
         logger.debug("🔧 开始初始化所有服务...")

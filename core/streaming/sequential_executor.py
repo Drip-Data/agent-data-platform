@@ -251,7 +251,9 @@ class SequentialStreamingExecutor:
 **Guideline**: Analyze the error and respond with new `<think>` and tool call XML tags to continue.
 """
             logger.info("🧠 请求LLM对错误进行反思和纠正...")
-            correction_response = await self.llm_client._call_api([{"role": "user", "content": prompt}])
+            correction_response_data = await self.llm_client._call_api([{"role": "user", "content": prompt}])
+            # 🔧 兼容新的返回格式：提取content字段
+            correction_response = correction_response_data.get('content', '') if isinstance(correction_response_data, dict) else correction_response_data
             
             if correction_response:
                 logger.info(f"🆕 LLM提供了纠正计划:\n{correction_response}")
@@ -328,7 +330,9 @@ Available actions:
 Choose the most appropriate action and respond with a single XML tag. Example: <chosen_action>parameters</chosen_action>"""
             logger.debug(f"发送给 LLM 的二级选择 Prompt:\n{prompt}")
 
-            response = await self.llm_client._call_api([{"role": "user", "content": prompt}])
+            response_data = await self.llm_client._call_api([{"role": "user", "content": prompt}])
+            # 🔧 兼容新的返回格式：提取content字段
+            response = response_data.get('content', '') if isinstance(response_data, dict) else response_data
             logger.debug(f"LLM 返回的二级选择结果: {response.strip()}")
 
             action_match = re.match(r'<(\w+)>(.*)</\1>', response.strip(), re.DOTALL)
@@ -383,7 +387,9 @@ Choose the most appropriate action and respond with a single XML tag. Example: <
         if not self.llm_client: return None
         try:
             prompt = self._build_continue_prompt(state_manager, current_response)
-            return await self.llm_client._call_api([{"role": "user", "content": prompt}])
+            response_data = await self.llm_client._call_api([{"role": "user", "content": prompt}])
+            # 🔧 兼容新的返回格式：提取content字段
+            return response_data.get('content', '') if isinstance(response_data, dict) else response_data
         except Exception as e:
             logger.error(f"❌ LLM继续推理失败: {e}")
             return None

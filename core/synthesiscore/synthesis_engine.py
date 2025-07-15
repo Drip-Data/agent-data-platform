@@ -157,7 +157,9 @@ class SynthesisEngine:
                 else:
                     # 回退到简单调用（不记录成本）
                     messages = [{"role": "user", "content": prompt}]
-                    response = await self.llm_client._call_api(messages)
+                    response_data = await self.llm_client._call_api(messages)
+                    # 🔧 兼容新的返回格式：提取content字段
+                    response = response_data.get('content', '') if isinstance(response_data, dict) else response_data
                 
                 logger.debug(f"✅ {operation_name} - 第{attempt}次尝试成功")
                 return response

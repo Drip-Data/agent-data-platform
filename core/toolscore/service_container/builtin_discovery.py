@@ -163,7 +163,7 @@ class BuiltinServiceDiscovery:
             "browser_use_server": {
                 "name": "Browser Use MCP Server",
                 "description": "AI驱动的浏览器自动化服务",
-                "port": 8084,
+                "port": 8082,
                 "capabilities": [
                     {
                         "name": "browser_use_execute_task",

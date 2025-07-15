@@ -232,7 +232,13 @@ class MCPSearchTool:
             llm_client = LLMClient({"provider": "gemini"})
             # 将字符串prompt转换为消息格式
             messages = [{"role": "user", "content": prompt}]
-            llm_response = await llm_client._call_api(messages)
+            llm_response_data = await llm_client._call_api(messages)
+            
+            # 🔧 兼容新的返回格式：提取content字段
+            if isinstance(llm_response_data, dict):
+                llm_response = llm_response_data.get('content', '')
+            else:
+                llm_response = str(llm_response_data)
             
             # 🔍 新增：记录LLM的原始响应
             logger.info("📥 LLM响应接收:")

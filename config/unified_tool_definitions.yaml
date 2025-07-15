@@ -150,7 +150,7 @@ tools:
     id: "browser_use"
     name: "智能浏览器操作工具"
     description: "AI驱动的浏览器自动化工具，支持网页导航、交互和内容提取"
-    service_port: 8084
+    service_port: 8082
     service_path: "mcp_servers/browser_use_server"
     
     # 支持的所有动作（基于实际实现的25个动作）

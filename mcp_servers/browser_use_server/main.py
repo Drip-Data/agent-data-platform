@@ -809,7 +809,25 @@ class BrowserUseLLMAdapter(BaseChatModel):
     def _parse_structured_response(self, content):
         """Parse structured response from LLM content"""
         try:
-            # 🔧 修复：使用JSONExtractor工具类，彻底避免re作用域问题
+            # 🔧 修复：确保content是字符串类型
+            if isinstance(content, dict):
+                # 如果content是字典，尝试提取文本内容
+                if 'content' in content:
+                    content = content['content']
+                elif 'text' in content:
+                    content = content['text']
+                elif 'response' in content:
+                    content = content['response']
+                else:
+                    # 如果是字典但没有明显的文本字段，转换为JSON字符串
+                    content = json.dumps(content)
+                    logger.warning(f"Content was dict, converted to JSON string: {content[:100]}...")
+            elif not isinstance(content, str):
+                # 如果既不是字符串也不是字典，强制转换为字符串
+                content = str(content)
+                logger.warning(f"Content was {type(content)}, converted to string: {content[:100]}...")
+            
+            # 使用JSONExtractor工具类，彻底避免re作用域问题
             parsed = JSONExtractor.parse_structured_content(content)
             structured_resp = StructuredResponse(parsed)
             logger.info(f"JSONExtractor parse successful, created StructuredResponse with keys: {list(structured_resp.keys())}")
@@ -820,7 +838,7 @@ class BrowserUseLLMAdapter(BaseChatModel):
             return structured_resp
         except Exception as e:
             logger.error(f"Error in structured response parsing: {e}")
-            return StructuredResponse({"error": str(e), "response": content})
+            return StructuredResponse({"error": str(e), "response": str(content)})
 
 
 from core.unified_tool_manager import UnifiedToolManager
@@ -998,125 +1016,69 @@ class BrowserUseMCPServer:
             return {"success": False, "error_message": f"获取内容时发生错误: {str(e)}"}
 
     async def _handle_google_search(self, query: str):
-        """增强的Google搜索处理，包含强化的内容提取和回退机制"""
-        try:
-            # 第一步：尝试browser-use的内置搜索
-            action_model = ActionModel(search_google=query)
-            result = await self.controller.act(action=action_model, browser_context=self.browser_context)
-            
-            if isinstance(result, ActionResult):
-                # 🔧 关键修复：检查内容是否真的有用
-                if result.extracted_content and result.extracted_content.strip() and len(result.extracted_content.strip()) > 10:
-                    logger.info(f"✅ Browser-use搜索成功，内容长度: {len(result.extracted_content)}")
-                    return {"success": True, "data": {"content": result.extracted_content, "is_done": result.is_done, "query": query}, "error_message": result.error or ""}
-                else:
-                    # 内容为空或太短，使用回退方案
-                    logger.warning(f"⚠️ Browser-use返回空内容，使用手动提取回退方案")
-                    return await self._manual_google_search_extraction(query)
-            else:
-                return {"success": True, "data": {"content": str(result), "query": query}}
-                
-        except Exception as e1:
-            logger.warning(f"🔧 search_google with ActionModel failed: {e1}")
-            return await self._manual_google_search_extraction(query)
-    
-    async def _manual_google_search_extraction(self, query: str):
-        """🔧 手动Google搜索和内容提取 - 强化的回退机制"""
+        """增强的Google搜索处理 - 基于官方browser-use实现"""
         try:
             import urllib.parse
             import asyncio
             
-            search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-            page = await self.browser_context.get_current_page()
+            logger.info(f"🔍 Enhanced Google搜索: {query}")
             
-            # 导航到搜索页面
-            await page.goto(search_url, wait_until='networkidle', timeout=30000)
+            # 首先尝试Google搜索
+            search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=en"
+            
+            # 导航到Google搜索页面
+            navigate_result = await self._navigate_to_url(search_url)
+            if not navigate_result.get('success', False):
+                return {
+                    "success": False,
+                    "error_message": f"Google搜索导航失败: {navigate_result.get('error_message', 'Unknown error')}",
+                    "query": query
+                }
             
             # 等待页面完全加载
-            await asyncio.sleep(3)
+            await asyncio.sleep(4)
             
-            # 尝试多种策略提取搜索结果
-            search_results = []
-            extraction_methods = [
-                # 方法1：标准Google搜索结果
-                {'selector': 'div[data-ved] h3', 'name': 'data-ved标题'},
-                {'selector': '.g h3', 'name': 'g类标题'},
-                {'selector': 'h3', 'name': '所有h3标题'},
-                {'selector': '.LC20lb', 'name': 'LC20lb类'},
-                {'selector': '[role="heading"]', 'name': 'heading角色'},
-                # 方法2：链接文本
-                {'selector': 'a h3', 'name': '链接中的h3'},
-                {'selector': 'cite', 'name': '引用文本'},
-            ]
+            # 检查是否遇到Google的反爬虫保护
+            page = await self.browser_context.get_current_page()
+            current_url = page.url
             
-            for method in extraction_methods:
-                try:
-                    elements = await page.query_selector_all(method['selector'])
-                    if elements:
-                        logger.info(f"📋 使用 {method['name']} 提取到 {len(elements)} 个元素")
-                        for element in elements[:8]:  # 取前8个结果
-                            text = await element.text_content()
-                            if text and text.strip() and len(text.strip()) > 3:
-                                search_results.append(text.strip())
-                        
-                        if search_results:
-                            break  # 找到结果就停止尝试其他方法
-                            
-                except Exception as e:
-                    logger.debug(f"提取方法 {method['name']} 失败: {e}")
-                    continue
-            
-            # 如果仍然没有结果，尝试获取页面摘要
-            if not search_results:
-                try:
-                    # 获取页面标题和一些文本内容
-                    title = await page.title()
-                    body_text = await page.evaluate('() => document.body.innerText')
-                    
-                    if body_text and len(body_text) > 50:
-                        # 从body文本中提取前几行有意义的内容
-                        lines = [line.strip() for line in body_text.split('\n') if line.strip() and len(line.strip()) > 10]
-                        search_results = lines[:5]
-                        logger.info(f"📝 从页面文本提取到 {len(search_results)} 行内容")
-                    
-                except Exception as e:
-                    logger.debug(f"页面文本提取失败: {e}")
-            
-            # 构建最终结果
-            if search_results:
-                content = f"Google搜索查询: {query}\n\n搜索结果:\n"
-                for i, result in enumerate(search_results, 1):
-                    content += f"{i}. {result}\n"
-                
-                logger.info(f"✅ 手动搜索成功，提取到 {len(search_results)} 个结果")
+            if "/sorry/" in current_url or "google.com/sorry" in current_url:
+                logger.warning(f"遇到Google反爬虫保护: {current_url}")
                 return {
-                    "success": True, 
-                    "data": {
-                        "content": content,
-                        "query": query,
-                        "results_count": len(search_results),
-                        "extraction_method": "manual_fallback"
-                    }
+                    "success": False,
+                    "error_message": f"Google搜索被阻止，请稍后重试。当前URL: {current_url}",
+                    "query": query
                 }
-            else:
-                # 最后的回退：至少返回一些基本信息
-                page_title = await page.title()
-                logger.warning(f"⚠️ 无法提取搜索结果，返回基本信息")
+            
+            # 使用专门的Google搜索结果提取
+            extract_result = await self._extract_google_search_results(query)
+            
+            if extract_result.get('success', False):
+                content = extract_result['data']['content']
+                logger.info(f"✅ Enhanced Google搜索成功，结果数: {extract_result['data'].get('result_count', 0)}")
                 return {
                     "success": True,
                     "data": {
-                        "content": f"Google搜索已完成查询: {query}\n页面标题: {page_title}\n注意: 由于页面结构限制，无法提取具体搜索结果，但搜索操作已成功执行。",
+                        "content": content,
                         "query": query,
-                        "page_title": page_title,
-                        "extraction_method": "basic_fallback"
+                        "url": search_url,
+                        "extraction_method": "enhanced_google_search",
+                        "result_count": extract_result['data'].get('result_count', 0),
+                        "is_done": True
                     }
                 }
+            else:
+                return {
+                    "success": False,
+                    "error_message": f"Google搜索结果提取失败: {extract_result.get('error_message', 'Unknown error')}",
+                    "query": query
+                }
                 
-        except Exception as e2:
-            logger.error(f"❌ 手动Google搜索失败: {e2}")
+        except Exception as e:
+            logger.error(f"Enhanced Google搜索处理出错: {e}")
             return {
-                "success": False, 
-                "error_message": f"Google search failed: {str(e2)}",
+                "success": False,
+                "error_message": f"Enhanced Google搜索处理出错: {str(e)}",
                 "query": query
             }
     
@@ -1125,36 +1087,60 @@ class BrowserUseMCPServer:
         if self.browser is None:
             try:
                 # 🔧 增强的反检测浏览器配置
+                # 🚀 Enhanced Browser Config - 基于官方browser-use最佳实践
+                # 关闭无头模式以减少反爬虫检测
                 browser_config = BrowserConfig(
-                    headless=os.getenv("BROWSER_HEADLESS", "true").lower() == "true",
-                    disable_security=True,     # 允许跨域访问
+                    headless=False,  # 关闭无头模式，可视化调试
+                    disable_security=True,
                     extra_chromium_args=[
+                        # 基础安全和性能参数
                         "--no-sandbox",
                         "--disable-dev-shm-usage", 
                         "--disable-gpu",
-                        # 🚀 核心反检测参数
+                        "--disable-extensions",
+                        "--no-first-run",
+                        "--disable-default-apps",
+                        
+                        # 🎯 核心反检测 - 基于官方browser-use
                         "--disable-blink-features=AutomationControlled",
                         "--disable-web-security",
                         "--disable-features=VizDisplayCompositor",
                         "--disable-ipc-flooding-protection",
-                        # 🔧 反爬虫对抗
-                        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "--disable-extensions",
-                        "--no-first-run",
-                        "--disable-default-apps",
+                        "--exclude-switches=enable-automation",
+                        "--disable-client-side-phishing-detection",
+                        
+                        # 🔧 增强的用户代理和伪装 - 使用最新Chrome
+                        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                        
+                        # 🚄 性能优化 - 更快的搜索体验
                         "--disable-background-timer-throttling",
-                        "--disable-backgrounding-occluded-windows",
+                        "--disable-backgrounding-occluded-windows", 
                         "--disable-renderer-backgrounding",
-                        # 🎭 隐身模式增强
-                        "--disable-plugins",
-                        "--disable-images",  # 加快加载速度
-                        "--no-default-browser-check",
-                        "--disable-translate",
-                        "--disable-sync",
-                        # 🔐 额外反检测措施
-                        "--disable-component-extensions-with-background-pages",
                         "--disable-background-networking",
-                        "--disable-domain-reliability"
+                        
+                        # 🌐 网络和缓存优化
+                        "--aggressive-cache-discard",
+                        "--disable-back-forward-cache",
+                        "--disable-prompt-on-repost",
+                        
+                        # 🎭 隐私和追踪保护
+                        "--disable-component-extensions-with-background-pages",
+                        "--disable-domain-reliability",
+                        "--disable-sync",
+                        "--disable-translate",
+                        "--no-default-browser-check",
+                        "--disable-plugins",
+                        
+                        # 🔍 搜索优化 - 提高Google搜索成功率  
+                        "--disable-features=TranslateUI",
+                        "--disable-features=Translate",
+                        "--lang=en-US,en",
+                        "--accept-lang=en-US,en;q=0.9",
+                        
+                        # 🎭 模拟真实用户行为
+                        "--simulate-outdated-no-au",
+                        "--disable-features=VizDisplayCompositor",
+                        "--start-maximized"  # 最大化窗口便于观察
                     ]
                 )
                 
@@ -1211,9 +1197,15 @@ class BrowserUseMCPServer:
     async def _execute_action(self, action_name: str, params: dict, **kwargs) -> Dict[str, Any]:
         """执行browser-use控制器的具体动作"""
         try:
-            # 创建动作模型
-            action_dict = {action_name: params}
-            action_model = ActionModel(**action_dict)
+            # 🔧 通用修复：统一处理空字典参数，保持接口一致性
+            # 如果参数是空字典，则不传递参数给ActionModel，避免验证错误
+            if not params or params == {}:
+                # 对于空参数，创建只包含动作名的ActionModel
+                action_model = ActionModel(**{action_name: None})
+            else:
+                # 对于有参数的动作，正常创建
+                action_dict = {action_name: params}
+                action_model = ActionModel(**action_dict)
             
             # 使用控制器执行动作
             # Controller.act()需要browser_context参数
@@ -1279,8 +1271,23 @@ class BrowserUseMCPServer:
                 retry_delay=5
             )
             
-            # 执行任务并获取完整的AgentHistoryList
-            agent_history = await agent.run(max_steps=max_steps)
+            # 执行任务并获取完整的AgentHistoryList，添加超时控制
+            task_timeout = min(max_steps * 30, 300)  # 每步最多30秒，总共最多5分钟
+            logger.info(f"🕐 执行任务，超时设置: {task_timeout}秒，最大步数: {max_steps}")
+            
+            try:
+                agent_history = await asyncio.wait_for(
+                    agent.run(max_steps=max_steps), 
+                    timeout=task_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"❌ 任务执行超时 ({task_timeout}秒)")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error_message": f"任务执行超时 ({task_timeout}秒)，请尝试减少max_steps或简化任务",
+                    "error_type": "TaskTimeout"
+                }
             
             # 使用Browser-Use风格的结果分析器
             analyzer = BrowserUseResultAnalyzer(agent_history)
@@ -1451,8 +1458,127 @@ class BrowserUseMCPServer:
                 "error_type": "URLError"
             }
     
+    async def _extract_google_search_results(self, query: str) -> Dict[str, Any]:
+        """专门提取Google搜索结果 - 基于官方browser-use最佳实践"""
+        try:
+            page = await self.browser_context.get_current_page()
+            url = page.url
+            
+            # 等待搜索结果加载
+            try:
+                await page.wait_for_selector('.g, .tF2Cxc', timeout=10000)
+            except:
+                logger.warning("Google搜索结果选择器等待超时，继续尝试提取")
+            
+            search_results = []
+            result_count = 0
+            
+            # 多种Google搜索结果选择器 - 适配不同版本的Google
+            result_selectors = [
+                '.g',  # 经典Google结果
+                '.tF2Cxc',  # 新版Google结果
+                '.g .rc',  # 备用选择器
+                '[data-sokoban-container]'  # 另一个可能的选择器
+            ]
+            
+            for selector in result_selectors:
+                try:
+                    elements = await page.query_selector_all(selector)
+                    if elements and len(elements) > 0:
+                        logger.info(f"找到 {len(elements)} 个搜索结果，使用选择器: {selector}")
+                        
+                        for i, element in enumerate(elements[:10]):  # 最多处理前10个结果
+                            try:
+                                # 提取标题
+                                title_selectors = ['h3', '.LC20lb', '.DKV0Md']
+                                title = ""
+                                for title_sel in title_selectors:
+                                    title_elem = await element.query_selector(title_sel)
+                                    if title_elem:
+                                        title = await title_elem.text_content() or ""
+                                        if title.strip():
+                                            break
+                                
+                                # 提取链接
+                                link_selectors = ['a[href]', '.yuRUbf a', 'h3 a']
+                                link = ""
+                                for link_sel in link_selectors:
+                                    link_elem = await element.query_selector(link_sel)
+                                    if link_elem:
+                                        link = await link_elem.get_attribute('href') or ""
+                                        if link and not link.startswith('/search'):
+                                            break
+                                
+                                # 提取摘要
+                                snippet_selectors = ['.VwiC3b', '.s3v9rd', '.st', '.X5LH0c']
+                                snippet = ""
+                                for snippet_sel in snippet_selectors:
+                                    snippet_elem = await element.query_selector(snippet_sel)
+                                    if snippet_elem:
+                                        snippet = await snippet_elem.text_content() or ""
+                                        if snippet.strip():
+                                            break
+                                
+                                if title.strip():  # 只有当有标题时才添加结果
+                                    search_results.append({
+                                        'title': title.strip(),
+                                        'url': link.strip() if link else '',
+                                        'snippet': snippet.strip(),
+                                        'position': i + 1
+                                    })
+                                    result_count += 1
+                                    
+                            except Exception as e:
+                                logger.warning(f"处理搜索结果 {i} 失败: {e}")
+                                continue
+                        
+                        if search_results:
+                            break  # 找到结果就退出循环
+                            
+                except Exception as e:
+                    logger.warning(f"选择器 {selector} 失败: {e}")
+                    continue
+            
+            if not search_results:
+                # 如果所有专用选择器都失败，尝试通用方法
+                logger.info("专用选择器失败，尝试通用内容提取")
+                return await self._extract_page_content({
+                    "goal": f"Google搜索结果: {query}",
+                    "include_links": True
+                })
+            
+            # 格式化搜索结果
+            formatted_content = f"# Google搜索结果: {query}\n\n"
+            formatted_content += f"找到 {result_count} 个相关结果\n\n"
+            
+            for i, result in enumerate(search_results, 1):
+                formatted_content += f"## {i}. {result['title']}\n"
+                if result['url']:
+                    formatted_content += f"**链接**: {result['url']}\n"
+                if result['snippet']:
+                    formatted_content += f"**摘要**: {result['snippet']}\n"
+                formatted_content += "\n"
+            
+            return {
+                "success": True,
+                "data": {
+                    "content": formatted_content,
+                    "url": url,
+                    "result_count": result_count,
+                    "raw_results": search_results,
+                    "extraction_method": "enhanced_google_search"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Google搜索结果提取失败: {e}")
+            return {
+                "success": False,
+                "error_message": f"Google搜索结果提取失败: {str(e)}"
+            }
+    
     async def _extract_page_content(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """提取页面内容"""
+        """提取页面内容 - 增强版本"""
         goal = parameters.get("goal", "提取页面主要内容")
         include_links = parameters.get("include_links", False)
         
@@ -1463,8 +1589,12 @@ class BrowserUseMCPServer:
             url = page.url
             title = await page.title()
             
+            # 检查是否是Google搜索页面
+            if "google.com/search" in url:
+                query = parameters.get("query", goal.replace("Google搜索结果: ", ""))
+                return await self._extract_google_search_results(query)
+            
             # 提取页面文本内容
-            # 获取主要内容元素
             main_content = ""
             
             # 尝试获取标题
@@ -1477,12 +1607,12 @@ class BrowserUseMCPServer:
             except:
                 pass
             
-            # 获取主要段落内容
+            # 获取主要段落内容 - 增强选择器
             try:
-                # 尝试常见的主内容选择器
                 content_selectors = [
                     "main", "article", ".content", "#content", 
-                    ".main-content", ".page-content", ".intro-text"
+                    ".main-content", ".page-content", ".intro-text",
+                    "[role='main']", ".post-content", ".entry-content"
                 ]
                 
                 found_content = False
@@ -1490,9 +1620,9 @@ class BrowserUseMCPServer:
                     try:
                         elements = await page.query_selector_all(selector)
                         if elements:
-                            for element in elements[:2]:  # 最多获取2个主要元素
+                            for element in elements[:3]:  # 增加到3个主要元素
                                 text = await element.text_content()
-                                if text and len(text.strip()) > 50:  # 只获取有意义的内容
+                                if text and len(text.strip()) > 30:  # 降低阈值
                                     main_content += f"{text.strip()}\n\n"
                                     found_content = True
                                     break
@@ -1501,12 +1631,12 @@ class BrowserUseMCPServer:
                     except:
                         continue
                 
-                # 如果没有找到主内容，获取所有段落
+                # 如果没有找到主内容，获取所有段落和div
                 if not found_content:
-                    p_elements = await page.query_selector_all("p")
-                    for p in p_elements[:5]:  # 最多5个段落
-                        text = await p.text_content()
-                        if text and len(text.strip()) > 20:
+                    text_elements = await page.query_selector_all("p, div.text, .description")
+                    for elem in text_elements[:8]:  # 增加到8个元素
+                        text = await elem.text_content()
+                        if text and len(text.strip()) > 15:  # 降低阈值
                             main_content += f"{text.strip()}\n\n"
                             
             except Exception as e:
@@ -1518,11 +1648,13 @@ class BrowserUseMCPServer:
                 try:
                     link_elements = await page.query_selector_all("a[href]")
                     links = []
-                    for link in link_elements[:10]:  # 最多10个链接
+                    for link in link_elements[:15]:  # 增加到15个链接
                         href = await link.get_attribute("href")
                         text = await link.text_content()
-                        if href and text and text.strip():
-                            links.append(f"- [{text.strip()}]({href})")
+                        if href and text and text.strip() and len(text.strip()) > 2:
+                            # 过滤掉内部锚点和javascript链接
+                            if not href.startswith('#') and not href.startswith('javascript:'):
+                                links.append(f"- [{text.strip()}]({href})")
                     if links:
                         links_content = "\n\n## 相关链接\n" + "\n".join(links)
                 except:
@@ -1533,10 +1665,14 @@ class BrowserUseMCPServer:
                 try:
                     body_text = await page.text_content("body")
                     if body_text:
-                        # 简单清理和截取
+                        # 改进的文本清理
                         lines = body_text.strip().split('\n')
-                        meaningful_lines = [line.strip() for line in lines if line.strip() and len(line.strip()) > 10]
-                        main_content = '\n'.join(meaningful_lines[:10])  # 最多10行
+                        meaningful_lines = []
+                        for line in lines:
+                            clean_line = line.strip()
+                            if clean_line and len(clean_line) > 5 and not clean_line.isspace():
+                                meaningful_lines.append(clean_line)
+                        main_content = '\n'.join(meaningful_lines[:20])  # 增加到20行
                 except:
                     main_content = "无法提取页面内容"
             
@@ -1552,7 +1688,7 @@ class BrowserUseMCPServer:
                     "content": final_content,
                     "content_length": len(final_content),
                     "include_links": include_links,
-                    "extraction_method": "direct_playwright"
+                    "extraction_method": "enhanced_playwright"
                 },
                 "error_message": "",
                 "error_type": ""
@@ -1785,7 +1921,7 @@ async def main():
     except OSError as e:
         if "Address already in use" in str(e) or "Errno 48" in str(e):
             logger.error(f"端口冲突: {e}")
-            logger.error("端口8084已被占用，请检查是否有其他Browser Use进程正在运行")
+            logger.error("端口8082已被占用，请检查是否有其他Browser Use进程正在运行")
             sys.exit(1)
         else:
             logger.error(f"网络错误: {e}")

@@ -1,5 +1,4 @@
-{"task_id": "test_microsandbox", "task_type": "code", "description": "使用MicroSandbox执行Python代码：计算斐波那契数列前10项", "expected_tools": ["microsandbox_execute"], "max_steps": 3}
-{"task_id": "test_deepsearch", "task_type": "research", "description": "使用DeepSearch研究：Python asyncio的基本概念和用法", "expected_tools": ["research"], "max_steps": 4}
-{"task_id": "test_browser_use", "task_type": "web", "description": "使用Browser-Use访问Python官网首页并将其主要信息用 md 抓取下来", "expected_tools": [], "max_steps": 3}
-{"task_id": "test_search_tool", "task_type": "reasoning", "description": "使用Search Tool在项目中搜索包含'asyncio'的文件内容", "expected_tools": ["search_file_content"], "max_steps": 2}
-{"task_id": "test_reasoning_combo", "task_type": "reasoning", "description": "复合推理任务：先用DeepSearch研究Python数据分析最佳实践，然后用MicroSandbox编写并执行一个简单的数据分析示例代码，最后用Search Tool查找项目中相关的代码模式", "expected_tools": ["research", "microsandbox_execute", "search_file_content"], "max_steps": 8}
+{"task_id": "任务执行模式测试", "task_type": "reasoning", "description": "用browser_use的browser_use_execute_task功能来搜索NUS IORA的Pang Yan是谁"}
+{"task_id": "基础测试", "task_type": "reasoning", "description": "用browser_use来搜索NUS IORA是什么学校"}
+{"task_id": "tool_star_52048", "task_type": "reasoning", "description": "In what city and state were the vocals of the main show and theme song for \"BraviSEAmo!\" recorded?"}
+{"task_id": "tool_star_44224", "task_type": "reasoning", "description": "Residential area roads are generally divided into three or four levels, which are used to solve the internal and external connections of residential groups. The branch roads within the residential area is called ()?\nA. Residential cul-de-sac routes\nB. Small path in front of the house\nC. Residential zone transit ways\nD. Residential neighborhood pathways\nE. Residential precinct streets\nF. Residential enclave footpaths\nG. Residential district roads\nH. Residential community level roads\nI. Residential group level roads\nJ. Residential community access roads"}

@@ -247,6 +247,9 @@ async def start_runtime_service(runtime, redis_manager=None):
                     # 每30秒检查一次是否有模拟任务
                     await asyncio.sleep(30)
                     logger.debug(f"Runtime {runtime.runtime_id} 在内存模式下等待任务...")
+                except (asyncio.CancelledError, GeneratorExit):
+                    logger.info(f"Runtime {runtime.runtime_id} 内存模式服务已取消或生成器退出")
+                    break
                 except KeyboardInterrupt:
                     break
                 except Exception as e:
@@ -307,126 +310,171 @@ async def start_runtime_service(runtime, redis_manager=None):
             pass
         # 消费循环
         logger.info(f"Runtime {runtime.runtime_id} starting consumer loop for queue {queue_name}")
-        while True:
-            try:
-                logger.debug(f"Runtime {runtime.runtime_id} reading from queue {queue_name}...")
-                msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=5000)
-                if not msgs:
-                    logger.debug(f"Runtime {runtime.runtime_id} no new messages after 5s timeout, continuing...")
+        try:
+            while True:
+                try:
+                    logger.debug(f"Runtime {runtime.runtime_id} reading from queue {queue_name}...")
+                    msgs = await r.xreadgroup(group, consumer_id, {queue_name: ">"}, count=1, block=5000)
+                    if not msgs:
+                        logger.debug(f"Runtime {runtime.runtime_id} no new messages after 5s timeout, continuing...")
+                        continue
+                except (asyncio.CancelledError, GeneratorExit):
+                    # 正常取消或生成器退出，退出循环
+                    logger.info(f"Runtime {runtime.runtime_id} consumer cancelled or generator exit")
+                    break
+                except Exception as e:
+                    logger.error(f"Error reading from queue {queue_name}: {e}")
+                    await asyncio.sleep(1)
                     continue
-            except asyncio.CancelledError:
-                # 正常取消，退出循环
-                logger.info(f"Runtime {runtime.runtime_id} consumer cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Error reading from queue {queue_name}: {e}")
-                await asyncio.sleep(1)
-                continue
-            logger.info(f"Runtime {runtime.runtime_id} received {len(msgs)} message(s) from queue {queue_name}")
-            for _, entries in msgs:
-                for msg_id, fields in entries:
-                    try:
-                        logger.info(f"Runtime {runtime.runtime_id} processing message {msg_id}")
-                        
-                        # 🚀 检查消息的交付次数 - 毒丸检测
-                        delivery_count = 1  # Redis Stream默认从1开始
-                        
-                        # 从Redis Stream信息中获取实际的delivery count
+                    
+                logger.info(f"Runtime {runtime.runtime_id} received {len(msgs)} message(s) from queue {queue_name}")
+                for _, entries in msgs:
+                    for msg_id, fields in entries:
                         try:
-                            # 🔧 修复Redis xpending命令参数错误：使用xpending_range获取详细信息
-                            pending_info = await r.xpending_range(queue_name, group, min=msg_id, max=msg_id, count=1)
-                            if pending_info:
-                                delivery_count = pending_info[0]['times_delivered']  # 使用正确的字段名
-                        except Exception as e:
-                            logger.debug(f"无法获取消息delivery count: {e}")
-                        
-                        MAX_RETRIES = 3
-                        if delivery_count > MAX_RETRIES:
-                            # 🚨 毒丸处理：将消息移到死信队列
-                            logger.warning(f"Poison pill detected: message {msg_id} has been delivered {delivery_count} times (>{MAX_RETRIES})")
+                            logger.info(f"Runtime {runtime.runtime_id} processing message {msg_id}")
                             
+                            # 🚀 检查消息的交付次数 - 毒丸检测
+                            delivery_count = 1  # Redis Stream默认从1开始
+                            
+                            # 从Redis Stream信息中获取实际的delivery count
                             try:
-                                # 将消息添加到死信队列
-                                dead_letter_data = {
-                                    'original_message_id': msg_id,
-                                    'original_queue': queue_name,
-                                    'delivery_count': delivery_count,
-                                    'poison_detected_at': time.time(),
-                                    'original_data': fields[b'task'].decode()
-                                }
-                                await r.xadd('tasks:dead_letter', dead_letter_data)
-                                logger.info(f"Moved poison pill {msg_id} to dead letter queue")
+                                # 🔧 修复Redis xpending命令参数错误：使用xpending_range获取详细信息
+                                pending_info = await r.xpending_range(queue_name, group, min=msg_id, max=msg_id, count=1)
+                                if pending_info:
+                                    delivery_count = pending_info[0]['times_delivered']  # 使用正确的字段名
                             except Exception as e:
-                                logger.error(f"Failed to move poison pill to dead letter queue: {e}")
+                                logger.debug(f"无法获取消息delivery count: {e}")
                             
-                            # 立即确认消息以从主队列移除
+                            MAX_RETRIES = 3
+                            if delivery_count > MAX_RETRIES:
+                                # 🚨 毒丸处理：将消息移到死信队列
+                                logger.warning(f"Poison pill detected: message {msg_id} has been delivered {delivery_count} times (>{MAX_RETRIES})")
+                                
+                                try:
+                                    # 将消息添加到死信队列
+                                    dead_letter_data = {
+                                        'original_message_id': msg_id,
+                                        'original_queue': queue_name,
+                                        'delivery_count': delivery_count,
+                                        'poison_detected_at': time.time(),
+                                        'original_data': fields[b'task'].decode()
+                                    }
+                                    await r.xadd('tasks:dead_letter', dead_letter_data)
+                                    logger.info(f"Moved poison pill {msg_id} to dead letter queue")
+                                except Exception as e:
+                                    logger.error(f"Failed to move poison pill to dead letter queue: {e}")
+                                
+                                # 立即确认消息以从主队列移除
+                                await r.xack(queue_name, group, msg_id)
+                                logger.info(f"Acknowledged and removed poison pill {msg_id} from main queue")
+                                continue  # 跳过处理，继续下一条消息
+                            
+                            data = json.loads(fields[b'task'].decode())
+                            task = TaskSpec.from_dict(data)
+                            logger.info(f"Processing task {task.task_id} from queue {queue_name} (delivery #{delivery_count})")
+                            
+                            # 更新任务状态为运行中
+                            await _update_task_api_status(r, task.task_id, "running")
+                            
+                            result = await runtime.execute(task)
+                            
+                            # 更新任务状态为已完成
+                            final_status = "completed" if result.success else "failed"
+                            await _update_task_api_status(r, task.task_id, final_status, result)
+                            
+                            # 路径由 runtime 自行保存轨迹
+                            logger.info(f"Task {task.task_id} executed successfully: {result.success}")
+                            
+                            # 确认消息处理完成
                             await r.xack(queue_name, group, msg_id)
-                            logger.info(f"Acknowledged and removed poison pill {msg_id} from main queue")
-                            continue  # 跳过处理，继续下一条消息
-                        
-                        data = json.loads(fields[b'task'].decode())
-                        task = TaskSpec.from_dict(data)
-                        logger.info(f"Processing task {task.task_id} from queue {queue_name} (delivery #{delivery_count})")
-                        
-                        # 更新任务状态为运行中
-                        await _update_task_api_status(r, task.task_id, "running")
-                        
-                        result = await runtime.execute(task)
-                        
-                        # 更新任务状态为已完成
-                        final_status = "completed" if result.success else "failed"
-                        await _update_task_api_status(r, task.task_id, final_status, result)
-                        
-                        # 路径由 runtime 自行保存轨迹
-                        logger.info(f"Task {task.task_id} executed successfully: {result.success}")
-                    except Exception as e:
-                        # 记录详细的错误信息
-                        logger.error(f"Error executing task {data.get('task_id', 'unknown')}: {e}", exc_info=True)
-                        
-                        # 更新任务状态为失败
-                        task_id = data.get('task_id', 'unknown')
-                        await _update_task_api_status(r, task_id, "failed")
-                        
-                        # 创建错误轨迹结果
-                        try:
-                            error_result = TrajectoryResult(
-                                task_name=data.get('task_id', 'unknown'),
-                                task_id=data.get('task_id', 'unknown'),
-                                task_description=data.get('description', ''),
-                                runtime_id=getattr(runtime, 'runtime_id', 'unknown'),
-                                success=False,
-                                steps=[],
-                                final_result="",
-                                error_message=str(e),
-                                error_type=ErrorType.SYSTEM_ERROR,
-                                total_duration=0,
-                                metadata={"execution_error": True, "error_details": str(e)}
-                            )
+                        except (asyncio.CancelledError, GeneratorExit):
+                            # 任务被取消或生成器退出，向上传播
+                            logger.info(f"Task execution cancelled or generator exit for task {data.get('task_id', 'unknown')}")
+                            raise
+                        except Exception as e:
+                            # 记录详细的错误信息
+                            logger.error(f"Error executing task {data.get('task_id', 'unknown')}: {e}", exc_info=True)
                             
-                            # 尝试保存错误轨迹
-                            if hasattr(runtime, '_save_trajectory'):
-                                await runtime._save_trajectory(error_result)
-                        except Exception as save_error:
-                            logger.error(f"Failed to save error trajectory: {save_error}")
-                        
-                        # 记录指标
-                        if hasattr(runtime, 'metrics'):
-                            runtime.metrics.record_task_failure(
-                                data.get('task_id', 'unknown'), 
-                                getattr(runtime, 'runtime_id', 'unknown'),
+                            # 更新任务状态为失败
+                            task_id = data.get('task_id', 'unknown')
+                            await _update_task_api_status(r, task_id, "failed")
+                            
+                            # 尝试保存失败任务的轨迹
+                            try:
+                                # 尝试从runtime获取到目前为止的轨迹数据
+                                raw_response = f"任务执行失败: {str(e)}"
+                                execution_duration = 0
+                                
+                                if hasattr(runtime, 'step_logger') and runtime.step_logger:
+                                    # 获取已记录的交互历史
+                                    try:
+                                        step_data = await runtime.step_logger.get_execution_steps()
+                                        if step_data:
+                                            # 构建详细的执行历史
+                                            history_parts = [f"任务执行了 {len(step_data)} 个步骤后失败:"]
+                                            for i, step in enumerate(step_data, 1):
+                                                step_desc = step.get('step_description', f'步骤{i}')
+                                                step_status = step.get('step_status', 'unknown')
+                                                history_parts.append(f"  步骤{i}: {step_desc} ({step_status})")
+                                            
+                                            history_parts.append(f"\n最终错误: {str(e)}")
+                                            raw_response = "\n".join(history_parts)
+                                        
+                                        # 尝试获取任务执行时长
+                                        if hasattr(runtime.step_logger, 'current_task_data') and runtime.step_logger.current_task_data:
+                                            task_data = runtime.step_logger.current_task_data
+                                            if 'task_start_time' in task_data:
+                                                from datetime import datetime
+                                                start_time = datetime.fromisoformat(task_data['task_start_time'])
+                                                execution_duration = (datetime.now() - start_time).total_seconds()
+                                    except Exception as step_error:
+                                        logger.debug(f"获取步骤数据失败: {step_error}")
+                                        raw_response = f"任务执行失败 (无法获取详细步骤): {str(e)}"
+                                
+                                # 构建轨迹数据格式（与成功任务一致）
+                                if hasattr(runtime, '_save_xml_output'):
+                                    from datetime import datetime
+                                    xml_output = {
+                                        "timestamp": datetime.now().isoformat(),
+                                        "task_id": task_id,
+                                        "task_description": data.get('description', ''),
+                                        "duration": execution_duration,
+                                        "success": False,
+                                        "final_result": f"任务执行失败: {str(e)}",
+                                        "raw_response": raw_response
+                                    }
+                                    await runtime._save_xml_output(xml_output)
+                                    logger.info(f"已保存失败任务 {task_id} 的轨迹 ({execution_duration:.1f}s)")
+                            except Exception as save_error:
+                                logger.error(f"Failed to save error trajectory: {save_error}")
+                            
+                            # 记录指标
+                            if hasattr(runtime, 'metrics'):
+                                runtime.metrics.record_task_failure(
+                                    data.get('task_id', 'unknown'), 
+                                    getattr(runtime, 'runtime_id', 'unknown'),
                                 "system_error"
                             )
-                    finally:
-                        await r.xack(queue_name, group, msg_id)
+                        finally:
+                            await r.xack(queue_name, group, msg_id)
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info(f"Runtime {runtime.runtime_id} service loop cancelled or generator exit.")
+            raise  # 重新抛出异常，让外层循环正确处理
+        finally:
+            # 确保在退出时关闭Redis连接
+            if 'r' in locals() and hasattr(r, 'close'):
+                await r.close()
+                logger.info(f"Runtime {runtime.runtime_id} Redis connection closed.")
 
     # === 改进：自动重启消费协程，防止异常退出导致任务堆积 ===
     while True:
         try:
             await _run_service()
-        except (asyncio.CancelledError, GeneratorExit):
-            # 正常取消或生成器退出时直接退出
-            logger.info(f"Runtime {getattr(runtime, 'runtime_id', 'unknown')} service stopped normally")
+            # 如果 _run_service 正常退出，也退出循环
             break
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info(f"Runtime {runtime.runtime_id} service loop cancelled or generator exit.")
+            break  # 跳出循环，正常退出
         except Exception as fatal_err:
             logger.exception(f"❌ Runtime {getattr(runtime, 'runtime_id', 'unknown')} crashed: {fatal_err}")
             # 留出短暂冷却时间后自动重启
