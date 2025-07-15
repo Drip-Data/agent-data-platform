@@ -22,3 +22,7 @@ llm_providers:
     #gemini-2.5-pro
 
 default_provider: "gemini"
+
+anti_scraping:
+  proxy_enabled: false
+  proxy_server: "http://user:pass@host:port" # 示例：http://your_proxy_server_address

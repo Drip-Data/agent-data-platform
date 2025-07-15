@@ -47,6 +47,19 @@ sudo systemctl start redis-server
 # Start the Agent Data Platform
 # The script will automatically use the python from your virtual environment
 venv/bin/python3 main.py
+
+### 启动应用 (在无图形界面的服务器上)
+
+为了在没有图形界面的服务器环境（如大多数云服务器）中运行 `browser_use_server` 并有效规避反爬虫检测，我们必须使用 `Xvfb`（X 虚拟帧缓冲器）来模拟一个显示器。这允许浏览器以“非无头”模式运行，极大地提高了成功率。
+
+**请使用以下命令启动整个平台:**
+
+```bash
+xvfb-run -a --server-args="-screen 0 1280x1024x24" venv/bin/python3 main.py
+```
+
+此命令会创建一个 1280x1024 分辨率的虚拟屏幕，并在此环境中运行应用。
+```
 ```
 The platform is now running!
 

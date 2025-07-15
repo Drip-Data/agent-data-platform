@@ -13,6 +13,7 @@ import os
 import json
 import time
 import re  # 🔧 修复：将re模块移到全局导入，避免作用域问题
+import random
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
@@ -1086,15 +1087,27 @@ class BrowserUseMCPServer:
         """确保browser和context已初始化"""
         if self.browser is None:
             try:
+                # 读取反爬虫配置
+                anti_scraping_config = self.config_manager.get_config('anti_scraping', {})
+                proxy_settings = None
+                if anti_scraping_config.get('proxy_enabled', False):
+                    proxy_server = anti_scraping_config.get('proxy_server')
+                    if proxy_server:
+                        proxy_settings = {"server": proxy_server}
+
                 # 🔧 增强的反检测浏览器配置
                 # 🚀 Enhanced Browser Config - 基于官方browser-use最佳实践
                 # 关闭无头模式以减少反爬虫检测
                 browser_config = BrowserConfig(
-                    headless=False,  # 关闭无头模式，可视化调试
+                    headless=False,  # 在虚拟显示环境中以非无头模式运行
+                    proxy=proxy_settings,  # <--- 应用代理
                     disable_security=True,
                     extra_chromium_args=[
-                        # 基础安全和性能参数
+                        # 核心修复：解决无头环境下的常见问题
                         "--no-sandbox",
+                        "--disable-setuid-sandbox",
+
+                        # 基础安全和性能参数
                         "--disable-dev-shm-usage", 
                         "--disable-gpu",
                         "--disable-extensions",
@@ -1110,7 +1123,7 @@ class BrowserUseMCPServer:
                         "--disable-client-side-phishing-detection",
                         
                         # 🔧 增强的用户代理和伪装 - 使用最新Chrome
-                        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                        "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
                         
                         # 🚄 性能优化 - 更快的搜索体验
                         "--disable-background-timer-throttling",
@@ -1140,7 +1153,7 @@ class BrowserUseMCPServer:
                         # 🎭 模拟真实用户行为
                         "--simulate-outdated-no-au",
                         "--disable-features=VizDisplayCompositor",
-                        "--start-maximized"  # 最大化窗口便于观察
+                        "--start-maximized"
                     ]
                 )
                 
@@ -1196,6 +1209,9 @@ class BrowserUseMCPServer:
     
     async def _execute_action(self, action_name: str, params: dict, **kwargs) -> Dict[str, Any]:
         """执行browser-use控制器的具体动作"""
+        # 模拟人类行为，加入随机延迟
+        delay = random.uniform(0.5, 2.5) # 随机延迟0.5到2.5秒
+        await asyncio.sleep(delay)
         try:
             # 🔧 通用修复：统一处理空字典参数，保持接口一致性
             # 如果参数是空字典，则不传递参数给ActionModel，避免验证错误
