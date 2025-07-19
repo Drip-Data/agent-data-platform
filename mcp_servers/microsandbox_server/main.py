@@ -380,16 +380,39 @@ class MicroSandboxMCPServer:
             raise
         
     def get_capabilities(self) -> List[ToolCapability]:
-        """获取MicroSandbox工具的所有能力"""
-        tool_info = self.tool_manager.get_tool_info(self.server_name)
-        capabilities = []
-        for action_name, action_def in tool_info.get('actions', {}).items():
-            capabilities.append(ToolCapability(
-                name=action_name,
-                description=action_def.get('description', ''),
-                parameters=action_def.get('parameters', {}),
-                examples=action_def.get('examples', [])
-            ))
+        """获取MicroSandbox工具的所有能力 - 使用动态工具加载器"""
+        try:
+            from core.toolscore.dynamic_tool_loader import get_dynamic_tool_loader
+            
+            # 从统一配置动态加载工具定义
+            loader = get_dynamic_tool_loader()
+            server_def = loader.get_server_definition(self.server_id)
+            
+            capabilities = []
+            for tool_def in server_def.capabilities:
+                capabilities.append(ToolCapability(
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    parameters=tool_def.parameters,
+                    examples=tool_def.examples or []
+                ))
+            
+            logger.info(f"✅ 从统一配置加载了 {len(capabilities)} 个MicroSandbox工具定义")
+            return capabilities
+            
+        except Exception as e:
+            logger.error(f"❌ 动态加载工具定义失败，回退到传统方式: {e}")
+            # 回退到原有方式
+            tool_info = self.tool_manager.get_tool_info(self.server_name)
+            capabilities = []
+            for action_name, action_def in tool_info.get('actions', {}).items():
+                capabilities.append(ToolCapability(
+                    name=action_name,
+                    description=action_def.get('description', ''),
+                    parameters=action_def.get('parameters', {}),
+                    examples=action_def.get('examples', [])
+                ))
+            return capabilities
         return capabilities
     
     async def handle_tool_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

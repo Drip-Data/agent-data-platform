@@ -9,127 +9,29 @@
   "capabilities": [
     {
       "name": "microsandbox_execute",
-      "description": "执行Python代码",
+      "description": "在沙盒中安全执行代码",
       "parameters": {
         "code": {
           "type": "string",
-          "description": "要执行的Python代码"
+          "description": "要执行的代码"
         },
-        "session_id": {
+        "language": {
           "type": "string",
-          "description": "会话标识符"
+          "description": "编程语言"
         },
         "timeout": {
           "type": "integer",
-          "description": "超时时间（秒）"
+          "description": "超时时间"
         }
       },
       "required_params": [
-        "code"
+        "code",
+        "language"
       ],
       "optional_params": [
-        "session_id",
         "timeout"
       ],
-      "examples": [
-        {
-          "code": "print('Hello World'); result = 2 + 3; print(result)",
-          "timeout": 30
-        }
-      ]
-    },
-    {
-      "name": "microsandbox_install_package",
-      "description": "安装Python包",
-      "parameters": {
-        "package_name": {
-          "type": "string",
-          "description": "包名称"
-        },
-        "version": {
-          "type": "string",
-          "description": "包版本"
-        },
-        "session_id": {
-          "type": "string",
-          "description": "会话标识符"
-        }
-      },
-      "required_params": [
-        "package_name"
-      ],
-      "optional_params": [
-        "version",
-        "session_id"
-      ],
-      "examples": [
-        {
-          "package_name": "numpy",
-          "version": "1.21.0"
-        }
-      ]
-    },
-    {
-      "name": "microsandbox_list_sessions",
-      "description": "列出活跃会话",
-      "parameters": {},
-      "required_params": [],
-      "optional_params": [],
-      "examples": [{}]
-    },
-    {
-      "name": "microsandbox_close_session",
-      "description": "关闭会话",
-      "parameters": {
-        "session_id": {
-          "type": "string",
-          "description": "要关闭的会话标识符"
-        }
-      },
-      "required_params": [
-        "session_id"
-      ],
-      "optional_params": [],
-      "examples": [
-        {
-          "session_id": "my-session"
-        }
-      ]
-    },
-    {
-      "name": "microsandbox_cleanup_expired",
-      "description": "清理过期会话",
-      "parameters": {
-        "max_age": {
-          "type": "integer",
-          "description": "最大年龄秒数"
-        }
-      },
-      "required_params": [],
-      "optional_params": [
-        "max_age"
-      ],
-      "examples": [
-        {
-          "max_age": 3600
-        }
-      ]
-    },
-    {
-      "name": "microsandbox_get_performance_stats",
-      "description": "获取性能统计",
-      "parameters": {},
-      "required_params": [],
-      "optional_params": [],
-      "examples": [{}]
-    },
-    {
-      "name": "microsandbox_get_health_status",
-      "description": "获取健康状态",
-      "parameters": {},
-      "required_params": [],
-      "optional_params": [],
-      "examples": [{}]
+      "examples": []
     }
   ],
   "tags": [

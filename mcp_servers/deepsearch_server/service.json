@@ -8,85 +8,30 @@
   "port": 8086,
   "capabilities": [
     {
-      "name": "research",
-      "description": "专业级深度研究",
+      "name": "deep_search",
+      "description": "执行深度搜索分析",
       "parameters": {
-        "question": {
+        "query": {
           "type": "string",
-          "description": "研究问题或查询"
+          "description": "搜索查询"
         },
-        "initial_queries": {
-          "type": "array",
-          "description": "初始查询列表"
-        },
-        "max_loops": {
+        "depth": {
           "type": "integer",
-          "description": "最大循环次数"
+          "description": "搜索深度"
         },
-        "reasoning_model": {
-          "type": "string",
-          "description": "推理模型"
+        "sources": {
+          "type": "array",
+          "description": "搜索源"
         }
       },
       "required_params": [
-        "question"
+        "query"
       ],
       "optional_params": [
-        "initial_queries",
-        "max_loops",
-        "reasoning_model"
+        "depth",
+        "sources"
       ],
-      "examples": [
-        {
-          "question": "Python asyncio最佳实践",
-          "max_loops": 3
-        }
-      ]
-    },
-    {
-      "name": "quick_research",
-      "description": "快速研究",
-      "parameters": {
-        "question": {
-          "type": "string",
-          "description": "研究问题"
-        }
-      },
-      "required_params": [
-        "question"
-      ],
-      "optional_params": [],
-      "examples": [
-        {
-          "question": "机器学习基础概念"
-        }
-      ]
-    },
-    {
-      "name": "comprehensive_research",
-      "description": "全面深入研究",
-      "parameters": {
-        "question": {
-          "type": "string",
-          "description": "研究问题"
-        },
-        "topic_focus": {
-          "type": "string",
-          "description": "主题焦点"
-        }
-      },
-      "required_params": [
-        "question"
-      ],
-      "optional_params": [
-        "topic_focus"
-      ],
-      "examples": [
-        {
-          "question": "区块链技术发展趋势",
-          "topic_focus": "2024年最新进展"
-        }
-      ]
+      "examples": []
     }
   ],
   "tags": [

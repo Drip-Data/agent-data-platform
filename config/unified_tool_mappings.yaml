@@ -125,7 +125,7 @@ action_mappings:
       status: microsandbox_get_health_status
       check_health: microsandbox_get_health_status
 
-  # Browser工具动作 - 完整映射（26个工具）
+  # Browser工具动作 - 完整映射（27个工具）
   browser_use:
     canonical_actions:
       # 🧭 导航控制
@@ -143,6 +143,7 @@ action_mappings:
       
       # 📄 内容操作
       - browser_extract_content
+      - browser_get_content
       - browser_search_google
       - browser_screenshot
       - browser_save_pdf
@@ -221,6 +222,12 @@ action_mappings:
       read_page: browser_extract_content
       scrape: browser_extract_content
       extract: browser_extract_content
+      
+      # CSS选择器内容获取别名
+      get_content_by_selector: browser_get_content
+      extract_by_selector: browser_get_content
+      query_content: browser_get_content
+      select_content: browser_get_content
       
       search_google: browser_search_google
       google_search: browser_search_google
@@ -664,11 +671,17 @@ tool_parameters:
     browser_extract_content:
       goal:
         type: string
-        description: "提取目标描述"
+        description: "AI驱动的内容提取目标描述"
         required: true
       include_links:
         type: boolean
         description: "是否包含链接，默认false"
+        required: false
+    
+    browser_get_content:
+      selector:
+        type: string
+        description: "CSS选择器，用于精确提取特定元素内容，空则获取全部页面内容"
         required: false
     
     browser_get_ax_tree:

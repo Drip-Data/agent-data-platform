@@ -921,6 +921,39 @@ class BrowserUseMCPServer:
         except Exception as e:
             logger.warning(f"Action validation failed: {e}, continuing with startup")
         
+        # 🤖 新增：处理器同步验证和自动修复
+        try:
+            from core.toolscore.action_handlers_synchronizer import create_synchronizer_for_server
+            
+            synchronizer = create_synchronizer_for_server(self)
+            
+            # 尝试自动修复处理器映射
+            auto_fix_success = synchronizer.auto_fix_handlers_mapping()
+            
+            # 验证同步状态
+            validation = synchronizer.validate_handlers_consistency()
+            
+            if validation['is_consistent']:
+                logger.info(f"✅ {self.server_name} 处理器完全同步 - 配置与实现一致")
+            else:
+                logger.warning(f"⚠️ {self.server_name} 处理器同步问题:")
+                if validation['missing_handlers']:
+                    logger.warning(f"  缺失处理器: {validation['missing_handlers']}")
+                if validation['extra_handlers']:
+                    logger.warning(f"  多余处理器: {validation['extra_handlers']}")
+                
+                # 生成修复代码模板
+                if validation['missing_handlers']:
+                    fix_code = synchronizer.generate_missing_handlers_code()
+                    logger.info("🛠️ 生成的修复代码模板:")
+                    for line in fix_code.split('\n')[:20]:  # 只显示前20行
+                        logger.info(f"    {line}")
+            
+        except ImportError:
+            logger.warning("⚠️ 处理器同步器不可用，跳过自动同步验证")
+        except Exception as e:
+            logger.error(f"处理器同步验证失败: {e}")
+        
         logger.info(f"BrowserUseMCPServer initialized:")
         logger.info(f"  Server Name: {self.server_name}")
         logger.info(f"  Server ID: {self.server_id}")
@@ -930,20 +963,48 @@ class BrowserUseMCPServer:
         logger.info(f"  ToolScore Endpoint: {self.toolscore_endpoint}")
 
     def _validate_actions(self):
-        """验证所有在配置中声明的动作都有对应的处理函数。"""
+        """验证所有在配置中声明的动作都有对应的处理函数 - 使用动态配置验证"""
         try:
-            declared_actions = set(self.tool_manager.get_tool_actions(self.server_name))
-            implemented_actions = set(self._action_handlers.keys())
-
-            missing = declared_actions - implemented_actions
-            if missing:
-                raise NotImplementedError(f"服务器 {self.server_name} 在配置中声明了动作 {missing}，但没有实现对应的处理函数！")
-
-            extra = implemented_actions - declared_actions
-            if extra:
-                logging.warning(f"服务器 {self.server_name} 实现了多余的动作 {extra}，这些动作未在配置中声明。")
+            from core.toolscore.dynamic_tool_loader import get_dynamic_tool_loader
             
-            logger.info(f"✅ {self.server_name} 的所有动作已验证。")
+            # 使用动态工具加载器进行一致性验证
+            loader = get_dynamic_tool_loader()
+            validation_result = loader.validate_server_consistency(self.server_id, self._action_handlers)
+            
+            if validation_result['is_consistent']:
+                logger.info(f"✅ {self.server_name} 的所有动作已验证 - 配置与实现完全一致")
+                logger.info(f"  📊 统计: {validation_result['summary']['total_configured']} 个动作完全匹配")
+            else:
+                error_msg = f"❌ 服务器 {self.server_name} 配置与实现不一致!"
+                
+                if validation_result['missing_implementations']:
+                    error_msg += f"\n  缺少实现的动作: {validation_result['missing_implementations']}"
+                
+                if validation_result['extra_implementations']:
+                    error_msg += f"\n  多余实现的动作: {validation_result['extra_implementations']}"
+                
+                logger.error(error_msg)
+                raise NotImplementedError(error_msg)
+            
+        except ImportError:
+            logger.warning("⚠️ 动态工具加载器不可用，回退到传统验证方式")
+            # 回退到原有验证逻辑
+            try:
+                declared_actions = set(self.tool_manager.get_tool_actions(self.server_name))
+                implemented_actions = set(self._action_handlers.keys())
+
+                missing = declared_actions - implemented_actions
+                if missing:
+                    raise NotImplementedError(f"服务器 {self.server_name} 在配置中声明了动作 {missing}，但没有实现对应的处理函数！")
+
+                extra = implemented_actions - declared_actions
+                if extra:
+                    logging.warning(f"服务器 {self.server_name} 实现了多余的动作 {extra}，这些动作未在配置中声明。")
+                
+                logger.info(f"✅ {self.server_name} 的所有动作已验证（传统方式）。")
+            except Exception as e:
+                logger.error(f"传统验证方式也失败: {e}", exc_info=True)
+                raise
         except Exception as e:
             logger.error(f"动作验证失败: {e}", exc_info=True)
             raise
@@ -1182,17 +1243,39 @@ class BrowserUseMCPServer:
             logger.info("Controller initialized")
     
     def get_capabilities(self) -> List[ToolCapability]:
-        """获取Browser-Use工具的所有能力"""
-        tool_info = self.tool_manager.get_tool_info(self.server_name)
-        capabilities = []
-        for action_name, action_def in tool_info.get('actions', {}).items():
-            capabilities.append(ToolCapability(
-                name=action_name,
-                description=action_def.get('description', ''),
-                parameters=action_def.get('parameters', {}),
-                examples=action_def.get('examples', [])
-            ))
-        return capabilities
+        """获取Browser-Use工具的所有能力 - 使用动态工具加载器"""
+        try:
+            from core.toolscore.dynamic_tool_loader import get_dynamic_tool_loader
+            
+            # 从统一配置动态加载工具定义
+            loader = get_dynamic_tool_loader()
+            server_def = loader.get_server_definition(self.server_id)
+            
+            capabilities = []
+            for tool_def in server_def.capabilities:
+                capabilities.append(ToolCapability(
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    parameters=tool_def.parameters,
+                    examples=tool_def.examples or []
+                ))
+            
+            logger.info(f"✅ 从统一配置加载了 {len(capabilities)} 个Browser-Use工具定义")
+            return capabilities
+            
+        except Exception as e:
+            logger.error(f"❌ 动态加载工具定义失败，回退到传统方式: {e}")
+            # 回退到原有方式
+            tool_info = self.tool_manager.get_tool_info(self.server_name)
+            capabilities = []
+            for action_name, action_def in tool_info.get('actions', {}).items():
+                capabilities.append(ToolCapability(
+                    name=action_name,
+                    description=action_def.get('description', ''),
+                    parameters=action_def.get('parameters', {}),
+                    examples=action_def.get('examples', [])
+                ))
+            return capabilities
     
     async def handle_tool_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """处理工具动作执行"""
