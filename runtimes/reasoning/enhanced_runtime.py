@@ -1497,11 +1497,14 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             # 不应该将纯思考内容当作最终答案，模型可能只是在第一步思考
             # 让执行流程继续，如果确实需要工具执行，后续的逻辑会处理
 
-            # 🔧 Stage 2 增强：复杂任务检测与强制执行机制
+            # 🔧 Stage 2 增强：复杂任务检测与强制执行机制（修复误判问题）
             if not actions:
-                # 🚨 新增：复杂任务检测与强制执行
-                if self._is_complex_task_response(response_text):
-                    logger.warning("🚨 检测到复杂任务但无工具执行 - 强制执行第一步")
+                # 🔧 修复：检查是否已有工具执行历史，避免在多步执行的后续阶段误触发
+                has_tool_history = self._has_previous_tool_execution(history, full_trajectory)
+                
+                # 🚨 只在没有执行历史且检测到复杂任务时才触发强制执行
+                if self._is_complex_task_response(response_text) and not has_tool_history:
+                    logger.warning("🚨 检测到初始复杂任务规划但无工具执行 - 强制执行第一步")
                     
                     # 尝试强制执行第一步
                     force_execution_result = await self._force_first_step_execution(response_text, task)
@@ -1512,6 +1515,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                         # 🔍 完成步骤记录
                         self.step_logger.finish_step("complex_task_forced_execution")
                         continue
+                elif has_tool_history and self._is_complex_task_response(response_text):
+                    # 🔧 已有执行历史的情况下，不触发强制执行，记录调试信息
+                    logger.debug("🔍 检测到复杂任务响应，但已有工具执行历史，继续正常流程")
                 
                 # 🔧 原有的计划-执行桥梁机制（作为备选方案）
                 plan_content = self._extract_detailed_plan(response_text)
@@ -3100,6 +3106,30 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         except Exception as e:
             logger.error(f"⚠️ 强制执行机制失败: {e}")
             return None
+    
+    def _has_previous_tool_execution(self, history: List[Dict], full_trajectory: List[Dict]) -> bool:
+        """检查是否已有工具执行历史 - 修复强制执行机制误判"""
+        import re
+        
+        # 检查所有历史记录中是否包含工具调用
+        all_entries = history + full_trajectory
+        
+        for entry in all_entries:
+            content = entry.get('content', '')
+            if isinstance(content, str):
+                # 检查是否包含任何工具调用标签
+                tool_pattern = r'<(microsandbox|deepsearch|browser_use|search_tool)>'
+                if re.search(tool_pattern, content):
+                    logger.debug(f"🔍 发现历史工具执行: {re.search(tool_pattern, content).group(1)}")
+                    return True
+                
+                # 检查是否包含工具执行结果标签
+                result_pattern = r'<result>'
+                if re.search(result_pattern, content):
+                    logger.debug("🔍 发现历史工具执行结果")
+                    return True
+        
+        return False
     
     def _extract_actionable_content(self, response_text: str) -> Optional[str]:
         """从响应中提取可执行的内容"""
