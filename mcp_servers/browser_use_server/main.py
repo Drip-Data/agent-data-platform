@@ -573,10 +573,31 @@ class BrowserUseLLMAdapter(BaseChatModel):
     Adapter to make our LLMClient compatible with browser-use's LangChain interface
     """
     
+    # Define extra fields to allow dynamic attributes
+    class Config:
+        extra = "allow"  # Allow extra fields including ainvoke
+        arbitrary_types_allowed = True
+    
     def __init__(self, llm_client: LLMClient, **kwargs):
         super().__init__(**kwargs)
         # Use object.__setattr__ to bypass Pydantic validation
         object.__setattr__(self, 'llm_client', llm_client)
+        # Pre-initialize ainvoke as None to allow browser_use to set it
+        object.__setattr__(self, 'ainvoke', None)
+    
+    def __setattr__(self, name, value):
+        """Override setattr to handle dynamic attribute setting by browser_use"""
+        try:
+            # For known dynamic attributes that browser_use sets, use object.__setattr__
+            if name in ['ainvoke', 'invoke', 'llm_client']:
+                object.__setattr__(self, name, value)
+            else:
+                # Use parent's setattr for other attributes
+                super().__setattr__(name, value)
+        except Exception as e:
+            # Fallback to object.__setattr__ if Pydantic validation fails
+            logger.debug(f"Falling back to object.__setattr__ for {name}: {e}")
+            object.__setattr__(self, name, value)
     
     def get(self, key: str, default=None):
         """Support for dictionary-like access needed by LangChain"""

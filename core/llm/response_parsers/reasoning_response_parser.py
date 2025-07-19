@@ -141,6 +141,11 @@ class ReasoningResponseParser(IResponseParser):
                 "full_tag": full_action_tag
             }
         else:
+            # 🔧 嵌套结构检测：如果tool_input包含XML标签，拒绝处理让XML解析器处理
+            if self._contains_xml_structure(tool_input):
+                logger.debug(f"🔄 检测到嵌套XML结构，回退到XML解析器处理: <{tool_name}>")
+                return None
+            
             # 标准化工具标识符 - 让工具管理器处理映射
             normalized_info = self._normalize_tool_identifier(tool_name)
             
@@ -269,6 +274,37 @@ class ReasoningResponseParser(IResponseParser):
             "search_tool": "search_file_content"
         }
         return defaults.get(tool_id, "")
+    
+    def _contains_xml_structure(self, text: str) -> bool:
+        """
+        检测文本是否包含XML结构（嵌套标签）
+        
+        Args:
+            text: 要检测的文本
+            
+        Returns:
+            bool: 如果包含XML标签结构则返回True
+        """
+        if not text or not isinstance(text, str):
+            return False
+        
+        # 检查是否包含XML标签模式
+        xml_pattern = r'<\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[^>]*>.*?</\s*\1\s*>'
+        
+        # 简单的XML标签检测
+        if re.search(xml_pattern, text, re.DOTALL):
+            logger.debug(f"🔍 检测到XML结构: {text[:100]}...")
+            return True
+        
+        # 检查是否包含未闭合的XML标签（可能是部分嵌套）
+        if '<' in text and '>' in text:
+            # 检查是否有XML标签格式
+            tag_pattern = r'<[a-zA-Z_][a-zA-Z0-9_]*[^>]*>'
+            if re.search(tag_pattern, text):
+                logger.debug(f"🔍 检测到XML标签: {text[:100]}...")
+                return True
+        
+        return False
 
     def set_tool_schema_manager(self, tool_schema_manager):
         """保持与旧接口的兼容性，但在此实现中未使用。"""
