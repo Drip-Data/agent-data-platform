@@ -82,6 +82,11 @@ class EnhancedReasoningRuntime(RuntimeInterface):
         self.xml_parser = EnhancedXMLParser()
         logger.info("✅ Stage 3组件初始化: TaskDecomposer & EnhancedXMLParser")
         
+        # 🔧 NEW: 初始化动态响应解析器 - 根本性解决工具调用路由问题
+        from core.llm.response_parsers.reasoning_response_parser import ReasoningResponseParser
+        self.dynamic_response_parser = ReasoningResponseParser(tool_manager=self.tool_manager)
+        logger.info("✅ 动态响应解析器初始化 - 支持所有工具标识符")
+        
         # 🔄 Stage 4: 上下文流管理和工具优化组件
         self.context_flow_manager = ContextFlowManager()
         self.query_optimizer = SmartQueryOptimizer()
@@ -1444,24 +1449,58 @@ class EnhancedReasoningRuntime(RuntimeInterface):
                 self.step_logger.finish_step("task_completed_with_answer")
                 break
 
-            # 🔍 Stage 3增强：使用增强XML解析器
+            # 🔧 NEW: 使用动态响应解析器 - 根本性解决工具调用路由问题
             parsing_start_time = time.time()
             
-            # 使用增强XML解析器
-            parse_result = self.xml_parser.parse_xml_response(response_text)
-            actions = parse_result.actions
+            # 初始化parse_result变量
+            parse_result = None
+            
+            # 首先尝试新的动态解析器
+            dynamic_parse_result = self.dynamic_response_parser.parse_response(response_text)
+            
+            if dynamic_parse_result and dynamic_parse_result.get("type") == "tool_call":
+                # 转换为原有格式以保持兼容性
+                actions = [{
+                    "service": dynamic_parse_result["tool_name"], 
+                    "tool": dynamic_parse_result.get("action_name", ""),
+                    "input": dynamic_parse_result["tool_input"],
+                    "original_identifier": dynamic_parse_result.get("original_identifier", ""),
+                    "parse_method": "dynamic"
+                }]
+                
+                # 🔧 修复：为动态解析创建兼容的parse_result对象
+                from core.xml_parser_enhanced import ParseResult
+                parse_result = ParseResult(
+                    success=True,
+                    actions=actions,
+                    errors=[],
+                    warnings=[],
+                    repaired_xml=None,
+                    confidence_score=1.0,
+                    execution_type="single"
+                )
+                
+                # 记录成功的动态解析
+                logger.info(f"✅ 动态解析成功: {dynamic_parse_result['tool_name']}.{dynamic_parse_result.get('action_name', '')}")
+                parsing_errors = []
+                
+            else:
+                # 回退到原有XML解析器
+                logger.debug("🔄 动态解析未匹配，回退到XML解析器")
+                parse_result = self.xml_parser.parse_xml_response(response_text)
+                actions = parse_result.actions
+                
+                # 构建解析错误信息
+                parsing_errors = []
+                if not parse_result.success:
+                    parsing_errors.extend(parse_result.errors)
+                if parse_result.warnings:
+                    parsing_errors.extend([f"警告: {w}" for w in parse_result.warnings])
             
             # 记录解析详情
             think_content = self.step_logger._extract_think_content(response_text)
             execution_block_text = self.step_logger._extract_execution_block(response_text)
             parsing_end_time = time.time()
-            
-            # 构建解析错误信息
-            parsing_errors = []
-            if not parse_result.success:
-                parsing_errors.extend(parse_result.errors)
-            if parse_result.warnings:
-                parsing_errors.extend([f"警告: {w}" for w in parse_result.warnings])
             
             # 记录解析结果（包含增强解析信息）
             self.step_logger.log_parsing_result(
@@ -1475,9 +1514,9 @@ class EnhancedReasoningRuntime(RuntimeInterface):
             )
             
             # 记录解析置信度和修复操作
-            if parse_result.repaired_xml:
+            if parse_result and parse_result.repaired_xml:
                 logger.info(f"🔧 XML自动修复成功，置信度: {parse_result.confidence_score:.2f}")
-            if not parse_result.success and len(actions) > 0:
+            if parse_result and not parse_result.success and len(actions) > 0:
                 logger.warning(f"⚠️ 部分解析成功，提取到 {len(actions)} 个动作")
             
             # 检查是否包含最终答案标签 - 如果有则直接结束
@@ -1572,7 +1611,7 @@ class EnhancedReasoningRuntime(RuntimeInterface):
 
             # 4. 根据类型分发执行
             results = []
-            block_type = parse_result.execution_type or "single"
+            block_type = (parse_result.execution_type if parse_result else "single") or "single"
 
             # 🔧 修复：添加工具执行异常处理，确保轨迹记录完整性
             try:

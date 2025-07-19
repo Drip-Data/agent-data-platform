@@ -440,6 +440,105 @@ class UnifiedToolManager:
         
         return tools
     
+    def get_all_tool_ids(self) -> List[str]:
+        """
+        🆔 获取所有工具ID - 支持动态响应解析器
+        
+        Returns:
+            所有已知工具ID的列表
+        """
+        return list(self._standard_ids)
+    
+    def get_all_aliases(self) -> Set[str]:
+        """
+        🔗 获取所有别名 - 支持动态响应解析器
+        
+        Returns:
+            所有已知别名的集合
+        """
+        all_aliases = set()
+        
+        # 收集所有工具的动作别名
+        if 'tools' in self.config:
+            for tool_id, tool_config in self.config['tools'].items():
+                if 'action_aliases' in tool_config:
+                    all_aliases.update(tool_config['action_aliases'].keys())
+        
+        # 添加旧版映射作为别名
+        all_aliases.update(self._legacy_mapping.keys())
+        
+        return all_aliases
+    
+    def find_tool_by_action(self, action_name: str) -> Optional[str]:
+        """
+        🔍 根据动作名查找工具ID - 支持动态响应解析器
+        
+        Args:
+            action_name: 动作名称
+            
+        Returns:
+            工具ID，如果未找到则返回None
+        """
+        # 遍历所有工具，查找包含该动作的工具
+        for tool_id in self._standard_ids:
+            tool_actions = self.get_tool_actions(tool_id)
+            if action_name in tool_actions:
+                return tool_id
+            
+            # 检查动作别名
+            tool_config = self.config['tools'].get(tool_id, {})
+            action_aliases = tool_config.get('action_aliases', {})
+            if action_name in action_aliases:
+                return tool_id
+        
+        return None
+    
+    def resolve_alias(self, identifier: str) -> Optional[Dict[str, str]]:
+        """
+        🔄 解析别名为标准工具和动作 - 支持动态响应解析器
+        
+        Args:
+            identifier: 可能是别名的标识符
+            
+        Returns:
+            包含tool_id和action_name的字典，如果无法解析则返回None
+        """
+        # 检查是否是动作别名
+        for tool_id in self._standard_ids:
+            tool_config = self.config['tools'].get(tool_id, {})
+            action_aliases = tool_config.get('action_aliases', {})
+            
+            if identifier in action_aliases:
+                canonical_action = action_aliases[identifier]
+                return {
+                    "tool_id": tool_id,
+                    "action_name": canonical_action
+                }
+        
+        # 检查是否是旧版工具ID
+        if identifier in self._legacy_mapping:
+            standard_id = self._legacy_mapping[identifier]
+            default_action = self.get_default_action(standard_id)
+            return {
+                "tool_id": standard_id,
+                "action_name": default_action
+            }
+        
+        return None
+    
+    def is_valid_tool(self, tool_id: str) -> bool:
+        """
+        ✅ 检查是否是有效的工具ID - 支持动态响应解析器
+        
+        Args:
+            tool_id: 工具ID
+            
+        Returns:
+            是否是有效的工具ID
+        """
+        standard_id = self.get_standard_id(tool_id)
+        return standard_id in self._standard_ids
+    
     # ==================== 内存暂存工具直接执行 ====================
     
     def is_memory_staging_tool(self, tool_id: str) -> bool:
